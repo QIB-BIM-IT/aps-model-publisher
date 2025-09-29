@@ -1,0 +1,43 @@
+{
+ "name": "aps-model-publisher-backend",
+ "version": "1.0.0",
+ "description": "Backend pour la publication automatique de modÃ¨les APS/ACC",
+ "main": "src/server.js",
+ "scripts": {
+  "start": "node src/server.js",
+  "dev": "nodemon src/server.js",
+  "test": "echo \"Error: no test specified\" && exit 1"
+ },
+ "keywords": [
+  "autodesk",
+  "aps",
+  "acc",
+  "bim",
+  "automation"
+ ],
+ "author": "",
+ "license": "ISC",
+ "dependencies": {
+  "axios": "^1.12.2",
+  "bcryptjs": "^3.0.2",
+  "compression": "^1.8.1",
+  "cookie-parser": "^1.4.7",
+  "cors": "^2.8.5",
+  "cron-parser": "^5.4.0",
+  "dotenv": "^17.2.2",
+  "express": "^5.1.0",
+  "forge-apis": "^0.9.11",
+  "helmet": "^8.1.0",
+  "jsonwebtoken": "^9.0.2",
+  "morgan": "^1.10.1",
+  "multer": "^2.0.2",
+  "node-cron": "^4.2.1",
+  "pg": "^8.16.3",
+  "sequelize": "^6.37.7",
+  "winston": "^3.17.0",
+  "winston-daily-rotate-file": "^5.0.0"
+ },
+ "devDependencies": {
+  "nodemon": "^3.1.10"
+ }
+}
