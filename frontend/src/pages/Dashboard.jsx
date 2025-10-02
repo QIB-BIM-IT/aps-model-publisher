@@ -115,6 +115,7 @@ export default function Dashboard() {
   const [selectedHub, setSelectedHub] = React.useState('');
   const [projects, setProjects] = React.useState([]);
   const [selectedProject, setSelectedProject] = React.useState('');
+  const [projectSearch, setProjectSearch] = React.useState('');
 
   const [topFolders, setTopFolders] = React.useState([]);
   const [childrenMap, setChildrenMap] = React.useState(new Map()); // folderId -> children[] | 'loading'
@@ -152,6 +153,7 @@ export default function Dashboard() {
       const data = await fetchProjects(hubId);
       setProjects(data);
       setSelectedProject(data.length ? idOf(data[0]) : '');
+      setProjectSearch('');
     } catch (e) { setError(e?.message || 'Erreur lors du chargement des projets'); }
     finally { setLoadingProjects(false); }
   }
@@ -255,6 +257,17 @@ export default function Dashboard() {
 
   const selectedArray = Object.entries(selectedItems).map(([id, node]) => ({ id, name: nameOf(node, id) }));
 
+  const filteredProjects = React.useMemo(() => {
+    if (!projectSearch.trim()) return projects;
+    const query = projectSearch.trim().toLowerCase();
+    const filtered = projects.filter((p) => nameOf(p, idOf(p)).toLowerCase().includes(query));
+    if (selectedProject && !filtered.some((p) => idOf(p) === selectedProject)) {
+      const current = projects.find((p) => idOf(p) === selectedProject);
+      if (current) filtered.unshift(current);
+    }
+    return filtered;
+  }, [projects, projectSearch, selectedProject]);
+
   return (
     <div>
       <h2>Explorateur ACC</h2>
@@ -281,11 +294,20 @@ export default function Dashboard() {
         {loadingProjects ? (
           <p>Chargement des projets…</p>
         ) : (
-          <select value={selectedProject} onChange={(e) => setSelectedProject(e.target.value)} style={{ padding: 8, minWidth: 520 }}>
-            {projects.map((p) => (
-              <option key={idOf(p)} value={idOf(p)}>{nameOf(p, idOf(p))}</option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 520 }}>
+            <input
+              type="search"
+              placeholder="Rechercher un projet…"
+              value={projectSearch}
+              onChange={(e) => setProjectSearch(e.target.value)}
+              style={{ padding: 8 }}
+            />
+            <select value={selectedProject} onChange={(e) => setSelectedProject(e.target.value)} style={{ padding: 8 }}>
+              {filteredProjects.map((p) => (
+                <option key={idOf(p)} value={idOf(p)}>{nameOf(p, idOf(p))}</option>
+              ))}
+            </select>
+          </div>
         )}
       </section>
 
