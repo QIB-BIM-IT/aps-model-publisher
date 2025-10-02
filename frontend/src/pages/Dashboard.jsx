@@ -166,14 +166,36 @@ export default function Dashboard() {
     try {
       const data = await fetchProjects(hubId);
       setProjects(data);
-      resetProjectData();
-    } catch (e) {
-      setProjects([]);
-      resetProjectData();
-      setError(e?.message || 'Erreur lors du chargement des projets');
-    } finally {
-      setLoadingProjects(false);
-    }
+const resetProjectData = React.useCallback(() => {
+  setSelectedProject('');
+  setProjectSearch('');
+  setTopFolders([]);
+  setChildrenMap(new Map());
+  setSelectedItems({});
+  setJobs([]);
+  setRuns([]);
+}, []);
+
+async function loadProjects(hubId) {
+  if (!hubId) {
+    setProjects([]);
+    resetProjectData();
+    return;
+  }
+  setLoadingProjects(true); setError('');
+  try {
+    const data = await fetchProjects(hubId);
+    setProjects(data);
+    resetProjectData();
+  } catch (e) {
+    setProjects([]);
+    resetProjectData();
+    setError(e?.message || 'Erreur lors du chargement des projets');
+  } finally {
+    setLoadingProjects(false);
+  }
+}
+
   }
 
   async function loadTopFolders(hubId, projectId) {
