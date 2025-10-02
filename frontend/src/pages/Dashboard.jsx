@@ -146,39 +146,34 @@ export default function Dashboard() {
     finally { setLoadingHubs(false); }
   }
 
+  const resetProjectData = React.useCallback(() => {
+    setSelectedProject('');
+    setProjectSearch('');
+    setTopFolders([]);
+    setChildrenMap(new Map());
+    setSelectedItems({});
+    setJobs([]);
+    setRuns([]);
+  }, []);
+
   async function loadProjects(hubId) {
     if (!hubId) {
       setProjects([]);
-      setSelectedProject('');
-      setTopFolders([]);
-      setChildrenMap(new Map());
-      setSelectedItems({});
-      setJobs([]);
-      setRuns([]);
+      resetProjectData();
       return;
     }
     setLoadingProjects(true); setError('');
     try {
       const data = await fetchProjects(hubId);
       setProjects(data);
-      setSelectedProject('');
-      setProjectSearch('');
-      setTopFolders([]);
-      setChildrenMap(new Map());
-      setSelectedItems({});
-      setJobs([]);
-      setRuns([]);
+      resetProjectData();
     } catch (e) {
       setProjects([]);
-      setSelectedProject('');
-      setTopFolders([]);
-      setChildrenMap(new Map());
-      setSelectedItems({});
-      setJobs([]);
-      setRuns([]);
+      resetProjectData();
       setError(e?.message || 'Erreur lors du chargement des projets');
+    } finally {
+      setLoadingProjects(false);
     }
-    finally { setLoadingProjects(false); }
   }
 
   async function loadTopFolders(hubId, projectId) {
