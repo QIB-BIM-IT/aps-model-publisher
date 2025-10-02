@@ -59,8 +59,15 @@ export async function deletePublishJob(id) {
   return data?.success === true;
 }
 export async function runPublishJobNow(id) {
-  const { data } = await api.post(`/api/publish/jobs/${encodeURIComponent(id)}/run`);
-  return data?.success === true;
+  try {
+    const { data } = await api.post(`/api/publish/jobs/${encodeURIComponent(id)}/run`);
+    return data?.data || null;
+  } catch (err) {
+    const message = err?.response?.data?.message || err?.message || 'Erreur lancement du job';
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
 }
 
 // ----- Runs -----

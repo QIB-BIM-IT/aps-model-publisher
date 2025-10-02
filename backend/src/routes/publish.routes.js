@@ -238,8 +238,17 @@ router.post('/jobs/:id/run', rateLimit, async (req, res) => {
     if (!job || job.userId !== req.userId) {
       return res.status(404).json({ success: false, message: 'Job introuvable' });
     }
-    scheduler.runJobNow(job.id);
-    return res.json({ success: true });
+    const { run, alreadyRunning } = await scheduler.runJobNow(job.id, { job });
+
+    if (alreadyRunning) {
+      return res.status(409).json({ success: false, message: 'Job déjà en cours' });
+    }
+
+    if (!run) {
+      return res.status(500).json({ success: false, message: 'Impossible de lancer le job' });
+    }
+
+    return res.json({ success: true, data: run });
   } catch (err) {
     logger.error(`POST /api/publish/jobs/:id/run error: ${err.message}`);
     return res.status(500).json({ success: false, message: 'Erreur lancement job' });

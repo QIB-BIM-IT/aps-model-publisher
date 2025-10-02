@@ -40,31 +40,48 @@ function scheduleJob(job) {
   }
 }
 
-async function runJob(jobId) {
-  if (RUNNING.has(String(jobId))) {
-    logger.warn(`[Scheduler] Job ${jobId} déjà en cours, on ignore ce tick`);
-    return;
-  }
+async function runJob(jobId, options = {}) {
+  const key = String(jobId);
+  const skipBegin = options.skipBegin === true;
+  let job = options.job || null;
+  let run = options.run || null;
 
-  RUNNING.add(String(jobId));
-  try {
-    const job = await PublishJob.findByPk(jobId);
-    if (!job) {
-      logger.warn(`[Scheduler] Job ${jobId} introuvable`);
-      return;
+  if (!skipBegin) {
+    if (RUNNING.has(key)) {
+      logger.warn(`[Scheduler] Job ${jobId} déjà en cours, on ignore ce tick`);
+      return null;
     }
 
-    job.status = 'running';
-    job.lastRun = new Date();
-    await job.save();
+    RUNNING.add(key);
+    try {
+      job = await PublishJob.findByPk(jobId);
+      if (!job) {
+        logger.warn(`[Scheduler] Job ${jobId} introuvable`);
+        return null;
+      }
 
-    // 1) créer un run
-    const run = await apsPublishService.startRun(job);
+      job.status = 'running';
+      job.lastRun = new Date();
+      await job.save();
 
-    // 2) exécuter (réel ou dry-run selon feature flag)
+      run = await apsPublishService.startRun(job);
+    } catch (e) {
+      RUNNING.delete(key);
+      throw e;
+    }
+  } else {
+    if (!job || !run) {
+      logger.error(`[Scheduler] runJob skipBegin sans job/run pour ${jobId}`);
+      return null;
+    }
+    if (!RUNNING.has(key)) {
+      RUNNING.add(key);
+    }
+  }
+
+  try {
     const { results, durationMs } = await apsPublishService.executeRun(run);
 
-    // 3) terminer le run + mettre à jour le job
     await apsPublishService.finishRun(run, {
       status: 'success',
       results,
@@ -88,10 +105,21 @@ async function runJob(jobId) {
     await job.save();
 
     logger.info(`[Scheduler] Job ${job.id} exécuté (items=${(job.models || []).length})`);
+    return run;
   } catch (e) {
     logger.error(`[Scheduler] Echec job ${jobId}: ${e.message}`);
     try {
-      const job = await PublishJob.findByPk(jobId);
+      if (run) {
+        await apsPublishService.finishRun(run, {
+          status: 'failed',
+          results: run?.results || [],
+          durationMs: run?.startedAt ? Date.now() - new Date(run.startedAt).getTime() : undefined,
+          message: e.message,
+        });
+      }
+    } catch {}
+
+    try {
       if (job) {
         job.status = 'error';
         job.history = [
@@ -101,16 +129,44 @@ async function runJob(jobId) {
         await job.save();
       }
     } catch {}
+
+    return run;
   } finally {
-    RUNNING.delete(String(jobId));
+    RUNNING.delete(key);
   }
 }
 
-async function runJobNow(jobId) {
-  // lancement immédiat (non bloquant pour l'appelant)
-  runJob(jobId).catch((e) =>
-    logger.error(`[Scheduler] runJobNow error: ${e.message}`)
-  );
+async function runJobNow(jobId, options = {}) {
+  const key = String(jobId);
+
+  if (RUNNING.has(key)) {
+    logger.warn(`[Scheduler] Job ${jobId} déjà en cours, lancement immédiat ignoré`);
+    return { run: null, alreadyRunning: true };
+  }
+
+  const job = options.job || (await PublishJob.findByPk(jobId));
+  if (!job) {
+    logger.warn(`[Scheduler] Job ${jobId} introuvable`);
+    return { run: null, alreadyRunning: false };
+  }
+
+  RUNNING.add(key);
+  try {
+    job.status = 'running';
+    job.lastRun = new Date();
+    await job.save();
+
+    const run = await apsPublishService.startRun(job);
+
+    runJob(jobId, { job, run, skipBegin: true }).catch((e) =>
+      logger.error(`[Scheduler] runJobNow error: ${e.message}`)
+    );
+
+    return { run, alreadyRunning: false };
+  } catch (e) {
+    RUNNING.delete(key);
+    throw e;
+  }
 }
 
 async function init() {

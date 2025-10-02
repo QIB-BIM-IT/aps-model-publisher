@@ -162,40 +162,24 @@ export default function Dashboard() {
       resetProjectData();
       return;
     }
-    setLoadingProjects(true); setError('');
+    setLoadingProjects(true);
+    setError('');
     try {
       const data = await fetchProjects(hubId);
       setProjects(data);
-const resetProjectData = React.useCallback(() => {
-  setSelectedProject('');
-  setProjectSearch('');
-  setTopFolders([]);
-  setChildrenMap(new Map());
-  setSelectedItems({});
-  setJobs([]);
-  setRuns([]);
-}, []);
-
-async function loadProjects(hubId) {
-  if (!hubId) {
-    setProjects([]);
-    resetProjectData();
-    return;
-  }
-  setLoadingProjects(true); setError('');
-  try {
-    const data = await fetchProjects(hubId);
-    setProjects(data);
-    resetProjectData();
-  } catch (e) {
-    setProjects([]);
-    resetProjectData();
-    setError(e?.message || 'Erreur lors du chargement des projets');
-  } finally {
-    setLoadingProjects(false);
-  }
-}
-
+      setProjectSearch('');
+      if (data.length) {
+        setSelectedProject(idOf(data[0]));
+      } else {
+        resetProjectData();
+      }
+    } catch (e) {
+      setProjects([]);
+      resetProjectData();
+      setError(e?.message || 'Erreur lors du chargement des projets');
+    } finally {
+      setLoadingProjects(false);
+    }
   }
 
   async function loadTopFolders(hubId, projectId) {
@@ -282,9 +266,34 @@ async function loadProjects(hubId) {
     await refreshJobs();
   }
   async function handleRunNow(job) {
-    await runPublishJobNow(job.id);
-    // on recharge l’historique après un petit délai
-    setTimeout(refreshRuns, 400);
+    try {
+      const run = await runPublishJobNow(job.id);
+
+      if (run && run.id) {
+        const pendingRun = { ...run, status: 'pending' };
+        setRuns((prev) => {
+          const without = prev.filter((r) => r.id !== pendingRun.id);
+          return [pendingRun, ...without];
+        });
+
+        setJobs((prev) =>
+          prev.map((j) =>
+            j.id === job.id
+              ? {
+                  ...j,
+                  status: 'running',
+                  lastRun: new Date().toISOString(),
+                }
+              : j
+          )
+        );
+      }
+
+      // on recharge l’historique après un petit délai
+      setTimeout(refreshRuns, 400);
+    } catch (e) {
+      setToast(e?.message || 'Erreur lancement du job');
+    }
   }
   async function handleDelete(job) {
     await deletePublishJob(job.id);
