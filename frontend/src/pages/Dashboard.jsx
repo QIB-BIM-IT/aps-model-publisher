@@ -146,16 +146,56 @@ export default function Dashboard() {
     finally { setLoadingHubs(false); }
   }
 
+  const resetProjectData = React.useCallback(() => {
+    setSelectedProject('');
+    setProjectSearch('');
+    setTopFolders([]);
+    setChildrenMap(new Map());
+    setSelectedItems({});
+    setJobs([]);
+    setRuns([]);
+  }, []);
+
   async function loadProjects(hubId) {
-    if (!hubId) { setProjects([]); setSelectedProject(''); return; }
+    if (!hubId) {
+      setProjects([]);
+      resetProjectData();
+      return;
+    }
     setLoadingProjects(true); setError('');
     try {
       const data = await fetchProjects(hubId);
       setProjects(data);
-      setSelectedProject(data.length ? idOf(data[0]) : '');
-      setProjectSearch('');
-    } catch (e) { setError(e?.message || 'Erreur lors du chargement des projets'); }
-    finally { setLoadingProjects(false); }
+const resetProjectData = React.useCallback(() => {
+  setSelectedProject('');
+  setProjectSearch('');
+  setTopFolders([]);
+  setChildrenMap(new Map());
+  setSelectedItems({});
+  setJobs([]);
+  setRuns([]);
+}, []);
+
+async function loadProjects(hubId) {
+  if (!hubId) {
+    setProjects([]);
+    resetProjectData();
+    return;
+  }
+  setLoadingProjects(true); setError('');
+  try {
+    const data = await fetchProjects(hubId);
+    setProjects(data);
+    resetProjectData();
+  } catch (e) {
+    setProjects([]);
+    resetProjectData();
+    setError(e?.message || 'Erreur lors du chargement des projets');
+  } finally {
+    setLoadingProjects(false);
+  }
+}
+
   }
 
   async function loadTopFolders(hubId, projectId) {
@@ -253,7 +293,17 @@ export default function Dashboard() {
 
   React.useEffect(() => { loadHubs(); }, []);
   React.useEffect(() => { if (selectedHub) loadProjects(selectedHub); }, [selectedHub]);
-  React.useEffect(() => { if (selectedHub && selectedProject) loadTopFolders(selectedHub, selectedProject); }, [selectedProject]);
+  React.useEffect(() => {
+    if (selectedHub && selectedProject) {
+      loadTopFolders(selectedHub, selectedProject);
+    } else {
+      setTopFolders([]);
+      setChildrenMap(new Map());
+      setSelectedItems({});
+      setJobs([]);
+      setRuns([]);
+    }
+  }, [selectedHub, selectedProject]);
 
   const selectedArray = Object.entries(selectedItems).map(([id, node]) => ({ id, name: nameOf(node, id) }));
 
@@ -438,7 +488,9 @@ export default function Dashboard() {
       {/* Arbre fichiers */}
       <section>
         <h3>Fichiers du projet</h3>
-        {loadingTop ? (
+        {!selectedProject ? (
+          <p>Sélectionne un projet pour afficher ses dossiers.</p>
+        ) : loadingTop ? (
           <p>Chargement des dossiers…</p>
         ) : topFolders.length === 0 ? (
           <p>Aucun dossier trouvé.</p>
@@ -491,7 +543,9 @@ export default function Dashboard() {
       {/* Mes jobs */}
       <section style={{ marginTop: 24 }}>
         <h3>Mes jobs</h3>
-        {loadingJobs ? (
+        {!selectedProject ? (
+          <div>Sélectionne un projet pour voir les jobs planifiés.</div>
+        ) : loadingJobs ? (
           <div>Chargement…</div>
         ) : jobs.length === 0 ? (
           <div>Aucun job pour ce projet.</div>
@@ -538,7 +592,9 @@ export default function Dashboard() {
       {/* Historique des exécutions */}
       <section style={{ marginTop: 24 }}>
         <h3>Historique (dernier 50)</h3>
-        {loadingRuns ? (
+        {!selectedProject ? (
+          <div>Sélectionne un projet pour consulter l'historique.</div>
+        ) : loadingRuns ? (
           <div>Chargement…</div>
         ) : runs.length === 0 ? (
           <div>Aucun run pour ce projet.</div>
