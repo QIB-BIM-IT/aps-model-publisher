@@ -27,7 +27,9 @@ const MAX_RETRIES = Math.max(0, parseInt(process.env.PUBLISH_MAX_RETRIES || '2',
 const RETRY_BASE_MS = Math.max(100, parseInt(process.env.PUBLISH_RETRY_BASE_MS || '500', 10));
 const PUBLISH_COMMAND = String(process.env.PUBLISH_COMMAND || 'PublishModel'); // PublishModel | PublishWithoutLinks
 
-const REGIONS = ['us', 'eu']; // ordre d'essai
+// Liste des régions supportées par Data Management v2. Certains projets "eu"
+// sont en réalité provisionnés dans la région "emea" – on teste donc les deux.
+const REGIONS = ['us', 'eu', 'emea']; // ordre d'essai
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function safeBody(b) { try { return JSON.stringify(b).slice(0, 1200); } catch { return '<unserializable>'; } }
