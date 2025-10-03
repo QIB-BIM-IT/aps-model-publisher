@@ -1,5 +1,5 @@
 // src/services/apsPublish.service.js
-// Publish réel via Data v2 *Commands* en ciblant une VERSION, avec détection automatique de région (us|eu).
+// Publish réel via Data v2 *Commands* en ciblant une VERSION, avec détection automatique de région (US|EMEA).
 //
 // Améliorations:
 // - Vérification de l’existence des items avant résolution
@@ -27,7 +27,15 @@ const MAX_RETRIES = Math.max(0, parseInt(process.env.PUBLISH_MAX_RETRIES || '2',
 const RETRY_BASE_MS = Math.max(100, parseInt(process.env.PUBLISH_RETRY_BASE_MS || '500', 10));
 const PUBLISH_COMMAND = String(process.env.PUBLISH_COMMAND || 'PublishModel'); // PublishModel | PublishWithoutLinks
 
-const REGIONS = ['us', 'eu']; // ordre d'essai
+// Liste des régions supportées par Data Management v2. Les modèles C4R sont
+// actuellement provisionnés soit aux US soit sur l'instance EMEA.
+const REGIONS = ['us', 'emea']; // ordre d'essai
+const REGION_LABELS = REGIONS.map((r) => r.toUpperCase());
+const REGION_LIST_LOG = REGION_LABELS.join('/');
+
+function formatRegion(region) {
+  return region ? String(region).toUpperCase() : 'N/A';
+}
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function safeBody(b) { try { return JSON.stringify(b).slice(0, 1200); } catch { return '<unserializable>'; } }
@@ -92,7 +100,7 @@ function isVersionUrn(urn) {
  */
 async function detectProjectRegion(projectId, accessToken) {
   const cleaned = cleanId(projectId);
-  logger.debug(`[Publish] Détection région pour projet: ${projectId}`);
+  logger.debug(`[Publish] Détection région (${REGION_LIST_LOG}) pour projet: ${projectId}`);
 
   for (const region of REGIONS) {
     try {
@@ -108,15 +116,19 @@ async function detectProjectRegion(projectId, accessToken) {
       const resp = await tryWithAndWithoutPrefix(config, projectId);
 
       if (resp.status === 200) {
-        logger.info(`[Publish] Projet détecté dans région: ${region}`);
+        logger.info(`[Publish] Projet détecté dans région: ${formatRegion(region)}`);
         return { region, projectId: cleaned };
       }
     } catch (e) {
-      logger.debug(`[Publish] Région ${region} non accessible pour le projet: ${e.message}`);
+      logger.debug(
+        `[Publish] Région ${formatRegion(region)} non accessible pour le projet: ${e.message}`
+      );
     }
   }
 
-  logger.warn(`[Publish] Impossible de détecter la région du projet: ${projectId}`);
+  logger.warn(
+    `[Publish] Impossible de détecter la région (${REGION_LIST_LOG}) du projet: ${projectId}`
+  );
   return { region: null, projectId: cleaned };
 }
 
@@ -136,12 +148,14 @@ async function verifyItemExists(region, projectId, itemUrn, accessToken) {
     const exists = resp.status === 200;
 
     if (exists) {
-      logger.debug(`[Publish] Item existe dans région ${region}: ${itemUrn}`);
+      logger.debug(`[Publish] Item existe dans région ${formatRegion(region)}: ${itemUrn}`);
     }
 
     return exists;
   } catch (e) {
-    logger.debug(`[Publish] Erreur vérification existence item région ${region}: ${e.message}`);
+    logger.debug(
+      `[Publish] Erreur vérification existence item région ${formatRegion(region)}: ${e.message}`
+    );
     return false;
   }
 }
@@ -155,7 +169,7 @@ async function findItemRegion(projectId, itemUrn, accessToken, projectRegion = n
 
   for (const region of regionsToTry) {
     if (await verifyItemExists(region, projectId, itemUrn, accessToken)) {
-      logger.info(`[Publish] Item trouvé dans région: ${region}`);
+      logger.info(`[Publish] Item trouvé dans région: ${formatRegion(region)}`);
       return region;
     }
   }
@@ -178,7 +192,7 @@ async function getTipVersionFromItems(region, projectId, itemUrn, accessToken) {
   const resp = await tryWithAndWithoutPrefix(config, projectId);
 
   if (resp.status !== 200) {
-    throw new Error(`items GET ${region || 'n/a'} ${resp.status}: ${safeBody(resp.data)}`);
+    throw new Error(`items GET ${formatRegion(region)} ${resp.status}: ${safeBody(resp.data)}`);
   }
 
   // 1) relationships.tip.data.id
@@ -196,7 +210,9 @@ async function getTipVersionFromItems(region, projectId, itemUrn, accessToken) {
     return ver.id;
   }
 
-  throw new Error(`Tip version introuvable dans la réponse /items (region=${region || 'n/a'})`);
+    throw new Error(
+      `Tip version introuvable dans la réponse /items (region=${formatRegion(region)})`
+    );
 }
 
 async function getLatestVersionFromVersions(region, projectId, itemUrn, accessToken) {
@@ -212,15 +228,19 @@ async function getLatestVersionFromVersions(region, projectId, itemUrn, accessTo
   const resp = await tryWithAndWithoutPrefix(config, projectId);
 
   if (resp.status !== 200) {
-    throw new Error(`versions GET ${region || 'n/a'} ${resp.status}: ${safeBody(resp.data)}`);
+    throw new Error(`versions GET ${formatRegion(region)} ${resp.status}: ${safeBody(resp.data)}`);
   }
 
   const arr = Array.isArray(resp?.data?.data) ? resp.data.data : [];
-  if (!arr.length) throw new Error(`Aucune version retournée (region=${region || 'n/a'})`);
+  if (!arr.length) {
+    throw new Error(`Aucune version retournée (region=${formatRegion(region)})`);
+  }
 
   // L’API renvoie généralement la plus récente en premier
   const latestVersion = arr[0].id;
-  logger.debug(`[Publish] Version la plus récente trouvée: ${latestVersion} (${arr.length} versions au total)`);
+  logger.debug(
+    `[Publish] Version la plus récente trouvée: ${latestVersion} (${arr.length} versions au total)`
+  );
   return latestVersion;
 }
 
@@ -241,25 +261,33 @@ async function resolveToVersionUrnWithRegion(projectId, inputUrn, accessToken, p
   const itemRegion = await findItemRegion(projectId, inputUrn, accessToken, projectRegion);
 
   if (!itemRegion) {
-    throw new Error(`Item n'existe dans aucune région (US/EU): ${inputUrn}`);
+    throw new Error(`Item n'existe dans aucune région (${REGION_LIST_LOG}): ${inputUrn}`);
   }
 
   // Essayer de résoudre la version dans la région où l’item existe
   try {
     // Essayer d’abord via /items (pour obtenir la tip version)
     const v1 = await getTipVersionFromItems(itemRegion, projectId, inputUrn, accessToken);
-    logger.info(`[Publish] Résolution tip via /items OK: region=${itemRegion} item=${inputUrn} -> version=${v1}`);
+    logger.info(
+      `[Publish] Résolution tip via /items OK: region=${formatRegion(itemRegion)} item=${inputUrn} -> version=${v1}`
+    );
     return { versionUrn: v1, region: itemRegion };
   } catch (e1) {
-    logger.warn(`[Publish] /items ${itemRegion} échec, essai fallback /versions: ${e1.message}`);
+    logger.warn(
+      `[Publish] /items ${formatRegion(itemRegion)} échec, essai fallback /versions: ${e1.message}`
+    );
 
     try {
       // Fallback: essayer via /versions
       const v2 = await getLatestVersionFromVersions(itemRegion, projectId, inputUrn, accessToken);
-      logger.info(`[Publish] Résolution via /versions OK: region=${itemRegion} item=${inputUrn} -> version=${v2}`);
+      logger.info(
+        `[Publish] Résolution via /versions OK: region=${formatRegion(itemRegion)} item=${inputUrn} -> version=${v2}`
+      );
       return { versionUrn: v2, region: itemRegion };
     } catch (e2) {
-      throw new Error(`Impossible de résoudre la version même avec item existant dans région ${itemRegion}: ${e2.message}`);
+      throw new Error(
+        `Impossible de résoudre la version même avec item existant dans région ${formatRegion(itemRegion)}: ${e2.message}`
+      );
     }
   }
 }
@@ -286,7 +314,9 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
     },
   };
 
-  logger.debug(`[Publish] Envoi command ${PUBLISH_COMMAND} région=${region} version=${versionUrn}`);
+  logger.debug(
+    `[Publish] Envoi command ${PUBLISH_COMMAND} région=${formatRegion(region)} version=${versionUrn}`
+  );
 
   let attempt = 0;
   while (attempt <= MAX_RETRIES) {
@@ -309,14 +339,14 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
 
       if (status === 202 || status === 200 || status === 201) {
         logger.info(
-          `[Publish][REAL][Commands] HTTP ${status} region=${region} project=${projectId} version=${versionUrn} cmd=${PUBLISH_COMMAND}`
+          `[Publish][REAL][Commands] HTTP ${status} region=${formatRegion(region)} project=${projectId} version=${versionUrn} cmd=${PUBLISH_COMMAND}`
         );
         return { outcome: 'accepted', http: status, body: data };
       }
 
       if (status >= 400 && status < 500 && status !== 429) {
         logger.warn(
-          `[Publish][REAL][Commands] ${status} non-retry region=${region} project=${projectId} version=${versionUrn} body=${safeBody(
+          `[Publish][REAL][Commands] ${status} non-retry region=${formatRegion(region)} project=${projectId} version=${versionUrn} body=${safeBody(
             data
           )}`
         );
@@ -326,7 +356,7 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
       attempt++;
       const wait = RETRY_BASE_MS * Math.pow(2, attempt - 1);
       logger.warn(
-        `[Publish][REAL][Commands] HTTP ${status} retry attempt=${attempt}/${MAX_RETRIES} wait=${wait}ms region=${region} body=${safeBody(
+        `[Publish][REAL][Commands] HTTP ${status} retry attempt=${attempt}/${MAX_RETRIES} wait=${wait}ms region=${formatRegion(region)} body=${safeBody(
           data
         )}`
       );
@@ -335,7 +365,7 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
       attempt++;
       const wait = RETRY_BASE_MS * Math.pow(2, attempt - 1);
       logger.warn(
-        `[Publish][REAL][Commands] network error: ${e.message} retry ${attempt}/${MAX_RETRIES} wait=${wait}ms region=${region}`
+        `[Publish][REAL][Commands] network error: ${e.message} retry ${attempt}/${MAX_RETRIES} wait=${wait}ms region=${formatRegion(region)}`
       );
       await sleep(wait);
     }
@@ -351,30 +381,40 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
 async function publishVersionWithRegion(versionUrn, knownRegion, projectId, accessToken) {
   const tryOrder = knownRegion ? [knownRegion, ...REGIONS.filter((r) => r !== knownRegion)] : REGIONS.slice();
 
-  logger.debug(`[Publish] Ordre des régions à tester pour publish: ${tryOrder.join(', ')}`);
+  logger.debug(
+    `[Publish] Ordre des régions à tester pour publish: ${tryOrder.map((r) => formatRegion(r)).join(', ')}`
+  );
 
   for (const region of tryOrder) {
     const r = await publishVersionViaCommand(region, projectId, versionUrn, accessToken);
 
     if (r.outcome === 'accepted') {
-      logger.info(`[Publish] Publication acceptée dans région: ${region}`);
+      logger.info(`[Publish] Publication acceptée dans région: ${formatRegion(region)}`);
       return { ...r, regionTried: region };
     }
 
     if (r.http && r.http !== 404) {
       // Erreur non-404, pas besoin d'essayer autre région
-      logger.warn(`[Publish] Erreur ${r.http} dans région ${region}, arrêt des tentatives`);
+      logger.warn(
+        `[Publish] Erreur ${r.http} dans région ${formatRegion(region)}, arrêt des tentatives`
+      );
       return { ...r, regionTried: region };
     }
 
     // En cas de 404, on tente l'autre région
     if (r.http === 404) {
-      logger.warn(`[Publish] 404 en publish dans region=${region}, tentative région suivante...`);
+      logger.warn(
+        `[Publish] 404 en publish dans region=${formatRegion(region)}, tentative région suivante...`
+      );
     }
   }
 
   // Si toutes régions échouent
-  logger.error(`[Publish] Échec publication dans toutes les régions testées: ${tryOrder.join(', ')}`);
+  logger.error(
+    `[Publish] Échec publication dans toutes les régions testées: ${tryOrder
+      .map((r) => formatRegion(r))
+      .join(', ')}`
+  );
   return {
     outcome: 'failed',
     http: 404,
@@ -418,7 +458,7 @@ class APSPublishService {
       logger.info(
         `[Publish] Mode=${ENABLE_REAL ? `REAL(${PUBLISH_COMMAND})` : 'DRY-RUN'} run=${run.id} project=${
           run.projectId
-        } région=${projectRegion || 'inconnue'} items=${run.items.length}`
+        } région=${formatRegion(projectRegion)} items=${run.items.length}`
       );
 
       // Log détaillé des items à traiter
@@ -451,7 +491,9 @@ class APSPublishService {
               versionUrn = r.versionUrn;
               resolvedRegion = r.region || projectRegion;
               logger.info(
-                `[Publish] Résolu: item=${selectedUrn} -> version=${versionUrn} (région=${resolvedRegion || 'unknown'})`
+                `[Publish] Résolu: item=${selectedUrn} -> version=${versionUrn} (région=${formatRegion(
+                  resolvedRegion
+                )})`
               );
             } catch (e) {
               const msg = `Échec résolution version: ${e.message}`;
@@ -474,19 +516,21 @@ class APSPublishService {
             accessToken
           );
 
+          const effectiveRegion = regionTried || resolvedRegion || null;
+
           results.push({
             item: selectedUrn,
             version: versionUrn,
             status: outcome,
             http,
-            region: regionTried || resolvedRegion || null,
+            region: effectiveRegion,
           });
 
           if (outcome === 'accepted') {
             logger.info(
-              `[Publish][REAL] ✓ run=${run.id} version=${versionUrn} => ${outcome} (HTTP ${http}, region=${
-                regionTried || resolvedRegion || 'unknown'
-              })`
+              `[Publish][REAL] ✓ run=${run.id} version=${versionUrn} => ${outcome} (HTTP ${http}, region=${formatRegion(
+                effectiveRegion
+              )})`
             );
           } else {
             logger.warn(
@@ -549,7 +593,9 @@ class APSPublishService {
       return {
         healthy: true,
         projectRegion: region,
+        projectRegionLabel: formatRegion(region),
         regions: REGIONS,
+        regionLabels: REGION_LABELS,
         config: {
           ENABLE_REAL,
           PUBLISH_COMMAND,
@@ -562,6 +608,7 @@ class APSPublishService {
         healthy: false,
         error: e.message,
         regions: REGIONS,
+        regionLabels: REGION_LABELS,
       };
     }
   }
@@ -573,7 +620,7 @@ class APSPublishService {
       const projectInfo = await detectProjectRegion(projectId, accessToken);
 
       if (!projectInfo.region) {
-        throw new Error('Impossible de déterminer la région du projet');
+        throw new Error(`Impossible de déterminer la région (${REGION_LIST_LOG}) du projet`);
       }
 
       const validProjectId = projectInfo.projectId;
@@ -649,7 +696,7 @@ class APSPublishService {
       const projectInfo = await detectProjectRegion(projectId, accessToken);
 
       if (!projectInfo.region) {
-        throw new Error('Impossible de déterminer la région du projet');
+        throw new Error(`Impossible de déterminer la région (${REGION_LIST_LOG}) du projet`);
       }
 
       const validProjectId = projectInfo.projectId;
