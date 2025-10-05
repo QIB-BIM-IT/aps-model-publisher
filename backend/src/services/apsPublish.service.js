@@ -44,10 +44,14 @@ function apiBase() {
   return (apsConfig && apsConfig.apis && apsConfig.apis.baseUrl) || 'https://developer.api.autodesk.com';
 }
 
-function dataBase(region) {
-  // Data v2 region-aware
-  if (region) return `${apiBase()}/data/v2/regions/${region}`;
-  // fallback (peu de routes écriture tolèrent le non-régional)
+function dataBase() {
+  return `${apiBase()}/data/v2`;
+}
+
+function commandsBase(region) {
+  if (region) {
+    return `${apiBase()}/data/v2/regions/${region}`;
+  }
   return `${apiBase()}/data/v2`;
 }
 
@@ -102,18 +106,17 @@ async function detectProjectRegion(projectId, accessToken) {
   const cleaned = cleanId(projectId);
   logger.debug(`[Publish] Détection région (${REGION_LIST_LOG}) pour projet: ${projectId}`);
 
-  for (const region of REGIONS) {
-    try {
-      const url = `${dataBase(region)}/projects/${encodeURIComponent(projectId)}`;
-      const config = {
-        method: 'GET',
-        url,
-        headers: { Authorization: `Bearer ${accessToken}` },
-        timeout: 5000,
-        validateStatus: () => true,
-      };
+  try {
+    const url = `${dataBase()}/projects/${encodeURIComponent(projectId)}`;
+    const config = {
+      method: 'GET',
+      url,
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 5000,
+      validateStatus: () => true,
+    };
 
-      const resp = await tryWithAndWithoutPrefix(config, projectId);
+    const resp = await tryWithAndWithoutPrefix(config, projectId);
 
       if (resp.status === 200) {
         logger.info(`[Publish] Projet détecté dans région: ${formatRegion(region)}`);
@@ -124,6 +127,8 @@ async function detectProjectRegion(projectId, accessToken) {
         `[Publish] Région ${formatRegion(region)} non accessible pour le projet: ${e.message}`
       );
     }
+  } catch (e) {
+    logger.warn(`[Publish] Erreur détection région: ${e.message}`);
   }
 
   logger.warn(
@@ -135,9 +140,9 @@ async function detectProjectRegion(projectId, accessToken) {
 /** Vérifie si un item existe dans une région donnée */
 async function verifyItemExists(region, projectId, itemUrn, accessToken) {
   try {
-    const url = `${dataBase(region)}/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}`;
+    const url = `${dataBase()}/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}`;
     const config = {
-      method: 'HEAD',
+      method: 'GET',
       url,
       headers: { Authorization: `Bearer ${accessToken}` },
       timeout: 5000,
@@ -180,7 +185,7 @@ async function findItemRegion(projectId, itemUrn, accessToken, projectRegion = n
 // — Résolution de version (region-aware) ———————————–
 
 async function getTipVersionFromItems(region, projectId, itemUrn, accessToken) {
-  const url = `${dataBase(region)}/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}`;
+  const url = `${dataBase()}/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}`;
   const config = {
     method: 'GET',
     url,
@@ -216,7 +221,7 @@ async function getTipVersionFromItems(region, projectId, itemUrn, accessToken) {
 }
 
 async function getLatestVersionFromVersions(region, projectId, itemUrn, accessToken) {
-  const url = `${dataBase(region)}/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}/versions`;
+  const url = `${dataBase()}/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}/versions`;
   const config = {
     method: 'GET',
     url,
@@ -295,11 +300,11 @@ async function resolveToVersionUrnWithRegion(projectId, inputUrn, accessToken, p
 // — Envoi de la Command Publish (region-aware) ——————————
 
 async function publishVersionViaCommand(region, projectId, versionUrn, accessToken) {
-  const url = `${dataBase(region)}/projects/${encodeURIComponent(projectId)}/commands`;
+  const url = `${commandsBase(region)}/projects/${encodeURIComponent(projectId)}/commands`;
   const cmdType =
     PUBLISH_COMMAND === 'PublishWithoutLinks'
-      ? 'commands:autodesk.bim360:PublishWithoutLinks'
-      : 'commands:autodesk.bim360:PublishModel';
+      ? 'commands:autodesk.bim360:C4RModelPublishWithoutLinks'
+      : 'commands:autodesk.bim360:C4RModelPublish';
 
   const payload = {
     jsonapi: { version: '1.0' },
@@ -307,8 +312,10 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
       type: 'commands',
       attributes: {
         extension: { type: cmdType, version: '1.0.0' },
-        arguments: {
-          resources: [{ type: 'versions', id: versionUrn }],
+      },
+      relationships: {
+        resources: {
+          data: [{ type: 'versions', id: versionUrn }],
         },
       },
     },
@@ -327,7 +334,7 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
         data: payload,
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/vnd.api+json',
           Accept: 'application/vnd.api+json',
         },
         timeout: ITEM_TIMEOUT_MS,
@@ -630,7 +637,7 @@ class APSPublishService {
       let targetFolderUrn = folderUrn;
       if (!targetFolderUrn) {
         // Obtenir le dossier racine du projet
-        const hubUrl = `${dataBase(region)}/projects/${encodeURIComponent(validProjectId)}`;
+        const hubUrl = `${dataBase()}/projects/${encodeURIComponent(validProjectId)}`;
         const hubResp = await axios.get(hubUrl, {
           headers: { Authorization: `Bearer ${accessToken}` },
           timeout: ITEM_TIMEOUT_MS,
@@ -647,7 +654,7 @@ class APSPublishService {
       }
 
       // Lister le contenu du dossier
-      const folderUrl = `${dataBase(region)}/projects/${encodeURIComponent(
+      const folderUrl = `${dataBase()}/projects/${encodeURIComponent(
         validProjectId
       )}/folders/${encodeURIComponent(targetFolderUrn)}/contents`;
       const resp = await axios.get(folderUrl, {
@@ -703,7 +710,7 @@ class APSPublishService {
       const region = projectInfo.region;
 
       // Obtenir les détails de la version
-      const url = `${dataBase(region)}/projects/${encodeURIComponent(validProjectId)}/versions/${encodeURIComponent(
+      const url = `${dataBase()}/projects/${encodeURIComponent(validProjectId)}/versions/${encodeURIComponent(
         versionUrn
       )}`;
       const resp = await axios.get(url, {
