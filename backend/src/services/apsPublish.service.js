@@ -104,7 +104,7 @@ function isVersionUrn(urn) {
  */
 async function detectProjectRegion(projectId, accessToken) {
   const cleaned = cleanId(projectId);
-  logger.debug(`[Publish] Détection région pour projet: ${projectId}`);
+  logger.debug(`[Publish] Détection région (${REGION_LIST_LOG}) pour projet: ${projectId}`);
 
   try {
     const url = `${dataBase()}/projects/${encodeURIComponent(projectId)}`;
@@ -118,28 +118,23 @@ async function detectProjectRegion(projectId, accessToken) {
 
     const resp = await tryWithAndWithoutPrefix(config, projectId);
 
-    if (resp.status === 200) {
-      const attributes = resp?.data?.data?.attributes;
-      let detectedRegion = attributes?.extension?.data?.region;
-
-      if (!detectedRegion) {
-        const hubId = resp?.data?.data?.relationships?.hub?.data?.id;
-        if (hubId && hubId.includes('.eu.')) {
-          detectedRegion = 'emea';
-        } else {
-          detectedRegion = 'us';
-        }
+      if (resp.status === 200) {
+        logger.info(`[Publish] Projet détecté dans région: ${formatRegion(region)}`);
+        return { region, projectId: cleaned };
       }
-
-      logger.info(`[Publish] Région détectée: ${formatRegion(detectedRegion)}`);
-      return { region: String(detectedRegion || 'us').toLowerCase(), projectId: cleaned };
+    } catch (e) {
+      logger.debug(
+        `[Publish] Région ${formatRegion(region)} non accessible pour le projet: ${e.message}`
+      );
     }
   } catch (e) {
     logger.warn(`[Publish] Erreur détection région: ${e.message}`);
   }
 
-  logger.info(`[Publish] Région par défaut (US) utilisée pour: ${projectId}`);
-  return { region: 'us', projectId: cleaned };
+  logger.warn(
+    `[Publish] Impossible de détecter la région (${REGION_LIST_LOG}) du projet: ${projectId}`
+  );
+  return { region: null, projectId: cleaned };
 }
 
 /** Vérifie si un item existe dans une région donnée */
@@ -158,12 +153,14 @@ async function verifyItemExists(region, projectId, itemUrn, accessToken) {
     const exists = resp.status === 200;
 
     if (exists) {
-      logger.debug(`[Publish] Item existe: ${itemUrn}`);
+      logger.debug(`[Publish] Item existe dans région ${formatRegion(region)}: ${itemUrn}`);
     }
 
     return exists;
   } catch (e) {
-    logger.debug(`[Publish] Erreur vérification existence item: ${e.message}`);
+    logger.debug(
+      `[Publish] Erreur vérification existence item région ${formatRegion(region)}: ${e.message}`
+    );
     return false;
   }
 }
@@ -200,7 +197,7 @@ async function getTipVersionFromItems(region, projectId, itemUrn, accessToken) {
   const resp = await tryWithAndWithoutPrefix(config, projectId);
 
   if (resp.status !== 200) {
-    throw new Error(`items GET ${resp.status}: ${safeBody(resp.data)}`);
+    throw new Error(`items GET ${formatRegion(region)} ${resp.status}: ${safeBody(resp.data)}`);
   }
 
   // 1) relationships.tip.data.id
@@ -218,7 +215,9 @@ async function getTipVersionFromItems(region, projectId, itemUrn, accessToken) {
     return ver.id;
   }
 
-  throw new Error(`Tip version introuvable dans la réponse /items`);
+    throw new Error(
+      `Tip version introuvable dans la réponse /items (region=${formatRegion(region)})`
+    );
 }
 
 async function getLatestVersionFromVersions(region, projectId, itemUrn, accessToken) {
@@ -234,12 +233,12 @@ async function getLatestVersionFromVersions(region, projectId, itemUrn, accessTo
   const resp = await tryWithAndWithoutPrefix(config, projectId);
 
   if (resp.status !== 200) {
-    throw new Error(`versions GET ${resp.status}: ${safeBody(resp.data)}`);
+    throw new Error(`versions GET ${formatRegion(region)} ${resp.status}: ${safeBody(resp.data)}`);
   }
 
   const arr = Array.isArray(resp?.data?.data) ? resp.data.data : [];
   if (!arr.length) {
-    throw new Error(`Aucune version retournée`);
+    throw new Error(`Aucune version retournée (region=${formatRegion(region)})`);
   }
 
   // L’API renvoie généralement la plus récente en premier
