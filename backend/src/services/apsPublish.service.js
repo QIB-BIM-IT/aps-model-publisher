@@ -117,15 +117,18 @@ async function detectProjectRegion(projectId, accessToken) {
     };
 
     const resp = await tryWithAndWithoutPrefix(config, projectId);
+    if (resp.status === 200) {
+      const attributes = resp?.data?.data?.attributes;
+      const detectedRegion = attributes?.extension?.data?.region;
 
-      if (resp.status === 200) {
-        logger.info(`[Publish] Projet détecté dans région: ${formatRegion(region)}`);
-        return { region, projectId: cleaned };
+      if (detectedRegion) {
+        logger.info(`[Publish] Projet détecté dans région: ${formatRegion(detectedRegion)}`);
+        return { region: String(detectedRegion).toLowerCase(), projectId: cleaned };
       }
-    } catch (e) {
-      logger.debug(
-        `[Publish] Région ${formatRegion(region)} non accessible pour le projet: ${e.message}`
-      );
+
+      logger.warn('[Publish] Région non fournie dans la réponse /projects');
+    } else {
+      logger.warn(`[Publish] /projects HTTP ${resp.status}: ${safeBody(resp.data)}`);
     }
   } catch (e) {
     logger.warn(`[Publish] Erreur détection région: ${e.message}`);
