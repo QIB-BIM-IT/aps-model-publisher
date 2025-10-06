@@ -49,7 +49,7 @@ function dataBase() {
 }
 
 function commandsBase(region) {
-  if (region) {
+  if (region && region !== 'N/A') {
     return `${apiBase()}/data/v2/regions/${region}`;
   }
   return `${apiBase()}/data/v2`;
@@ -117,15 +117,18 @@ async function detectProjectRegion(projectId, accessToken) {
     };
 
     const resp = await tryWithAndWithoutPrefix(config, projectId);
+    if (resp.status === 200) {
+      const attributes = resp?.data?.data?.attributes;
+      const detectedRegion = attributes?.extension?.data?.region;
 
-      if (resp.status === 200) {
-        logger.info(`[Publish] Projet détecté dans région: ${formatRegion(region)}`);
-        return { region, projectId: cleaned };
+      if (detectedRegion) {
+        logger.info(`[Publish] Projet détecté dans région: ${formatRegion(detectedRegion)}`);
+        return { region: String(detectedRegion).toLowerCase(), projectId: cleaned };
       }
-    } catch (e) {
-      logger.debug(
-        `[Publish] Région ${formatRegion(region)} non accessible pour le projet: ${e.message}`
-      );
+
+      logger.warn('[Publish] Région non fournie dans la réponse /projects');
+    } else {
+      logger.warn(`[Publish] /projects HTTP ${resp.status}: ${safeBody(resp.data)}`);
     }
   } catch (e) {
     logger.warn(`[Publish] Erreur détection région: ${e.message}`);
@@ -137,55 +140,10 @@ async function detectProjectRegion(projectId, accessToken) {
   return { region: null, projectId: cleaned };
 }
 
-/** Vérifie si un item existe dans une région donnée */
-async function verifyItemExists(region, projectId, itemUrn, accessToken) {
-  try {
-    const url = `${dataBase()}/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}`;
-    const config = {
-      method: 'GET',
-      url,
-      headers: { Authorization: `Bearer ${accessToken}` },
-      timeout: 5000,
-      validateStatus: () => true,
-    };
-
-    const resp = await tryWithAndWithoutPrefix(config, projectId);
-    const exists = resp.status === 200;
-
-    if (exists) {
-      logger.debug(`[Publish] Item existe dans région ${formatRegion(region)}: ${itemUrn}`);
-    }
-
-    return exists;
-  } catch (e) {
-    logger.debug(
-      `[Publish] Erreur vérification existence item région ${formatRegion(region)}: ${e.message}`
-    );
-    return false;
-  }
-}
-
-/** Trouve la région où l’item existe */
-async function findItemRegion(projectId, itemUrn, accessToken, projectRegion = null) {
-  // Essayer d’abord la région du projet si elle est connue
-  const regionsToTry = projectRegion
-    ? [projectRegion, ...REGIONS.filter((r) => r !== projectRegion)]
-    : REGIONS;
-
-  for (const region of regionsToTry) {
-    if (await verifyItemExists(region, projectId, itemUrn, accessToken)) {
-      logger.info(`[Publish] Item trouvé dans région: ${formatRegion(region)}`);
-      return region;
-    }
-  }
-
-  return null;
-}
-
 // — Résolution de version (region-aware) ———————————–
 
-async function getTipVersionFromItems(region, projectId, itemUrn, accessToken) {
-  const url = `${dataBase()}/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}`;
+async function getTipVersionFromItems(projectId, itemUrn, accessToken) {
+  const url = `${apiBase()}/data/v2/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}`;
   const config = {
     method: 'GET',
     url,
@@ -197,7 +155,8 @@ async function getTipVersionFromItems(region, projectId, itemUrn, accessToken) {
   const resp = await tryWithAndWithoutPrefix(config, projectId);
 
   if (resp.status !== 200) {
-    throw new Error(`items GET ${formatRegion(region)} ${resp.status}: ${safeBody(resp.data)}`);
+    logger.error(`[Publish] /items HTTP ${resp.status}: ${safeBody(resp.data)}`);
+    throw new Error(`items GET ${resp.status}: ${safeBody(resp.data)}`);
   }
 
   // 1) relationships.tip.data.id
@@ -215,13 +174,11 @@ async function getTipVersionFromItems(region, projectId, itemUrn, accessToken) {
     return ver.id;
   }
 
-    throw new Error(
-      `Tip version introuvable dans la réponse /items (region=${formatRegion(region)})`
-    );
+  throw new Error(`Tip version introuvable dans /items`);
 }
 
-async function getLatestVersionFromVersions(region, projectId, itemUrn, accessToken) {
-  const url = `${dataBase()}/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}/versions`;
+async function getLatestVersionFromVersions(projectId, itemUrn, accessToken) {
+  const url = `${apiBase()}/data/v2/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}/versions`;
   const config = {
     method: 'GET',
     url,
@@ -233,66 +190,47 @@ async function getLatestVersionFromVersions(region, projectId, itemUrn, accessTo
   const resp = await tryWithAndWithoutPrefix(config, projectId);
 
   if (resp.status !== 200) {
-    throw new Error(`versions GET ${formatRegion(region)} ${resp.status}: ${safeBody(resp.data)}`);
+    logger.error(`[Publish] /versions HTTP ${resp.status}: ${safeBody(resp.data)}`);
+    throw new Error(`versions GET ${resp.status}: ${safeBody(resp.data)}`);
   }
 
   const arr = Array.isArray(resp?.data?.data) ? resp.data.data : [];
   if (!arr.length) {
-    throw new Error(`Aucune version retournée (region=${formatRegion(region)})`);
+    throw new Error(`Aucune version retournée`);
   }
 
-  // L’API renvoie généralement la plus récente en premier
   const latestVersion = arr[0].id;
-  logger.debug(
-    `[Publish] Version la plus récente trouvée: ${latestVersion} (${arr.length} versions au total)`
-  );
+  logger.debug(`[Publish] Latest version trouvée: ${latestVersion} (${arr.length} versions total)`);
   return latestVersion;
 }
 
 /**
- * Essaie de résoudre vers un URN version en testant les régions
- * Retourne { versionUrn, region }
+ * Résout vers un URN version (simplifié - pas de multi-région pour /items)
  */
-async function resolveToVersionUrnWithRegion(projectId, inputUrn, accessToken, projectRegion = null) {
+async function resolveToVersionUrn(projectId, inputUrn, accessToken) {
   logger.info(`[Publish] Début résolution version pour: ${inputUrn}`);
 
-  // Si c’est déjà une version -> pas besoin de /items
+  // Si c'est déjà une version -> pas besoin de /items
   if (isVersionUrn(inputUrn)) {
     logger.debug(`[Publish] Input est déjà une version -> ${inputUrn}`);
-    return { versionUrn: inputUrn, region: projectRegion };
+    return inputUrn;
   }
 
-  // Vérifier d’abord que l’item existe et dans quelle région
-  const itemRegion = await findItemRegion(projectId, inputUrn, accessToken, projectRegion);
-
-  if (!itemRegion) {
-    throw new Error(`Item n'existe dans aucune région (${REGION_LIST_LOG}): ${inputUrn}`);
-  }
-
-  // Essayer de résoudre la version dans la région où l’item existe
+  // Essayer d'abord via /items (pour obtenir la tip version)
   try {
-    // Essayer d’abord via /items (pour obtenir la tip version)
-    const v1 = await getTipVersionFromItems(itemRegion, projectId, inputUrn, accessToken);
-    logger.info(
-      `[Publish] Résolution tip via /items OK: region=${formatRegion(itemRegion)} item=${inputUrn} -> version=${v1}`
-    );
-    return { versionUrn: v1, region: itemRegion };
+    const versionUrn = await getTipVersionFromItems(projectId, inputUrn, accessToken);
+    logger.info(`[Publish] Résolution tip via /items OK: item=${inputUrn} -> version=${versionUrn}`);
+    return versionUrn;
   } catch (e1) {
-    logger.warn(
-      `[Publish] /items ${formatRegion(itemRegion)} échec, essai fallback /versions: ${e1.message}`
-    );
+    logger.warn(`[Publish] /items échec, essai fallback /versions: ${e1.message}`);
 
+    // Fallback: essayer via /versions
     try {
-      // Fallback: essayer via /versions
-      const v2 = await getLatestVersionFromVersions(itemRegion, projectId, inputUrn, accessToken);
-      logger.info(
-        `[Publish] Résolution via /versions OK: region=${formatRegion(itemRegion)} item=${inputUrn} -> version=${v2}`
-      );
-      return { versionUrn: v2, region: itemRegion };
+      const versionUrn = await getLatestVersionFromVersions(projectId, inputUrn, accessToken);
+      logger.info(`[Publish] Résolution via /versions OK: item=${inputUrn} -> version=${versionUrn}`);
+      return versionUrn;
     } catch (e2) {
-      throw new Error(
-        `Impossible de résoudre la version même avec item existant dans région ${formatRegion(itemRegion)}: ${e2.message}`
-      );
+      throw new Error(`Impossible de résoudre la version: ${e2.message}`);
     }
   }
 }
@@ -462,6 +400,30 @@ class APSPublishService {
       const projectInfo = await detectProjectRegion(run.projectId, accessToken);
       const projectRegion = projectInfo.region;
 
+      // DEBUG: Tester l'accès direct à l'item
+      logger.debug(`[Publish] TEST - Tentative accès direct item: ${run.items[0]}`);
+      try {
+        const testUrl = `${apiBase()}/data/v2/projects/${encodeURIComponent(run.projectId)}/items/${encodeURIComponent(run.items[0])}`;
+        logger.debug(`[Publish] TEST URL: ${testUrl}`);
+
+        const testResp = await axios.get(testUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 5000,
+          validateStatus: () => true,
+        });
+
+        logger.debug(`[Publish] TEST HTTP: ${testResp.status}`);
+        if (testResp.status === 200) {
+          logger.debug(
+            `[Publish] TEST SUCCESS - Item data: ${JSON.stringify(testResp.data?.data?.attributes?.displayName)}`
+          );
+        } else {
+          logger.error(`[Publish] TEST FAILED - Body: ${safeBody(testResp.data)}`);
+        }
+      } catch (e) {
+        logger.error(`[Publish] TEST ERROR: ${e.message}`);
+      }
+
       logger.info(
         `[Publish] Mode=${ENABLE_REAL ? `REAL(${PUBLISH_COMMAND})` : 'DRY-RUN'} run=${run.id} project=${
           run.projectId
@@ -494,14 +456,8 @@ class APSPublishService {
             logger.debug(`[Publish] Input déjà version -> ${versionUrn}`);
           } else {
             try {
-              const r = await resolveToVersionUrnWithRegion(run.projectId, selectedUrn, accessToken, projectRegion);
-              versionUrn = r.versionUrn;
-              resolvedRegion = r.region || projectRegion;
-              logger.info(
-                `[Publish] Résolu: item=${selectedUrn} -> version=${versionUrn} (région=${formatRegion(
-                  resolvedRegion
-                )})`
-              );
+              versionUrn = await resolveToVersionUrn(run.projectId, selectedUrn, accessToken);
+              logger.info(`[Publish] Résolu: item=${selectedUrn} -> version=${versionUrn}`);
             } catch (e) {
               const msg = `Échec résolution version: ${e.message}`;
               results.push({
