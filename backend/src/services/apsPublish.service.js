@@ -386,13 +386,13 @@ class APSPublishService {
 
       // Détecter d'abord la région du projet pour optimiser les appels suivants
       const projectInfo = await detectProjectRegion(run.projectId, accessToken);
-      const resolvedProjectId = projectInfo.projectId || run.projectId;
+      const normalizedProjectId = projectInfo.projectId || run.projectId;
       const projectRegion = projectInfo.region;
 
       // DEBUG: Tester l'accès direct à l'item
       logger.debug(`[Publish] TEST - Tentative accès direct item: ${run.items[0]}`);
       try {
-        const testUrl = `${apiBase()}/data/v2/projects/${encodeURIComponent(resolvedProjectId)}/items/${encodeURIComponent(run.items[0])}`;
+        const testUrl = `${apiBase()}/data/v2/projects/${encodeURIComponent(normalizedProjectId)}/items/${encodeURIComponent(run.items[0])}`;
         logger.debug(`[Publish] TEST URL: ${testUrl}`);
 
         const testResp = await axios.get(testUrl, {
@@ -414,9 +414,9 @@ class APSPublishService {
       }
 
       logger.info(
-        `[Publish] Mode=${ENABLE_REAL ? `REAL(${PUBLISH_COMMAND})` : 'DRY-RUN'} run=${run.id} project=${
-          resolvedProjectId
-        } région=${formatRegion(projectRegion)} items=${run.items.length}`
+        `[Publish] Mode=${ENABLE_REAL ? `REAL(${PUBLISH_COMMAND})` : 'DRY-RUN'} run=${run.id} projectRaw=${
+          run.projectId
+        } projectNormalized=${normalizedProjectId} région=${formatRegion(projectRegion)} items=${run.items.length}`
       );
 
       // Log détaillé des items à traiter
@@ -445,7 +445,7 @@ class APSPublishService {
             logger.debug(`[Publish] Input déjà version -> ${versionUrn}`);
           } else {
             try {
-              versionUrn = await resolveToVersionUrn(resolvedProjectId, selectedUrn, accessToken);
+              versionUrn = await resolveToVersionUrn(normalizedProjectId, selectedUrn, accessToken);
               logger.info(`[Publish] Résolu: item=${selectedUrn} -> version=${versionUrn}`);
             } catch (e) {
               const msg = `Échec résolution version: ${e.message}`;
@@ -456,7 +456,7 @@ class APSPublishService {
                 error: 'RESOLUTION_ERROR',
               });
               logger.error(
-                `[Publish] ${msg} (project=${resolvedProjectId}, input=${selectedUrn})`
+                `[Publish] ${msg} (projectRaw=${run.projectId}, projectNormalized=${normalizedProjectId}, input=${selectedUrn})`
               );
               continue;
             }
@@ -466,7 +466,7 @@ class APSPublishService {
           const { outcome, http, body, regionTried } = await publishVersionWithRegion(
             versionUrn,
             resolvedRegion,
-            resolvedProjectId,
+            normalizedProjectId,
             accessToken
           );
 
