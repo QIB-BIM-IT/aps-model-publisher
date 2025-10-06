@@ -104,7 +104,7 @@ function isVersionUrn(urn) {
  */
 async function detectProjectRegion(projectId, accessToken) {
   const cleaned = cleanId(projectId);
-  logger.debug(`[Publish] Détection région (${REGION_LIST_LOG}) pour projet: ${projectId}`);
+  logger.debug(`[Publish] Détection région pour projet: ${projectId}`);
 
   try {
     const url = `${dataBase()}/projects/${encodeURIComponent(projectId)}`;
@@ -117,27 +117,34 @@ async function detectProjectRegion(projectId, accessToken) {
     };
 
     const resp = await tryWithAndWithoutPrefix(config, projectId);
-    if (resp.status === 200) {
-      const attributes = resp?.data?.data?.attributes;
-      const detectedRegion = attributes?.extension?.data?.region;
 
-      if (detectedRegion) {
-        logger.info(`[Publish] Projet détecté dans région: ${formatRegion(detectedRegion)}`);
-        return { region: String(detectedRegion).toLowerCase(), projectId: cleaned };
+    if (resp.status === 200) {
+      // Extraire la région depuis les attributs du projet si disponible
+      const attributes = resp?.data?.data?.attributes;
+
+      // La région peut être dans extension.data.region ou déterminée par le hub
+      let detectedRegion = attributes?.extension?.data?.region;
+
+      if (!detectedRegion) {
+        // Fallback: essayer de déterminer depuis le hub
+        const hubId = resp?.data?.data?.relationships?.hub?.data?.id;
+        if (hubId && hubId.includes('.eu.')) {
+          detectedRegion = 'emea';
+        } else {
+          detectedRegion = 'us'; // Par défaut US
+        }
       }
 
-      logger.warn('[Publish] Région non fournie dans la réponse /projects');
-    } else {
-      logger.warn(`[Publish] /projects HTTP ${resp.status}: ${safeBody(resp.data)}`);
+      logger.info(`[Publish] Région détectée: ${formatRegion(detectedRegion)}`);
+      return { region: detectedRegion.toLowerCase(), projectId: cleaned };
     }
   } catch (e) {
     logger.warn(`[Publish] Erreur détection région: ${e.message}`);
   }
 
-  logger.warn(
-    `[Publish] Impossible de détecter la région (${REGION_LIST_LOG}) du projet: ${projectId}`
-  );
-  return { region: null, projectId: cleaned };
+  // Fallback: US par défaut
+  logger.info(`[Publish] Région par défaut (US) utilisée pour: ${projectId}`);
+  return { region: 'us', projectId: cleaned };
 }
 
 // — Résolution de version (region-aware) ———————————–
