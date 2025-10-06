@@ -57,31 +57,13 @@ function commandsBase(region) {
 
 // — Utilitaires pour gérer les IDs —————————————–
 
-/** Nettoie un ID de projet/hub en retirant le préfixe 'b.' si nécessaire */
+/** Nettoie un ID en retirant le préfixe 'b.' lorsque certaines APIs l'exigent.
+ *  ⚠️ Ne pas utiliser pour les projectId/hubId des endpoints Data v2. */
 function cleanId(id) {
   if (typeof id === 'string' && id.startsWith('b.')) {
     return id.substring(2);
   }
   return id;
-}
-
-/**
- * Essaie un appel avec l’ID original, puis sans le préfixe 'b.' si 404
- */
-async function tryWithAndWithoutPrefix(axiosConfig, id) {
-  let resp = await axios(axiosConfig);
-
-  // Si 404 et que l’ID a un préfixe 'b.', réessayer sans
-  if (resp.status === 404 && typeof id === 'string' && id.startsWith('b.')) {
-    const cleanedId = cleanId(id);
-    // remplace l'ID encodé dans l'URL s'il est présent
-    const encodedOriginal = encodeURIComponent(id);
-    const encodedCleaned = encodeURIComponent(cleanedId);
-    const newUrl = (axiosConfig.url || '').replace(encodedOriginal, encodedCleaned);
-    resp = await axios({ ...axiosConfig, url: newUrl });
-  }
-
-  return resp;
 }
 
 // — Reconnaissance des URN ———————————————––
@@ -100,10 +82,9 @@ function isVersionUrn(urn) {
 
 /**
  * Détecte la région d’un projet en testant les différentes régions.
- * Retourne { region, projectId } (projectId potentiellement nettoyé)
+ * Retourne { region, projectId }
  */
 async function detectProjectRegion(projectId, accessToken) {
-  const cleaned = cleanId(projectId);
   logger.debug(`[Publish] Détection région pour projet: ${projectId}`);
 
   try {
@@ -116,7 +97,7 @@ async function detectProjectRegion(projectId, accessToken) {
       validateStatus: () => true,
     };
 
-    const resp = await tryWithAndWithoutPrefix(config, projectId);
+    const resp = await axios(config);
 
     if (resp.status === 200) {
       // Extraire la région depuis les attributs du projet si disponible
@@ -136,7 +117,7 @@ async function detectProjectRegion(projectId, accessToken) {
       }
 
       logger.info(`[Publish] Région détectée: ${formatRegion(detectedRegion)}`);
-      return { region: detectedRegion.toLowerCase(), projectId: cleaned };
+      return { region: detectedRegion.toLowerCase(), projectId };
     }
   } catch (e) {
     logger.warn(`[Publish] Erreur détection région: ${e.message}`);
@@ -144,7 +125,7 @@ async function detectProjectRegion(projectId, accessToken) {
 
   // Fallback: US par défaut
   logger.info(`[Publish] Région par défaut (US) utilisée pour: ${projectId}`);
-  return { region: 'us', projectId: cleaned };
+  return { region: 'us', projectId };
 }
 
 // — Résolution de version (region-aware) ———————————–
@@ -159,7 +140,7 @@ async function getTipVersionFromItems(projectId, itemUrn, accessToken) {
     validateStatus: () => true,
   };
 
-  const resp = await tryWithAndWithoutPrefix(config, projectId);
+  const resp = await axios(config);
 
   if (resp.status !== 200) {
     logger.error(`[Publish] /items HTTP ${resp.status}: ${safeBody(resp.data)}`);
@@ -194,7 +175,7 @@ async function getLatestVersionFromVersions(projectId, itemUrn, accessToken) {
     validateStatus: () => true,
   };
 
-  const resp = await tryWithAndWithoutPrefix(config, projectId);
+  const resp = await axios(config);
 
   if (resp.status !== 200) {
     logger.error(`[Publish] /versions HTTP ${resp.status}: ${safeBody(resp.data)}`);
@@ -286,7 +267,7 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
         validateStatus: () => true,
       };
 
-      const resp = await tryWithAndWithoutPrefix(config, projectId);
+      const resp = await axios(config);
       const { status, data } = resp;
 
       if (status === 202 || status === 200 || status === 201) {
@@ -405,12 +386,13 @@ class APSPublishService {
 
       // Détecter d'abord la région du projet pour optimiser les appels suivants
       const projectInfo = await detectProjectRegion(run.projectId, accessToken);
+      const resolvedProjectId = projectInfo.projectId || run.projectId;
       const projectRegion = projectInfo.region;
 
       // DEBUG: Tester l'accès direct à l'item
       logger.debug(`[Publish] TEST - Tentative accès direct item: ${run.items[0]}`);
       try {
-        const testUrl = `${apiBase()}/data/v2/projects/${encodeURIComponent(run.projectId)}/items/${encodeURIComponent(run.items[0])}`;
+        const testUrl = `${apiBase()}/data/v2/projects/${encodeURIComponent(resolvedProjectId)}/items/${encodeURIComponent(run.items[0])}`;
         logger.debug(`[Publish] TEST URL: ${testUrl}`);
 
         const testResp = await axios.get(testUrl, {
@@ -433,7 +415,7 @@ class APSPublishService {
 
       logger.info(
         `[Publish] Mode=${ENABLE_REAL ? `REAL(${PUBLISH_COMMAND})` : 'DRY-RUN'} run=${run.id} project=${
-          run.projectId
+          resolvedProjectId
         } région=${formatRegion(projectRegion)} items=${run.items.length}`
       );
 
@@ -463,7 +445,7 @@ class APSPublishService {
             logger.debug(`[Publish] Input déjà version -> ${versionUrn}`);
           } else {
             try {
-              versionUrn = await resolveToVersionUrn(run.projectId, selectedUrn, accessToken);
+              versionUrn = await resolveToVersionUrn(resolvedProjectId, selectedUrn, accessToken);
               logger.info(`[Publish] Résolu: item=${selectedUrn} -> version=${versionUrn}`);
             } catch (e) {
               const msg = `Échec résolution version: ${e.message}`;
@@ -473,7 +455,9 @@ class APSPublishService {
                 message: msg,
                 error: 'RESOLUTION_ERROR',
               });
-              logger.error(`[Publish] ${msg} (project=${run.projectId}, input=${selectedUrn})`);
+              logger.error(
+                `[Publish] ${msg} (project=${resolvedProjectId}, input=${selectedUrn})`
+              );
               continue;
             }
           }
@@ -482,7 +466,7 @@ class APSPublishService {
           const { outcome, http, body, regionTried } = await publishVersionWithRegion(
             versionUrn,
             resolvedRegion,
-            run.projectId,
+            resolvedProjectId,
             accessToken
           );
 
