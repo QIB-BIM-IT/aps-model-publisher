@@ -1,5 +1,6 @@
 // src/routes/aps.routes.js
 const express = require('express');
+const axios = require('axios');
 const router = express.Router();
 const logger = require('../config/logger');
 const { authenticateToken } = require('../middleware/auth.middleware');
@@ -72,6 +73,67 @@ router.get('/projects/:projectId/folders/:folderId/contents', async (req, res) =
   } catch (err) {
     logger.error(`GET /api/aps/projects/:projectId/folders/:folderId/contents error: ${err.message}`);
     res.status(500).json({ success: false, message: 'Erreur folder-contents' });
+  }
+});
+
+// Route de diagnostic temporaire
+router.get('/debug/folder-contents', async (req, res) => {
+  try {
+    const { projectId, folderId } = req.query;
+
+    if (!projectId || !folderId) {
+      return res.status(400).json({
+        error: 'projectId et folderId requis',
+        example: '/api/aps/debug/folder-contents?projectId=b.xxx&folderId=urn:adsk.wipprod:fs.folder:co.xxx',
+      });
+    }
+
+    const userId = req.user?.id || req.userId;
+    const accessToken = await apsAuthService.ensureValidToken(userId);
+
+    const url = `https://developer.api.autodesk.com/data/v2/projects/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(folderId)}/contents`;
+
+    logger.info(`[DEBUG] Fetching: ${url}`);
+
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { 'page[limit]': 50 },
+    });
+
+    const revitFiles = response.data?.data
+      ?.filter((item) => {
+        const name = item.attributes?.displayName || '';
+        return name.toLowerCase().endsWith('.rvt');
+      })
+      .map((item) => ({
+        id: item.id,
+        type: item.type,
+        displayName: item.attributes?.displayName,
+        createTime: item.attributes?.createTime,
+        extension: item.attributes?.extension,
+        relationships: item.relationships,
+        tipVersionId: item.relationships?.tip?.data?.id,
+        rawItem: item,
+      }));
+
+    const includedVersions = response.data?.included?.filter((inc) => inc.type === 'versions');
+
+    res.json({
+      projectId,
+      folderId,
+      revitFilesCount: revitFiles?.length || 0,
+      revitFiles,
+      includedVersions,
+      fullResponseData: response.data?.data,
+      fullResponseIncluded: response.data?.included,
+    });
+  } catch (e) {
+    logger.error(`[DEBUG] Error: ${e.message}`);
+    res.status(500).json({
+      error: e.message,
+      response: e.response?.data,
+      stack: e.stack,
+    });
   }
 });
 
