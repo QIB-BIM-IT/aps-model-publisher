@@ -209,8 +209,22 @@ export default function Dashboard() {
   function toggleSelect(itemId, node) {
     setSelectedItems((prev) => {
       const nxt = { ...prev };
-      if (nxt[itemId]) delete nxt[itemId];
-      else nxt[itemId] = node;
+      if (nxt[itemId]) {
+        delete nxt[itemId];
+      } else {
+        const tipVersionUrn = node?.relationships?.tip?.data?.id;
+
+        if (!tipVersionUrn) {
+          console.warn('⚠️ Pas de tip version pour:', itemId, node);
+          setError(`Impossible de trouver la version pour ${nameOf(node)}`);
+          return prev;
+        }
+
+        nxt[itemId] = {
+          ...node,
+          publishUrn: tipVersionUrn,
+        };
+      }
       return nxt;
     });
   }
@@ -240,11 +254,12 @@ export default function Dashboard() {
   }
 
   async function handlePlanifier() {
-    const items = Object.keys(selectedItems);
+    const items = Object.values(selectedItems).map((item) => item.publishUrn);
     if (!selectedHub || !selectedProject || items.length === 0) {
       setToast('Sélectionne au moins une maquette RVT.');
       return;
     }
+    console.log('📤 Envoi des URNs pour publish:', items);
     try {
       await createPublishJob({
         hubId: selectedHub,
