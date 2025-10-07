@@ -14,9 +14,22 @@ const scheduler = require('../services/scheduler.service');
 // ------------- helpers -------------
 const ENABLE_REAL = String(process.env.ENABLE_REAL_PUBLISH || 'false').toLowerCase() === 'true';
 
-// Très simple validation d’URN lineage
-const URN_RE = /^urn:adsk\.wipprod:dm\.lineage:[A-Za-z0-9\-_]+$/i;
-function validUrn(u) { return URN_RE.test(String(u || '')); }
+// Validation d'URN : accepte les lineage et les versions (vf)
+const VALID_URN_PREFIXES = [
+  'urn:adsk.wipprod:dm.lineage:',
+  'urn:adsk.wipprod:fs.file:vf.',
+];
+
+function validUrn(u) {
+  const value = String(u || '').trim();
+  if (!value) return false;
+
+  const lowerValue = value.toLowerCase();
+  return VALID_URN_PREFIXES.some(prefix => {
+    if (!lowerValue.startsWith(prefix)) return false;
+    return value.length > prefix.length;
+  });
+}
 
 // Timezone check : si Node supporte Intl.supportedValuesOf, on vérifie, sinon fallback simple.
 let KNOWN_TZ = null;
@@ -104,6 +117,8 @@ router.post('/jobs', rateLimit, async (req, res) => {
   try {
     const user = await User.findByPk(req.userId);
     if (!user) return res.status(401).json({ success: false, message: 'Utilisateur introuvable' });
+
+    logger.debug('POST /api/publish/jobs body', { body: req.body });
 
     const payload = normalizeJobInput(req.body);
     const err = validateJobPayload(payload);
