@@ -236,11 +236,19 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
     data: {
       type: 'commands',
       attributes: {
-        extension: { type: cmdType, version: '1.0.0' },
+        extension: {
+          type: cmdType,
+          version: '1.0.0',
+        },
       },
       relationships: {
         resources: {
-          data: [{ type: 'versions', id: versionUrn }],
+          data: [
+            {
+              type: 'versions',
+              id: versionUrn,
+            },
+          ],
         },
       },
     },
