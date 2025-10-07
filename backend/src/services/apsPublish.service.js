@@ -246,6 +246,10 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
     },
   };
 
+  logger.info(`[Publish] POST URL: ${url}`);
+  logger.info(`[Publish] Payload: ${JSON.stringify(payload, null, 2)}`);
+  logger.info(`[Publish] Version URN: ${versionUrn}`);
+  logger.info(`[Publish] Command Type: ${cmdType}`);
   logger.debug(
     `[Publish] Envoi command ${PUBLISH_COMMAND} région=${formatRegion(region)} version=${versionUrn}`
   );
@@ -268,6 +272,9 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
 
       const resp = await axios(config);
       const { status, data } = resp;
+
+      logger.info(`[Publish] Response status: ${status}`);
+      logger.info(`[Publish] Response data: ${JSON.stringify(data, null, 2)}`);
 
       if (status === 202 || status === 200 || status === 201) {
         logger.info(
@@ -294,6 +301,8 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
       );
       await sleep(wait);
     } catch (e) {
+      logger.error(`[Publish] Exception: ${e.message}`);
+      logger.error(`[Publish] Stack: ${e.stack}`);
       attempt++;
       const wait = RETRY_BASE_MS * Math.pow(2, attempt - 1);
       logger.warn(
