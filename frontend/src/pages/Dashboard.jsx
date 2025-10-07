@@ -254,7 +254,10 @@ export default function Dashboard() {
   }
 
   async function handlePlanifier() {
+    console.log('🔍 selectedItems avant extraction:', selectedItems);
     const items = Object.values(selectedItems).map((item) => item.publishUrn);
+    console.log('📤 URNs à envoyer:', items);
+    console.log('📤 Premier URN:', items[0]);
     if (!selectedHub || !selectedProject || items.length === 0) {
       setToast('Sélectionne au moins une maquette RVT.');
       return;
