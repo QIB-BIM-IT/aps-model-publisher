@@ -241,17 +241,14 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
           version: '1.0.0',
         },
       },
-      relationships: {
-        resources: {
-          data: [
-            {
-              type: 'versions',
-              id: versionUrn,
-            },
-          ],
-        },
-      },
     },
+    included: [
+      {
+        type: 'versions',
+        id: versionUrn,
+        relationships: {},
+      },
+    ],
   };
 
   logger.info(`[Publish] POST URL: ${url}`);
