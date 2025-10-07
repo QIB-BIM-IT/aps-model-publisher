@@ -51,7 +51,7 @@ function dataBase() {
 function commandsBase() {
   // L'API /commands n'utilise pas /regions/{region} dans l'URL ;
   // la sélection de région est gérée côté serveur.
-  return `${apiBase()}/data/v2`;
+  return `${apiBase()}/data/v1`;
 }
 
 // — Utilitaires pour gérer les IDs —————————————–
