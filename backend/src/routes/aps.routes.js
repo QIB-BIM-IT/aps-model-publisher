@@ -7,6 +7,66 @@ const { authenticateToken } = require('../middleware/auth.middleware');
 const apsDataService = require('../services/apsData.service');
 const apsAuthService = require('../services/apsAuth.service');
 
+// Route de debug SANS authentification (temporaire)
+router.get('/debug/folder-contents-noauth', async (req, res) => {
+  try {
+    const { projectId, folderId } = req.query;
+
+    if (!projectId || !folderId) {
+      return res.status(400).json({
+        error: 'Paramètres manquants',
+        usage: 'projectId et folderId requis',
+      });
+    }
+
+    // Trouvez un userId existant dans votre DB
+    const { User } = require('../models');
+    const user = await User.findOne({ order: [['createdAt', 'DESC']] });
+
+    if (!user) {
+      return res.status(500).json({ error: 'Aucun utilisateur trouvé dans la DB' });
+    }
+
+    const accessToken = await require('../services/apsAuth.service').ensureValidToken(user.id);
+
+    const url = `https://developer.api.autodesk.com/data/v2/projects/${encodeURIComponent(
+      projectId
+    )}/folders/${encodeURIComponent(folderId)}/contents`;
+
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { 'page[limit]': 50 },
+    });
+
+    const revitFiles = response.data?.data
+      ?.filter((item) => {
+        const name = item.attributes?.displayName || '';
+        return name.toLowerCase().endsWith('.rvt');
+      })
+      .map((item) => ({
+        id: item.id,
+        type: item.type,
+        displayName: item.attributes?.displayName,
+        tipVersionId: item.relationships?.tip?.data?.id,
+        relationships: item.relationships,
+      }));
+
+    res.json({
+      success: true,
+      projectId,
+      folderId,
+      revitFilesCount: revitFiles?.length || 0,
+      revitFiles,
+      fullResponse: response.data,
+    });
+  } catch (e) {
+    res.status(500).json({
+      error: e.message,
+      details: e.response?.data,
+    });
+  }
+});
+
 router.use(authenticateToken);
 
 // Hubs
