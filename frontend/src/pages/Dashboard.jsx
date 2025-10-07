@@ -194,9 +194,11 @@ export default function Dashboard() {
   }
 
   async function loadChildren(folderId) {
+    console.log('📁 FOLDER ID:', folderId);
     setChildrenMap((m) => new Map(m.set(folderId, 'loading')));
     try {
       const data = await fetchFolderContents(selectedProject, folderId);
+      console.log('📦 FOLDER CONTENTS:', JSON.stringify(data, null, 2));
       setChildrenMap((m) => new Map(m.set(folderId, data)));
     } catch (e) {
       setChildrenMap((m) => new Map(m.set(folderId, [])));
