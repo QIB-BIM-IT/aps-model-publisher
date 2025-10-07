@@ -48,10 +48,9 @@ function dataBase() {
   return `${apiBase()}/data/v2`;
 }
 
-function commandsBase(region) {
-  if (region && region !== 'N/A') {
-    return `${apiBase()}/data/v2/regions/${region}`;
-  }
+function commandsBase() {
+  // L'API /commands n'utilise pas /regions/{region} dans l'URL ;
+  // la sélection de région est gérée côté serveur.
   return `${apiBase()}/data/v2`;
 }
 
@@ -226,7 +225,7 @@ async function resolveToVersionUrn(projectId, inputUrn, accessToken) {
 // — Envoi de la Command Publish (region-aware) ——————————
 
 async function publishVersionViaCommand(region, projectId, versionUrn, accessToken) {
-  const url = `${commandsBase(region)}/projects/${encodeURIComponent(projectId)}/commands`;
+  const url = `${commandsBase()}/projects/${encodeURIComponent(projectId)}/commands`;
   const cmdType =
     PUBLISH_COMMAND === 'PublishWithoutLinks'
       ? 'commands:autodesk.bim360:C4RModelPublishWithoutLinks'
