@@ -212,17 +212,9 @@ export default function Dashboard() {
       if (nxt[itemId]) {
         delete nxt[itemId];
       } else {
-        const tipVersionUrn = node?.relationships?.tip?.data?.id;
-
-        if (!tipVersionUrn) {
-          console.warn('⚠️ Pas de tip version pour:', itemId, node);
-          setError(`Impossible de trouver la version pour ${nameOf(node)}`);
-          return prev;
-        }
-
         nxt[itemId] = {
           ...node,
-          publishUrn: tipVersionUrn,
+          publishUrn: itemId,
         };
       }
       return nxt;
