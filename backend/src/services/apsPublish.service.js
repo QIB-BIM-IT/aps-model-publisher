@@ -241,16 +241,8 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
           version: '1.0.0',
         },
       },
-      relationships: {
-        resources: {
-          data: [
-            {
-              type: 'versions',
-              id: versionUrn,
-            },
-          ],
-        },
-      },
+      // Selon la documentation officielle, il n'est pas nécessaire de cibler une version précise :
+      // la commande s'applique automatiquement aux dernières modifications synchronisées.
     },
   };
 
