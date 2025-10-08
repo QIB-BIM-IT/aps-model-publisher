@@ -241,15 +241,27 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
           version: '1.0.0',
         },
       },
-      // Selon la documentation officielle, il n'est pas nécessaire de cibler une version précise :
-      // la commande s'applique automatiquement aux dernières modifications synchronisées.
+      relationships: {
+        resources: {
+          data: [
+            {
+              type: 'versions',
+              id: versionUrn,
+            },
+          ],
+        },
+      },
     },
   };
 
+  logger.info(`[Publish] ========================================`);
   logger.info(`[Publish] POST URL: ${url}`);
-  logger.info(`[Publish] Payload: ${JSON.stringify(payload, null, 2)}`);
-  logger.info(`[Publish] Version URN: ${versionUrn}`);
-  logger.info(`[Publish] Command Type: ${cmdType}`);
+  logger.info(`[Publish] Headers:`);
+  logger.info(`[Publish]   Content-Type: application/vnd.api+json`);
+  logger.info(`[Publish]   Accept: application/vnd.api+json`);
+  logger.info(`[Publish] Payload stringifié pour envoi:`);
+  logger.info(JSON.stringify(payload, null, 2));
+  logger.info(`[Publish] ========================================`);
   logger.debug(
     `[Publish] Envoi command ${PUBLISH_COMMAND} région=${formatRegion(region)} version=${versionUrn}`
   );
@@ -269,6 +281,19 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
         timeout: ITEM_TIMEOUT_MS,
         validateStatus: () => true,
       };
+
+      logger.debug(
+        `[Publish] Axios config: ${JSON.stringify(
+          {
+            method: config.method,
+            url: config.url,
+            headers: config.headers,
+            dataType: typeof config.data,
+          },
+          null,
+          2
+        )}`
+      );
 
       const resp = await axios(config);
       const { status, data } = resp;
