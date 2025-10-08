@@ -254,14 +254,8 @@ async function publishVersionViaCommand(region, projectId, resourceUrn, accessTo
     },
   };
 
-  logger.info(`[Publish] ========================================`);
-  logger.info(`[Publish] POST URL: ${url}`);
-  logger.info(`[Publish] Headers:`);
-  logger.info(`[Publish]   Content-Type: application/vnd.api+json`);
-  logger.info(`[Publish]   Accept: application/vnd.api+json`);
-  logger.info(`[Publish] Payload stringifié pour envoi:`);
-  logger.info(JSON.stringify(payload, null, 2));
-  logger.info(`[Publish] ========================================`);
+  logger.debug(`[Publish] POST ${url}`);
+  logger.debug(`[Publish] Payload: ${JSON.stringify(payload)}`);
   logger.debug(
     `[Publish] Envoi command ${PUBLISH_COMMAND} région=${formatRegion(region)} resource=${resourceUrn}`
   );
@@ -306,8 +300,8 @@ async function publishVersionViaCommand(region, projectId, resourceUrn, accessTo
       const resp = await axios(config);
       const { status, data } = resp;
 
-      logger.info(`[Publish] Response status: ${status}`);
-      logger.info(`[Publish] Response data: ${JSON.stringify(data, null, 2)}`);
+      logger.debug(`[Publish] Response status: ${status}`);
+      logger.debug(`[Publish] Response data: ${JSON.stringify(data)}`);
 
       if (status === 202 || status === 200 || status === 201) {
         logger.info(
@@ -429,30 +423,6 @@ class APSPublishService {
       const projectInfo = await detectProjectRegion(run.projectId, accessToken);
       const normalizedProjectId = projectInfo.projectId || run.projectId;
       const projectRegion = projectInfo.region;
-
-      // DEBUG: Tester l'accès direct à l'item
-      logger.debug(`[Publish] TEST - Tentative accès direct item: ${run.items[0]}`);
-      try {
-        const testUrl = `${apiBase()}/data/v2/projects/${encodeURIComponent(normalizedProjectId)}/items/${encodeURIComponent(run.items[0])}`;
-        logger.debug(`[Publish] TEST URL: ${testUrl}`);
-
-        const testResp = await axios.get(testUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-          timeout: 5000,
-          validateStatus: () => true,
-        });
-
-        logger.debug(`[Publish] TEST HTTP: ${testResp.status}`);
-        if (testResp.status === 200) {
-          logger.debug(
-            `[Publish] TEST SUCCESS - Item data: ${JSON.stringify(testResp.data?.data?.attributes?.displayName)}`
-          );
-        } else {
-          logger.error(`[Publish] TEST FAILED - Body: ${safeBody(testResp.data)}`);
-        }
-      } catch (e) {
-        logger.error(`[Publish] TEST ERROR: ${e.message}`);
-      }
 
       logger.info(
         `[Publish] Mode=${ENABLE_REAL ? `REAL(${PUBLISH_COMMAND})` : 'DRY-RUN'} run=${run.id} projectRaw=${
