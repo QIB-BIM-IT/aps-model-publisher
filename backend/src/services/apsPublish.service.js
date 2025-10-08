@@ -511,15 +511,34 @@ class APSPublishService {
   }
 
   async finishRun(run, summary) {
-    run.status = summary.status || 'completed';
+    const results = summary.results || [];
+
+    let finalStatus = 'success';
+
+    if (summary.status) {
+      finalStatus = summary.status;
+    } else {
+      const hasFailures = results.some((r) => r.status === 'failed');
+      const hasSuccess = results.some((r) => r.status === 'accepted' || r.status === 'queued');
+
+      if (hasFailures && !hasSuccess) {
+        finalStatus = 'failed';
+      } else if (hasFailures && hasSuccess) {
+        finalStatus = 'success';
+      } else {
+        finalStatus = 'success';
+      }
+    }
+
+    run.status = finalStatus;
     run.endedAt = new Date();
-    run.results = summary.results || [];
+    run.results = results;
     run.stats = {
       ...(run.stats || {}),
       durationMs: summary.durationMs,
-      items: (summary.results || []).length,
-      okCount: (summary.results || []).filter((r) => r.status !== 'failed').length,
-      failCount: (summary.results || []).filter((r) => r.status === 'failed').length,
+      items: results.length,
+      okCount: results.filter((r) => r.status === 'accepted' || r.status === 'queued').length,
+      failCount: results.filter((r) => r.status === 'failed').length,
     };
 
     if (summary.message) {

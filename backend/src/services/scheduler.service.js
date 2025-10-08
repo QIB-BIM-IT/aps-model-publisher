@@ -82,7 +82,7 @@ async function runJob(jobId, options = {}) {
   try {
     const { results, durationMs } = await apsPublishService.executeRun(run);
 
-    await apsPublishService.finishRun(run, {
+    const finishedRun = await apsPublishService.finishRun(run, {
       status: 'success',
       results,
       durationMs,
@@ -95,16 +95,23 @@ async function runJob(jobId, options = {}) {
         at: new Date(),
         durationMs,
         items: results.length,
-        ok: true,
+        ok: finishedRun.status === 'success',
       },
     };
     job.history = [
       ...(job.history || []),
-      { at: new Date(), status: 'done', durationMs, results },
+      {
+        at: new Date(),
+        status: finishedRun.status || 'done',
+        durationMs,
+        results,
+      },
     ];
     await job.save();
 
-    logger.info(`[Scheduler] Job ${job.id} exécuté (items=${(job.models || []).length})`);
+    logger.info(
+      `[Scheduler] Job ${job.id} exécuté (status=${finishedRun.status}, items=${(job.models || []).length})`
+    );
     return run;
   } catch (e) {
     logger.error(`[Scheduler] Echec job ${jobId}: ${e.message}`);
