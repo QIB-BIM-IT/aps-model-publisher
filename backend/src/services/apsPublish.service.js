@@ -224,7 +224,7 @@ async function resolveToVersionUrn(projectId, inputUrn, accessToken) {
 
 // — Envoi de la Command Publish (region-aware) ——————————
 
-async function publishVersionViaCommand(region, projectId, versionUrn, accessToken) {
+async function publishVersionViaCommand(region, projectId, resourceUrn, accessToken) {
   const url = `${commandsBase()}/projects/${encodeURIComponent(projectId)}/commands`;
   const cmdType =
     PUBLISH_COMMAND === 'PublishWithoutLinks'
@@ -245,8 +245,8 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
         resources: {
           data: [
             {
-              type: 'versions',
-              id: versionUrn,
+              type: 'items',
+              id: resourceUrn,
             },
           ],
         },
@@ -263,11 +263,19 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
   logger.info(JSON.stringify(payload, null, 2));
   logger.info(`[Publish] ========================================`);
   logger.debug(
-    `[Publish] Envoi command ${PUBLISH_COMMAND} région=${formatRegion(region)} version=${versionUrn}`
+    `[Publish] Envoi command ${PUBLISH_COMMAND} région=${formatRegion(region)} resource=${resourceUrn}`
   );
 
   let attempt = 0;
   while (attempt <= MAX_RETRIES) {
+    try {
+      const tokenPayload = accessToken.split('.')[1];
+      const decoded = JSON.parse(Buffer.from(tokenPayload, 'base64').toString());
+      logger.info(`[Publish] Token scopes: ${JSON.stringify(decoded.scope)}`);
+    } catch (e) {
+      logger.warn(`[Publish] Impossible de décoder les scopes du token: ${e.message}`);
+    }
+
     try {
       const config = {
         method: 'POST',
@@ -303,14 +311,14 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
 
       if (status === 202 || status === 200 || status === 201) {
         logger.info(
-          `[Publish][REAL][Commands] HTTP ${status} region=${formatRegion(region)} project=${projectId} version=${versionUrn} cmd=${PUBLISH_COMMAND}`
+          `[Publish][REAL][Commands] HTTP ${status} region=${formatRegion(region)} project=${projectId} resource=${resourceUrn} cmd=${PUBLISH_COMMAND}`
         );
         return { outcome: 'accepted', http: status, body: data };
       }
 
       if (status >= 400 && status < 500 && status !== 429) {
         logger.warn(
-          `[Publish][REAL][Commands] ${status} non-retry region=${formatRegion(region)} project=${projectId} version=${versionUrn} body=${safeBody(
+          `[Publish][REAL][Commands] ${status} non-retry region=${formatRegion(region)} project=${projectId} resource=${resourceUrn} body=${safeBody(
             data
           )}`
         );
@@ -344,7 +352,7 @@ async function publishVersionViaCommand(region, projectId, versionUrn, accessTok
  * Publie une version en essayant d’abord la région connue (si on l’a),
  * puis en fallback l’autre région.
  */
-async function publishVersionWithRegion(versionUrn, knownRegion, projectId, accessToken) {
+async function publishVersionWithRegion(resourceUrn, knownRegion, projectId, accessToken) {
   const tryOrder = knownRegion ? [knownRegion, ...REGIONS.filter((r) => r !== knownRegion)] : REGIONS.slice();
 
   logger.debug(
@@ -352,7 +360,7 @@ async function publishVersionWithRegion(versionUrn, knownRegion, projectId, acce
   );
 
   for (const region of tryOrder) {
-    const r = await publishVersionViaCommand(region, projectId, versionUrn, accessToken);
+    const r = await publishVersionViaCommand(region, projectId, resourceUrn, accessToken);
 
     if (r.outcome === 'accepted') {
       logger.info(`[Publish] Publication acceptée dans région: ${formatRegion(region)}`);
@@ -469,35 +477,18 @@ class APSPublishService {
             continue;
           }
 
-          // 1) Résoudre -> VERSION + région
-          let versionUrn;
-          let resolvedRegion = projectRegion;
+          const resourceUrn = selectedUrn;
+          const resolvedRegion = projectRegion;
 
-          if (isVersionUrn(selectedUrn)) {
-            versionUrn = selectedUrn;
-            logger.debug(`[Publish] Input déjà version -> ${versionUrn}`);
-          } else {
-            try {
-              versionUrn = await resolveToVersionUrn(normalizedProjectId, selectedUrn, accessToken);
-              logger.info(`[Publish] Résolu: item=${selectedUrn} -> version=${versionUrn}`);
-            } catch (e) {
-              const msg = `Échec résolution version: ${e.message}`;
-              results.push({
-                item: selectedUrn,
-                status: 'failed',
-                message: msg,
-                error: 'RESOLUTION_ERROR',
-              });
-              logger.error(
-                `[Publish] ${msg} (projectRaw=${run.projectId}, projectNormalized=${normalizedProjectId}, input=${selectedUrn})`
-              );
-              continue;
-            }
+          if (isVersionUrn(resourceUrn)) {
+            logger.warn(
+              `[Publish] URN de version détecté alors que la commande attend un lineage: ${resourceUrn}`
+            );
           }
 
           // 2) Publier, en essayant la région connue puis les autres
           const { outcome, http, body, regionTried } = await publishVersionWithRegion(
-            versionUrn,
+            resourceUrn,
             resolvedRegion,
             normalizedProjectId,
             accessToken
@@ -507,7 +498,7 @@ class APSPublishService {
 
           results.push({
             item: selectedUrn,
-            version: versionUrn,
+            resource: resourceUrn,
             status: outcome,
             http,
             region: effectiveRegion,
@@ -515,13 +506,13 @@ class APSPublishService {
 
           if (outcome === 'accepted') {
             logger.info(
-              `[Publish][REAL] ✓ run=${run.id} version=${versionUrn} => ${outcome} (HTTP ${http}, region=${formatRegion(
+              `[Publish][REAL] ✓ run=${run.id} resource=${resourceUrn} => ${outcome} (HTTP ${http}, region=${formatRegion(
                 effectiveRegion
               )})`
             );
           } else {
             logger.warn(
-              `[Publish][REAL] ✗ run=${run.id} version=${versionUrn} => ${outcome} (HTTP ${http}, body=${safeBody(body)})`
+              `[Publish][REAL] ✗ run=${run.id} resource=${resourceUrn} => ${outcome} (HTTP ${http}, body=${safeBody(body)})`
             );
           }
         } catch (e) {
