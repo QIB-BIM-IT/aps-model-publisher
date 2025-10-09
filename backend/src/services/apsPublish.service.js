@@ -480,6 +480,25 @@ class APSPublishService {
                 effectiveRegion
               )})`
             );
+
+            // Après le publish accepté, vérifier le statut périodiquement
+            const projectIdForCheck = normalizedProjectId;
+            const selectedItemUrn = selectedUrn;
+            setTimeout(async () => {
+              try {
+                const checkUrl = `${apiBase()}/data/v1/projects/${encodeURIComponent(
+                  projectIdForCheck
+                )}/items/${encodeURIComponent(selectedItemUrn)}`;
+                const checkResp = await axios.get(checkUrl, {
+                  headers: { Authorization: `Bearer ${accessToken}` },
+                });
+
+                const publishTime = checkResp.data?.data?.attributes?.lastModifiedTime;
+                logger.info(`[Publish] Confirmation publication: ${publishTime}`);
+              } catch (e) {
+                logger.warn(`[Publish] Impossible de vérifier la publication: ${e.message}`);
+              }
+            }, 5000);
           } else {
             logger.warn(
               `[Publish][REAL] ✗ run=${run.id} resource=${resourceUrn} => ${outcome} (HTTP ${http}, body=${safeBody(body)})`
