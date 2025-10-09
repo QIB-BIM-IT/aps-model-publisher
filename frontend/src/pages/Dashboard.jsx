@@ -330,14 +330,17 @@ export default function Dashboard() {
     if (!selectedProject) return;
 
     const hasRunningRuns = runs.some((r) => r.status === 'running' || r.status === 'queued');
-    if (!hasRunningRuns) return;
+    const hasRunningJobs = jobs.some((j) => j.status === 'running');
+
+    if (!hasRunningRuns && !hasRunningJobs) return;
 
     const interval = setInterval(() => {
       refreshRuns();
+      refreshJobs();
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [selectedProject, runs]);
+  }, [selectedProject, runs, jobs]);
 
   const selectedArray = Object.entries(selectedItems).map(([id, node]) => ({ id, name: nameOf(node, id) }));
 
