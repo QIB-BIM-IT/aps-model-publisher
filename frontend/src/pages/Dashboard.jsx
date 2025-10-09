@@ -49,6 +49,202 @@ function RevitIcon() {
   );
 }
 
+function HistoriqueTable({ runs }) {
+  const [sortField, setSortField] = React.useState('createdAt');
+  const [sortDirection, setSortDirection] = React.useState('desc');
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const sortedRuns = React.useMemo(() => {
+    return [...runs].sort((a, b) => {
+      let aVal = a[sortField];
+      let bVal = b[sortField];
+
+      if (sortField === 'stats.okCount') {
+        aVal = a.stats?.okCount ?? 0;
+        bVal = b.stats?.okCount ?? 0;
+      }
+      if (sortField === 'stats.failCount') {
+        aVal = a.stats?.failCount ?? 0;
+        bVal = b.stats?.failCount ?? 0;
+      }
+      if (sortField === 'stats.durationMs') {
+        aVal = a.stats?.durationMs ?? 0;
+        bVal = b.stats?.durationMs ?? 0;
+      }
+
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [runs, sortField, sortDirection]);
+
+  const SortableHeader = ({ field, children }) => (
+    <th
+      onClick={() => handleSort(field)}
+      style={{
+        textAlign: 'left',
+        borderBottom: '2px solid #ddd',
+        padding: '12px 8px',
+        cursor: 'pointer',
+        userSelect: 'none',
+        background: sortField === field ? '#f0f9ff' : 'transparent',
+        fontWeight: 600,
+        position: 'relative',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {children}
+        {sortField === field && (
+          <span style={{ fontSize: 12 }}>
+            {sortDirection === 'asc' ? '↑' : '↓'}
+          </span>
+        )}
+      </div>
+    </th>
+  );
+
+  return (
+    <table
+      style={{
+        borderCollapse: 'collapse',
+        width: '100%',
+        border: '1px solid #e5e7eb',
+        borderRadius: 8,
+        overflow: 'hidden',
+      }}
+    >
+      <thead style={{ background: '#f9fafb' }}>
+        <tr>
+          <SortableHeader field="createdAt">Date</SortableHeader>
+          <SortableHeader field="jobId">Job</SortableHeader>
+          <SortableHeader field="startedAt">Début</SortableHeader>
+          <SortableHeader field="endedAt">Fin</SortableHeader>
+          <SortableHeader field="stats.durationMs">Durée</SortableHeader>
+          <SortableHeader field="items">Fichiers</SortableHeader>
+          <SortableHeader field="stats.okCount">Succès</SortableHeader>
+          <SortableHeader field="stats.failCount">Échecs</SortableHeader>
+          <SortableHeader field="status">Statut</SortableHeader>
+        </tr>
+      </thead>
+      <tbody>
+        {sortedRuns.map((r, index) => {
+          const okCount = r.stats?.okCount ?? 0;
+          const failCount = r.stats?.failCount ?? 0;
+          const totalFiles = Array.isArray(r.items) ? r.items.length : 0;
+
+          let durationText = '-';
+          if (r.stats?.durationMs) {
+            const seconds = Math.round(r.stats.durationMs / 1000);
+            durationText =
+              seconds < 60
+                ? `${seconds}s`
+                : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+          }
+
+          let statusColor = '#666';
+          if (r.status === 'success') statusColor = '#0a6';
+          if (r.status === 'failed') statusColor = '#c33';
+          if (r.status === 'running') statusColor = '#fa0';
+
+          return (
+            <tr
+              key={r.id}
+              style={{
+                background: index % 2 === 0 ? '#fff' : '#f9fafb',
+                borderBottom: '1px solid #e5e7eb',
+              }}
+            >
+              <td style={{ padding: '10px 8px' }}>
+                {r.createdAt
+                  ? new Date(r.createdAt).toLocaleDateString('fr-CA')
+                  : '-'}
+              </td>
+              <td
+                style={{
+                  padding: '10px 8px',
+                  fontSize: 13,
+                  fontFamily: 'monospace',
+                  color: '#6b7280',
+                }}
+              >
+                {String(r.jobId).slice(0, 8)}
+              </td>
+              <td style={{ padding: '10px 8px', fontSize: 14 }}>
+                {r.startedAt
+                  ? new Date(r.startedAt).toLocaleTimeString('fr-CA')
+                  : '-'}
+              </td>
+              <td style={{ padding: '10px 8px', fontSize: 14 }}>
+                {r.endedAt
+                  ? new Date(r.endedAt).toLocaleTimeString('fr-CA')
+                  : r.status === 'running'
+                  ? '⏳ en cours...'
+                  : '-'}
+              </td>
+              <td style={{ padding: '10px 8px', fontWeight: 500 }}>{durationText}</td>
+              <td style={{ padding: '10px 8px', textAlign: 'center', fontWeight: 500 }}>
+                {totalFiles}
+              </td>
+              <td
+                style={{
+                  padding: '10px 8px',
+                  textAlign: 'center',
+                  color: '#059669',
+                  fontWeight: 600,
+                  fontSize: 15,
+                }}
+              >
+                {okCount}
+              </td>
+              <td
+                style={{
+                  padding: '10px 8px',
+                  textAlign: 'center',
+                  color: failCount > 0 ? '#dc2626' : '#9ca3af',
+                  fontWeight: 600,
+                  fontSize: 15,
+                }}
+              >
+                {failCount}
+              </td>
+              <td style={{ padding: '10px 8px' }}>
+                <span
+                  style={{
+                    color: statusColor,
+                    fontWeight: 600,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 14,
+                  }}
+                >
+                  {r.status === 'running' && '🔄'}
+                  {r.status === 'success' && '✅'}
+                  {r.status === 'failed' && '❌'}
+                  {r.status}
+                </span>
+                {r.message && (
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                    {r.message}
+                  </div>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 // ---------- Tree node ----------
 function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onToggleSelect }) {
   const [expanded, setExpanded] = React.useState(false);
@@ -636,102 +832,7 @@ export default function Dashboard() {
         ) : runs.length === 0 ? (
           <div>Aucune publication pour ce projet.</div>
         ) : (
-          <table style={{ borderCollapse: 'collapse', minWidth: 900 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Date</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Job</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Début</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Fin</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Durée</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Fichiers</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Succès</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Échecs</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Statut</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => {
-                const okCount = r.stats?.okCount ?? 0;
-                const failCount = r.stats?.failCount ?? 0;
-                const totalFiles = Array.isArray(r.items) ? r.items.length : 0;
-
-                let durationText = '-';
-                if (r.stats?.durationMs) {
-                  const seconds = Math.round(r.stats.durationMs / 1000);
-                  durationText =
-                    seconds < 60
-                      ? `${seconds}s`
-                      : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-                }
-
-                let statusColor = '#666';
-                if (r.status === 'success') statusColor = '#0a6';
-                if (r.status === 'failed') statusColor = '#c33';
-                if (r.status === 'running') statusColor = '#fa0';
-
-                return (
-                  <tr
-                    key={r.id}
-                    style={{ background: r.status === 'running' ? '#fffbf0' : 'transparent' }}
-                  >
-                    <td style={{ padding: 8 }}>
-                      {r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '-'}
-                    </td>
-                    <td style={{ padding: 8, fontSize: 13, fontFamily: 'monospace' }}>
-                      {String(r.jobId).slice(0, 8)}
-                    </td>
-                    <td style={{ padding: 8 }}>
-                      {r.startedAt ? new Date(r.startedAt).toLocaleTimeString() : '-'}
-                    </td>
-                    <td style={{ padding: 8 }}>
-                      {r.endedAt
-                        ? new Date(r.endedAt).toLocaleTimeString()
-                        : r.status === 'running'
-                        ? '⏳ en cours...'
-                        : '-'}
-                    </td>
-                    <td style={{ padding: 8 }}>{durationText}</td>
-                    <td style={{ padding: 8, textAlign: 'center' }}>{totalFiles}</td>
-                    <td style={{ padding: 8, textAlign: 'center', color: '#0a6', fontWeight: 600 }}>
-                      {okCount}
-                    </td>
-                    <td
-                      style={{
-                        padding: 8,
-                        textAlign: 'center',
-                        color: failCount > 0 ? '#c33' : '#666',
-                        fontWeight: 600,
-                      }}
-                    >
-                      {failCount}
-                    </td>
-                    <td style={{ padding: 8 }}>
-                      <span
-                        style={{
-                          color: statusColor,
-                          fontWeight: 600,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                        }}
-                      >
-                        {r.status === 'running' && '🔄'}
-                        {r.status === 'success' && '✅'}
-                        {r.status === 'failed' && '❌'}
-                        {r.status}
-                      </span>
-                      {r.message && (
-                        <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                          {r.message}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <HistoriqueTable runs={runs} />
         )}
       </section>
     </div>
