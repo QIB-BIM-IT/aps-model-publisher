@@ -823,25 +823,6 @@ export default function Dashboard() {
                   </span>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                    Expression CRON générée
-                  </label>
-                  <input
-                    value={cronExpression}
-                    readOnly
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: '1px solid rgba(148, 163, 184, 0.2)',
-                      background: 'rgba(226, 232, 240, 0.5)',
-                      fontSize: 14,
-                      outline: 'none',
-                      color: '#1f2937',
-                    }}
-                  />
-                </div>
-
                 <div style={{ display: 'flex', alignItems: 'flex-end' }}>
                   <Button onClick={handlePlanifier} style={{ padding: '12px 24px' }}>
                     🚀 Planifier
@@ -867,64 +848,78 @@ export default function Dashboard() {
                   <tr style={{ borderBottom: '2px solid rgba(148, 163, 184, 0.2)' }}>
                     <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>ID</th>
                     <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Maquettes</th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>CRON</th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Heure planifiée</th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Fuseau horaire</th>
                     <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Status</th>
                     <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {jobs.map((j) => (
-                    <tr key={j.id} style={{ borderBottom: '1px solid rgba(148, 163, 184, 0.1)' }}>
-                      <td style={{ padding: '10px 8px', fontSize: 13, fontFamily: 'monospace', color: '#6b7280' }}>
-                        {String(j.id).slice(0, 8)}
-                      </td>
-                      <td style={{ padding: '10px 8px', fontSize: 14, fontWeight: 500 }}>
-                        {Array.isArray(j.models) ? j.models.length : 0}
-                      </td>
-                      <td style={{ padding: '10px 8px', fontSize: 13, fontFamily: 'monospace' }}>
-                        {j.cronExpression}
-                      </td>
-                      <td style={{ padding: '10px 8px' }}>
-                        <span
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: 6,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            background: j.status === 'running' ? 'rgba(251, 146, 60, 0.15)' : 'rgba(34, 197, 94, 0.15)',
-                            color: j.status === 'running' ? '#ea580c' : '#16a34a',
-                          }}
-                        >
-                          {j.status || 'idle'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 8px' }}>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <Button
-                            variant="secondary"
-                            onClick={() => handleToggleActive(j)}
-                            style={{ padding: '6px 12px', fontSize: 12 }}
+                  {jobs.map((j) => {
+                    const cronParts = typeof j.cronExpression === 'string' ? j.cronExpression.trim().split(/\s+/) : [];
+                    const minutePart = cronParts[0];
+                    const hourPart = cronParts[1];
+                    const isSimpleTime = /^\d+$/.test(hourPart || '') && /^\d+$/.test(minutePart || '');
+                    const displayTime = isSimpleTime
+                      ? `${hourPart.padStart(2, '0')}:${minutePart.padStart(2, '0')}`
+                      : 'Planification personnalisée';
+
+                    return (
+                      <tr key={j.id} style={{ borderBottom: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                        <td style={{ padding: '10px 8px', fontSize: 13, fontFamily: 'monospace', color: '#6b7280' }}>
+                          {String(j.id).slice(0, 8)}
+                        </td>
+                        <td style={{ padding: '10px 8px', fontSize: 14, fontWeight: 500 }}>
+                          {Array.isArray(j.models) ? j.models.length : 0}
+                        </td>
+                        <td style={{ padding: '10px 8px', fontSize: 14, fontWeight: 500 }}>
+                          🕐 {displayTime}
+                        </td>
+                        <td style={{ padding: '10px 8px', fontSize: 13, color: '#475569' }}>
+                          {j.timezone || 'UTC'}
+                        </td>
+                        <td style={{ padding: '10px 8px' }}>
+                          <span
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              background: j.status === 'running' ? 'rgba(251, 146, 60, 0.15)' : 'rgba(34, 197, 94, 0.15)',
+                              color: j.status === 'running' ? '#ea580c' : '#16a34a',
+                            }}
                           >
-                            {j.scheduleEnabled ? 'Pause' : 'Activer'}
-                          </Button>
-                          <Button
-                            variant="primary"
-                            onClick={() => handleRunNow(j)}
-                            style={{ padding: '6px 12px', fontSize: 12 }}
-                          >
-                            ▶️
-                          </Button>
-                          <Button
-                            variant="danger"
-                            onClick={() => handleDelete(j)}
-                            style={{ padding: '6px 12px', fontSize: 12 }}
-                          >
-                            🗑️
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {j.status || 'idle'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 8px' }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <Button
+                              variant="secondary"
+                              onClick={() => handleToggleActive(j)}
+                              style={{ padding: '6px 12px', fontSize: 12 }}
+                            >
+                              {j.scheduleEnabled ? 'Pause' : 'Activer'}
+                            </Button>
+                            <Button
+                              variant="primary"
+                              onClick={() => handleRunNow(j)}
+                              style={{ padding: '6px 12px', fontSize: 12 }}
+                            >
+                              ▶️
+                            </Button>
+                            <Button
+                              variant="danger"
+                              onClick={() => handleDelete(j)}
+                              style={{ padding: '6px 12px', fontSize: 12 }}
+                            >
+                              🗑️
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
