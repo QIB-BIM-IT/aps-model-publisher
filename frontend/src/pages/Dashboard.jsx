@@ -11,9 +11,8 @@ import {
   runPublishJobNow,
   getRuns,
 } from '../services/api';
-import HistoriqueTable from '../components/HistoriqueTable';
 
-// ---------- helpers ----------
+// Helpers
 function nameOf(node, fall = '') {
   const a = node?.attributes || {};
   return a.displayName || a.name || node?.name || node?.hubName || node?.projectName || fall;
@@ -39,18 +38,28 @@ const isRvt = (node) => extOf(node) === 'rvt';
 function RevitIcon() {
   return (
     <span
-      title="Revit"
       style={{
-        display: 'inline-flex', width: 16, height: 16, borderRadius: 3,
-        alignItems: 'center', justifyContent: 'center',
-        fontSize: 11, fontWeight: 700, marginRight: 6,
-        background: '#1E6BD6', color: 'white', lineHeight: 1,
+        display: 'inline-flex',
+        width: 20,
+        height: 20,
+        borderRadius: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 12,
+        fontWeight: 700,
+        marginRight: 8,
+        background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+        color: 'white',
+        lineHeight: 1,
+        boxShadow: '0 2px 4px rgba(37,99,235,0.3)',
       }}
-    >R</span>
+    >
+      R
+    </span>
   );
 }
 
-// ---------- Tree node ----------
+// Tree Node avec style moderne
 function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onToggleSelect }) {
   const [expanded, setExpanded] = React.useState(false);
   const id = idOf(node);
@@ -69,27 +78,59 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
   const checked = !!selected[id];
 
   return (
-    <div style={{ marginLeft: 16 }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+    <div style={{ marginLeft: 20 }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 10,
+          alignItems: 'center',
+          padding: '8px 12px',
+          borderRadius: 8,
+          transition: 'all 0.2s',
+          background: checked ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+          border: checked ? '1px solid rgba(37, 99, 235, 0.2)' : '1px solid transparent',
+        }}
+      >
         {isFolder(node) ? (
-          <button onClick={toggle} style={{ cursor: 'pointer', width: 22 }}>
+          <button
+            onClick={toggle}
+            style={{
+              cursor: 'pointer',
+              width: 24,
+              height: 24,
+              border: 'none',
+              background: 'rgba(148, 163, 184, 0.15)',
+              borderRadius: 6,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 14,
+              transition: 'all 0.2s',
+              color: '#475569',
+            }}
+          >
             {expanded ? '▾' : '▸'}
           </button>
         ) : (
-          <span style={{ width: 22 }} />
+          <span style={{ width: 24 }} />
         )}
         {selectable && (
-          <input type="checkbox" checked={checked} onChange={() => onToggleSelect(id, node)} />
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={() => onToggleSelect(id, node)}
+            style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#2563eb' }}
+          />
         )}
         {isItem(node) && isRvt(node) && <RevitIcon />}
-        <span>{nm}</span>
+        <span style={{ fontSize: 14, color: '#1f2937', fontWeight: checked ? 600 : 400 }}>{nm}</span>
       </div>
 
       {expanded && (
-        <div style={{ marginLeft: 8 }}>
-          {loading && <div>Chargement…</div>}
+        <div style={{ marginLeft: 12, marginTop: 4 }}>
+          {loading && <div style={{ color: '#6b7280', fontSize: 14, padding: 8 }}>Chargement…</div>}
           {!loading && Array.isArray(kids) && kids.length === 0 && (
-            <div style={{ color: '#666' }}>(vide)</div>
+            <div style={{ color: '#9ca3af', fontSize: 13, padding: 8 }}>(vide)</div>
           )}
           {!loading &&
             Array.isArray(kids) &&
@@ -110,7 +151,84 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
   );
 }
 
-// ---------- Page ----------
+// Composant Card moderne
+function Card({ children, title, style = {} }) {
+  return (
+    <div
+      style={{
+        background: 'rgba(255, 255, 255, 0.9)',
+        backdropFilter: 'blur(20px)',
+        borderRadius: 16,
+        border: '1px solid rgba(148, 163, 184, 0.2)',
+        boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
+        padding: 24,
+        ...style,
+      }}
+    >
+      {title && (
+        <h3
+          style={{
+            margin: '0 0 20px 0',
+            fontSize: 18,
+            fontWeight: 600,
+            color: '#0f172a',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          {title}
+        </h3>
+      )}
+      {children}
+    </div>
+  );
+}
+
+// Bouton moderne
+function Button({ children, onClick, variant = 'primary', disabled = false, style = {} }) {
+  const variants = {
+    primary: {
+      background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+      color: '#fff',
+      border: 'none',
+      boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+    },
+    secondary: {
+      background: 'rgba(148, 163, 184, 0.15)',
+      color: '#475569',
+      border: '1px solid rgba(148, 163, 184, 0.3)',
+      boxShadow: 'none',
+    },
+    danger: {
+      background: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)',
+      color: '#fff',
+      border: 'none',
+      boxShadow: '0 4px 14px rgba(220, 38, 38, 0.4)',
+    },
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        padding: '10px 20px',
+        borderRadius: 10,
+        fontSize: 14,
+        fontWeight: 600,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'all 0.2s',
+        opacity: disabled ? 0.5 : 1,
+        ...variants[variant],
+        ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function Dashboard() {
   const [hubs, setHubs] = React.useState([]);
   const [selectedHub, setSelectedHub] = React.useState('');
@@ -119,8 +237,8 @@ export default function Dashboard() {
   const [projectSearch, setProjectSearch] = React.useState('');
 
   const [topFolders, setTopFolders] = React.useState([]);
-  const [childrenMap, setChildrenMap] = React.useState(new Map()); // folderId -> children[] | 'loading'
-  const [selectedItems, setSelectedItems] = React.useState({}); // itemId -> node
+  const [childrenMap, setChildrenMap] = React.useState(new Map());
+  const [selectedItems, setSelectedItems] = React.useState({});
 
   const [jobs, setJobs] = React.useState([]);
   const [loadingJobs, setLoadingJobs] = React.useState(false);
@@ -138,13 +256,17 @@ export default function Dashboard() {
   const [toast, setToast] = React.useState('');
 
   async function loadHubs() {
-    setLoadingHubs(true); setError('');
+    setLoadingHubs(true);
+    setError('');
     try {
       const data = await fetchHubs();
       setHubs(data);
       if (data.length) setSelectedHub(idOf(data[0]));
-    } catch (e) { setError(e?.message || 'Erreur lors du chargement des hubs'); }
-    finally { setLoadingHubs(false); }
+    } catch (e) {
+      setError(e?.message || 'Erreur hubs');
+    } finally {
+      setLoadingHubs(false);
+    }
   }
 
   const resetProjectData = React.useCallback(() => {
@@ -177,33 +299,40 @@ export default function Dashboard() {
     } catch (e) {
       setProjects([]);
       resetProjectData();
-      setError(e?.message || 'Erreur lors du chargement des projets');
+      setError(e?.message || 'Erreur projets');
     } finally {
       setLoadingProjects(false);
     }
   }
 
   async function loadTopFolders(hubId, projectId) {
-    if (!hubId || !projectId) { setTopFolders([]); return; }
-    setLoadingTop(true); setError(''); setChildrenMap(new Map()); setSelectedItems({});
+    if (!hubId || !projectId) {
+      setTopFolders([]);
+      return;
+    }
+    setLoadingTop(true);
+    setError('');
+    setChildrenMap(new Map());
+    setSelectedItems({});
     try {
       const data = await fetchTopFolders(hubId, projectId);
       setTopFolders(data);
       await Promise.all([refreshJobs(), refreshRuns()]);
-    } catch (e) { setError(e?.message || 'Erreur lors du chargement des dossiers'); }
-    finally { setLoadingTop(false); }
+    } catch (e) {
+      setError(e?.message || 'Erreur dossiers');
+    } finally {
+      setLoadingTop(false);
+    }
   }
 
   async function loadChildren(folderId) {
-    console.log('📁 FOLDER ID:', folderId);
     setChildrenMap((m) => new Map(m.set(folderId, 'loading')));
     try {
       const data = await fetchFolderContents(selectedProject, folderId);
-      console.log('📦 FOLDER CONTENTS:', JSON.stringify(data, null, 2));
       setChildrenMap((m) => new Map(m.set(folderId, data)));
     } catch (e) {
       setChildrenMap((m) => new Map(m.set(folderId, [])));
-      setError(e?.message || 'Erreur lors du chargement du dossier');
+      setError(e?.message || 'Erreur dossier');
     }
   }
 
@@ -228,7 +357,7 @@ export default function Dashboard() {
       const list = await getPublishJobs({ hubId: selectedHub, projectId: selectedProject });
       setJobs(list);
     } catch (e) {
-      setError(e?.message || 'Erreur chargement jobs');
+      setError(e?.message || 'Erreur jobs');
     } finally {
       setLoadingJobs(false);
     }
@@ -240,22 +369,19 @@ export default function Dashboard() {
       const list = await getRuns({ hubId: selectedHub, projectId: selectedProject, limit: 50 });
       setRuns(list);
     } catch (e) {
-      setError(e?.message || 'Erreur chargement historique');
+      setError(e?.message || 'Erreur historique');
     } finally {
       setLoadingRuns(false);
     }
   }
 
   async function handlePlanifier() {
-    console.log('🔍 selectedItems avant extraction:', selectedItems);
     const items = Object.values(selectedItems).map((item) => item.publishUrn);
-    console.log('📤 URNs à envoyer:', items);
-    console.log('📤 Premier URN:', items[0]);
     if (!selectedHub || !selectedProject || items.length === 0) {
-      setToast('Sélectionne au moins une maquette RVT.');
+      setToast('⚠️ Sélectionne au moins une maquette RVT.');
+      setTimeout(() => setToast(''), 3000);
       return;
     }
-    console.log('📤 Envoi des URNs pour publish:', items);
     try {
       await createPublishJob({
         hubId: selectedHub,
@@ -266,11 +392,13 @@ export default function Dashboard() {
         timezone,
         notifyOnFailure: true,
       });
-      setToast('Job créé 🎉');
+      setToast('✅ Job créé avec succès!');
+      setTimeout(() => setToast(''), 3000);
       setSelectedItems({});
       await Promise.all([refreshJobs(), refreshRuns()]);
     } catch (e) {
-      setToast(e?.message || 'Erreur création du job');
+      setToast('❌ ' + (e?.message || 'Erreur'));
+      setTimeout(() => setToast(''), 3000);
     }
   }
 
@@ -278,43 +406,39 @@ export default function Dashboard() {
     await patchPublishJob(job.id, { scheduleEnabled: !job.scheduleEnabled });
     await refreshJobs();
   }
+
   async function handleRunNow(job) {
     try {
       const run = await runPublishJobNow(job.id);
-
-      if (run && run.id) {
-        const pendingRun = { ...run, status: 'pending' };
-        setRuns((prev) => {
-          const without = prev.filter((r) => r.id !== pendingRun.id);
-          return [pendingRun, ...without];
-        });
-
+      if (run?.id) {
+        setRuns((prev) => [{ ...run, status: 'pending' }, ...prev.filter((r) => r.id !== run.id)]);
         setJobs((prev) =>
           prev.map((j) =>
-            j.id === job.id
-              ? {
-                  ...j,
-                  status: 'running',
-                  lastRun: new Date().toISOString(),
-                }
-              : j
+            j.id === job.id ? { ...j, status: 'running', lastRun: new Date().toISOString() } : j
           )
         );
       }
-
-      // on recharge l’historique après un petit délai
       setTimeout(refreshRuns, 400);
     } catch (e) {
-      setToast(e?.message || 'Erreur lancement du job');
+      setToast('❌ ' + (e?.message || 'Erreur lancement'));
+      setTimeout(() => setToast(''), 3000);
     }
   }
+
   async function handleDelete(job) {
+    if (!window.confirm('Supprimer ce job?')) return;
     await deletePublishJob(job.id);
     await Promise.all([refreshJobs(), refreshRuns()]);
   }
 
-  React.useEffect(() => { loadHubs(); }, []);
-  React.useEffect(() => { if (selectedHub) loadProjects(selectedHub); }, [selectedHub]);
+  React.useEffect(() => {
+    loadHubs();
+  }, []);
+
+  React.useEffect(() => {
+    if (selectedHub) loadProjects(selectedHub);
+  }, [selectedHub]);
+
   React.useEffect(() => {
     if (selectedHub && selectedProject) {
       loadTopFolders(selectedHub, selectedProject);
@@ -327,12 +451,11 @@ export default function Dashboard() {
     }
   }, [selectedHub, selectedProject]);
 
+  // Auto-refresh pendant les runs
   React.useEffect(() => {
     if (!selectedProject) return;
-
     const hasRunningRuns = runs.some((r) => r.status === 'running' || r.status === 'queued');
     const hasRunningJobs = jobs.some((j) => j.status === 'running');
-
     if (!hasRunningRuns && !hasRunningJobs) return;
 
     const interval = setInterval(() => {
@@ -343,7 +466,10 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [selectedProject, runs, jobs]);
 
-  const selectedArray = Object.entries(selectedItems).map(([id, node]) => ({ id, name: nameOf(node, id) }));
+  const selectedArray = Object.entries(selectedItems).map(([id, node]) => ({
+    id,
+    name: nameOf(node, id),
+  }));
 
   const filteredProjects = React.useMemo(() => {
     if (!projectSearch.trim()) return projects;
@@ -356,290 +482,600 @@ export default function Dashboard() {
     return filtered;
   }, [projects, projectSearch, selectedProject]);
 
-  const projectStyles = `
-    #project-search-input::placeholder { color: #9ca3af; opacity: 1; }
-    #project-search-input::-ms-input-placeholder { color: #9ca3af; }
-    #project-search-input:-ms-input-placeholder { color: #9ca3af; }
-    #project-search-input:focus {
-      border-color: #2563eb !important;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
-    }
-    .project-option[aria-selected="true"] {
-      background: #eef2ff !important;
-      color: #1d4ed8 !important;
-      font-weight: 600 !important;
-    }
-    .project-option:not([aria-selected="true"]):hover {
-      background: #f3f4f6 !important;
-    }
-    .project-option:focus-visible {
-      outline: 2px solid #2563eb;
-      outline-offset: 2px;
-    }
-  `;
-
   return (
-    <div>
-      <style>{projectStyles}</style>
-      <h2>Explorateur ACC</h2>
-      {error && <p style={{ color: 'crimson' }}>{error}</p>}
-      {toast && <p style={{ color: '#0a6', fontWeight: 600 }}>{toast}</p>}
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+        padding: '40px 20px',
+      }}
+    >
+      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+        {/* Header */}
+        <div style={{ marginBottom: 32, textAlign: 'center' }}>
+          <h1
+            style={{
+              fontSize: 36,
+              fontWeight: 700,
+              background: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              marginBottom: 8,
+            }}
+          >
+            🚀 APS Model Publisher
+          </h1>
+          <p style={{ color: '#94a3b8', fontSize: 16 }}>
+            Automatise la publication de tes maquettes Revit vers ACC
+          </p>
+        </div>
 
-      {/* Hubs */}
-      <section style={{ marginBottom: 16 }}>
-        <h3>Hubs</h3>
-        {loadingHubs ? (
-          <p>Chargement des hubs…</p>
-        ) : (
-          <select value={selectedHub} onChange={(e) => setSelectedHub(e.target.value)} style={{ padding: 8, minWidth: 360 }}>
-            {hubs.map((h) => (
-              <option key={idOf(h)} value={idOf(h)}>{nameOf(h, idOf(h))}</option>
-            ))}
-          </select>
+        {/* Toast */}
+        {toast && (
+          <div
+            style={{
+              position: 'fixed',
+              top: 20,
+              right: 20,
+              background: 'rgba(17, 24, 39, 0.95)',
+              backdropFilter: 'blur(12px)',
+              color: '#fff',
+              padding: '12px 20px',
+              borderRadius: 12,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              zIndex: 1000,
+              fontSize: 14,
+              fontWeight: 500,
+              border: '1px solid rgba(148, 163, 184, 0.2)',
+            }}
+          >
+            {toast}
+          </div>
         )}
-      </section>
 
-      {/* Projets */}
-      <section style={{ marginBottom: 16 }}>
-        <h3>Projets</h3>
-        {loadingProjects ? (
-          <p>Chargement des projets…</p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 580 }}>
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 16,
-                border: '1px solid #d0d7de',
-                borderRadius: 16,
-                padding: 20,
-                background: '#f9fafb',
-                boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
-              }}
-            >
-              <div
+        {/* Error */}
+        {error && (
+          <div
+            style={{
+              background: 'rgba(220, 38, 38, 0.1)',
+              border: '1px solid rgba(220, 38, 38, 0.3)',
+              color: '#fca5a5',
+              padding: '12px 16px',
+              borderRadius: 12,
+              marginBottom: 20,
+              fontSize: 14,
+            }}
+          >
+            ⚠️ {error}
+          </div>
+        )}
+
+        {/* Grid Layout */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 24 }}>
+          {/* Hub */}
+          <Card title="🏢 Hub">
+            {loadingHubs ? (
+              <p style={{ color: '#6b7280' }}>Chargement...</p>
+            ) : (
+              <select
+                value={selectedHub}
+                onChange={(e) => setSelectedHub(e.target.value)}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 16,
-                  flexWrap: 'wrap',
+                  width: '100%',
+                  padding: '12px 16px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(148, 163, 184, 0.3)',
+                  background: 'rgba(248, 250, 252, 0.8)',
+                  fontSize: 14,
+                  outline: 'none',
+                  cursor: 'pointer',
                 }}
               >
-                <div style={{ fontSize: 16, fontWeight: 600, color: '#1f2937' }}>
-                  Choisis un projet
-                </div>
-                <div style={{ position: 'relative', flex: '0 0 280px', minWidth: 220 }}>
-                  <span
-                    aria-hidden="true"
+                {hubs.map((h) => (
+                  <option key={idOf(h)} value={idOf(h)}>
+                    {nameOf(h, idOf(h))}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Card>
+
+          {/* Projet */}
+          <Card title="📁 Projet">
+            {loadingProjects ? (
+              <p style={{ color: '#6b7280' }}>Chargement...</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <input
+                  type="search"
+                  placeholder="🔍 Rechercher un projet..."
+                  value={projectSearch}
+                  onChange={(e) => setProjectSearch(e.target.value)}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    background: 'rgba(248, 250, 252, 0.8)',
+                    fontSize: 14,
+                    outline: 'none',
+                  }}
+                />
+                <select
+                  value={selectedProject}
+                  onChange={(e) => setSelectedProject(e.target.value)}
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    background: 'rgba(248, 250, 252, 0.8)',
+                    fontSize: 14,
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {filteredProjects.map((p) => (
+                    <option key={idOf(p)} value={idOf(p)}>
+                      {nameOf(p, idOf(p))}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {/* Arbre fichiers */}
+        <Card title="📂 Fichiers du projet" style={{ marginBottom: 24 }}>
+          {!selectedProject ? (
+            <p style={{ color: '#6b7280' }}>Sélectionne un projet</p>
+          ) : loadingTop ? (
+            <p style={{ color: '#6b7280' }}>Chargement...</p>
+          ) : topFolders.length === 0 ? (
+            <p style={{ color: '#9ca3af' }}>Aucun dossier</p>
+          ) : (
+            <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+              {topFolders.map((f) => (
+                <TreeNode
+                  key={idOf(f)}
+                  node={f}
+                  projectId={selectedProject}
+                  onLoadChildren={loadChildren}
+                  childrenMap={childrenMap}
+                  selected={selectedItems}
+                  onToggleSelect={toggleSelect}
+                />
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Sélection */}
+        <Card title={`✅ Maquettes sélectionnées (${selectedArray.length})`} style={{ marginBottom: 24 }}>
+          {selectedArray.length === 0 ? (
+            <p style={{ color: '#9ca3af' }}>Aucune sélection</p>
+          ) : (
+            <>
+              <div style={{ marginBottom: 16, maxHeight: 150, overflowY: 'auto' }}>
+                {selectedArray.map(({ id, name }) => (
+                  <div
+                    key={id}
                     style={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: 14,
-                      transform: 'translateY(-50%)',
-                      color: '#6b7280',
-                      fontSize: 16,
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '8px 12px',
+                      background: 'rgba(239, 246, 255, 0.6)',
+                      borderRadius: 8,
+                      marginBottom: 8,
+                      border: '1px solid rgba(37, 99, 235, 0.2)',
                     }}
                   >
-                    🔍
-                  </span>
-                  <input
-                    id="project-search-input"
-                    type="search"
-                    placeholder="Search projects by name or number…"
-                    value={projectSearch}
-                    onChange={(e) => setProjectSearch(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px 10px 40px',
-                      borderRadius: 999,
-                      border: '1px solid #d1d5db',
-                      background: '#fff',
-                      color: '#111827',
-                      fontSize: 15,
-                      outline: 'none',
-                      boxShadow: '0 1px 2px rgba(15,23,42,0.08)',
-                      transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
-                    }}
-                  />
-                </div>
-              </div>
-              <div
-                role="listbox"
-                aria-label="Liste des projets"
-                style={{
-                  maxHeight: 280,
-                  overflowY: 'auto',
-                  borderRadius: 12,
-                  border: '1px solid #e5e7eb',
-                  background: '#fff',
-                }}
-              >
-                {filteredProjects.length === 0 ? (
-                  <div style={{ padding: 16, color: '#6b7280', textAlign: 'center' }}>
-                    Aucun projet ne correspond à cette recherche.
+                    <RevitIcon />
+                    <span style={{ fontSize: 14, color: '#1f2937' }}>{name}</span>
                   </div>
-                ) : (
-                  filteredProjects.map((p, index) => {
-                    const projectId = idOf(p);
-                    const selected = projectId === selectedProject;
-                    const isLast = index === filteredProjects.length - 1;
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  placeholder="CRON (ex: 0 2 * * *)"
+                  value={cronExpression}
+                  onChange={(e) => setCronExpression(e.target.value)}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    background: 'rgba(248, 250, 252, 0.8)',
+                    fontSize: 14,
+                    outline: 'none',
+                    flex: 1,
+                    minWidth: 180,
+                  }}
+                />
+                <input
+                  placeholder="Timezone"
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    background: 'rgba(248, 250, 252, 0.8)',
+                    fontSize: 14,
+                    outline: 'none',
+                    flex: 1,
+                    minWidth: 200,
+                  }}
+                />
+                <Button onClick={handlePlanifier}>🚀 Planifier</Button>
+              </div>
+            </>
+          )}
+        </Card>
+
+        {/* Jobs */}
+        <Card title="⚙️ Mes jobs" style={{ marginBottom: 24 }}>
+          {!selectedProject ? (
+            <p style={{ color: '#9ca3af' }}>Sélectionne un projet</p>
+          ) : loadingJobs ? (
+            <p style={{ color: '#6b7280' }}>Chargement...</p>
+          ) : jobs.length === 0 ? (
+            <p style={{ color: '#9ca3af' }}>Aucun job</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid rgba(148, 163, 184, 0.2)' }}>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>ID</th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Maquettes</th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>CRON</th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Status</th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobs.map((j) => (
+                    <tr key={j.id} style={{ borderBottom: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                      <td style={{ padding: '10px 8px', fontSize: 13, fontFamily: 'monospace', color: '#6b7280' }}>
+                        {String(j.id).slice(0, 8)}
+                      </td>
+                      <td style={{ padding: '10px 8px', fontSize: 14, fontWeight: 500 }}>
+                        {Array.isArray(j.models) ? j.models.length : 0}
+                      </td>
+                      <td style={{ padding: '10px 8px', fontSize: 13, fontFamily: 'monospace' }}>
+                        {j.cronExpression}
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        <span
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: 6,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            background: j.status === 'running' ? 'rgba(251, 146, 60, 0.15)' : 'rgba(34, 197, 94, 0.15)',
+                            color: j.status === 'running' ? '#ea580c' : '#16a34a',
+                          }}
+                        >
+                          {j.status || 'idle'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 8px' }}>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <Button
+                            variant="secondary"
+                            onClick={() => handleToggleActive(j)}
+                            style={{ padding: '6px 12px', fontSize: 12 }}
+                          >
+                            {j.scheduleEnabled ? 'Pause' : 'Activer'}
+                          </Button>
+                          <Button
+                            variant="primary"
+                            onClick={() => handleRunNow(j)}
+                            style={{ padding: '6px 12px', fontSize: 12 }}
+                          >
+                            ▶️
+                          </Button>
+                          <Button
+                            variant="danger"
+                            onClick={() => handleDelete(j)}
+                            style={{ padding: '6px 12px', fontSize: 12 }}
+                          >
+                            🗑️
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        {/* Historique */}
+        <Card title="📊 Historique des publications">
+          {!selectedProject ? (
+            <p style={{ color: '#9ca3af' }}>Sélectionne un projet</p>
+          ) : loadingRuns ? (
+            <p style={{ color: '#6b7280' }}>Chargement...</p>
+          ) : runs.length === 0 ? (
+            <p style={{ color: '#9ca3af' }}>Aucune publication</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr
+                    style={{
+                      borderBottom: '2px solid rgba(148, 163, 184, 0.2)',
+                      background: 'rgba(248, 250, 252, 0.5)',
+                    }}
+                  >
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '12px 12px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                        borderRight: '1px solid rgba(148, 163, 184, 0.15)',
+                      }}
+                    >
+                      Date
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '12px 12px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                        borderRight: '1px solid rgba(148, 163, 184, 0.15)',
+                      }}
+                    >
+                      Job
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '12px 12px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                        borderRight: '1px solid rgba(148, 163, 184, 0.15)',
+                      }}
+                    >
+                      Début
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '12px 12px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                        borderRight: '1px solid rgba(148, 163, 184, 0.15)',
+                      }}
+                    >
+                      Fin
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '12px 12px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                        borderRight: '1px solid rgba(148, 163, 184, 0.15)',
+                      }}
+                    >
+                      Durée
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'center',
+                        padding: '12px 12px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                        borderRight: '1px solid rgba(148, 163, 184, 0.15)',
+                      }}
+                    >
+                      Fichiers
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'center',
+                        padding: '12px 12px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                        borderRight: '1px solid rgba(148, 163, 184, 0.15)',
+                      }}
+                    >
+                      Succès
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'center',
+                        padding: '12px 12px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                        borderRight: '1px solid rgba(148, 163, 184, 0.15)',
+                      }}
+                    >
+                      Échecs
+                    </th>
+                    <th
+                      style={{
+                        textAlign: 'left',
+                        padding: '12px 12px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                      }}
+                    >
+                      Statut
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.map((r, index) => {
+                    const okCount = r.stats?.okCount ?? 0;
+                    const failCount = r.stats?.failCount ?? 0;
+                    const totalFiles = Array.isArray(r.items) ? r.items.length : 0;
+
+                    let durationText = '-';
+                    if (r.stats?.durationMs) {
+                      const seconds = Math.round(r.stats.durationMs / 1000);
+                      durationText = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+                    }
+
+                    let statusColor = '#6b7280';
+                    let statusBg = 'rgba(156, 163, 175, 0.15)';
+                    if (r.status === 'success') {
+                      statusColor = '#059669';
+                      statusBg = 'rgba(5, 150, 105, 0.15)';
+                    }
+                    if (r.status === 'failed') {
+                      statusColor = '#dc2626';
+                      statusBg = 'rgba(220, 38, 38, 0.15)';
+                    }
+                    if (r.status === 'running') {
+                      statusColor = '#f59e0b';
+                      statusBg = 'rgba(245, 158, 11, 0.15)';
+                    }
+
                     return (
-                      <button
-                        key={projectId}
-                        type="button"
-                        onClick={() => setSelectedProject(projectId)}
-                        role="option"
-                        aria-selected={selected}
-                        className="project-option"
+                      <tr
+                        key={r.id}
                         style={{
-                          width: '100%',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          gap: 12,
-                          padding: '12px 16px',
-                          background: selected ? '#eef2ff' : 'transparent',
-                          color: selected ? '#1d4ed8' : '#111827',
-                          fontWeight: selected ? 600 : 500,
-                          border: 'none',
-                          borderBottom: isLast ? 'none' : '1px solid #f3f4f6',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                          fontSize: 15,
-                          transition: 'background 0.15s ease, color 0.15s ease',
+                          background:
+                            r.status === 'running'
+                              ? 'rgba(254, 243, 199, 0.3)'
+                              : index % 2 === 0
+                              ? 'rgba(248, 250, 252, 0.3)'
+                              : 'transparent',
+                          borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
                         }}
                       >
-                        <span>{nameOf(p, projectId)}</span>
-                        {selected && <span style={{ fontSize: 12 }}>Sélectionné</span>}
-                      </button>
+                        <td
+                          style={{
+                            padding: '12px',
+                            fontSize: 13,
+                            borderRight: '1px solid rgba(148, 163, 184, 0.1)',
+                          }}
+                        >
+                          {r.createdAt ? new Date(r.createdAt).toLocaleDateString('fr-CA') : '-'}
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px',
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                            color: '#6b7280',
+                            borderRight: '1px solid rgba(148, 163, 184, 0.1)',
+                          }}
+                        >
+                          {String(r.jobId).slice(0, 8)}
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px',
+                            fontSize: 13,
+                            borderRight: '1px solid rgba(148, 163, 184, 0.1)',
+                          }}
+                        >
+                          {r.startedAt ? new Date(r.startedAt).toLocaleTimeString('fr-CA') : '-'}
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px',
+                            fontSize: 13,
+                            borderRight: '1px solid rgba(148, 163, 184, 0.1)',
+                          }}
+                        >
+                          {r.endedAt
+                            ? new Date(r.endedAt).toLocaleTimeString('fr-CA')
+                            : r.status === 'running'
+                            ? '⏳ en cours...'
+                            : '-'}
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px',
+                            fontWeight: 500,
+                            fontSize: 13,
+                            borderRight: '1px solid rgba(148, 163, 184, 0.1)',
+                          }}
+                        >
+                          {durationText}
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px',
+                            textAlign: 'center',
+                            fontWeight: 600,
+                            fontSize: 14,
+                            borderRight: '1px solid rgba(148, 163, 184, 0.1)',
+                          }}
+                        >
+                          {totalFiles}
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px',
+                            textAlign: 'center',
+                            color: '#059669',
+                            fontWeight: 700,
+                            fontSize: 15,
+                            borderRight: '1px solid rgba(148, 163, 184, 0.1)',
+                          }}
+                        >
+                          {okCount}
+                        </td>
+                        <td
+                          style={{
+                            padding: '12px',
+                            textAlign: 'center',
+                            color: failCount > 0 ? '#dc2626' : '#cbd5e1',
+                            fontWeight: 700,
+                            fontSize: 15,
+                            borderRight: '1px solid rgba(148, 163, 184, 0.1)',
+                          }}
+                        >
+                          {failCount}
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              padding: '4px 12px',
+                              borderRadius: 8,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: statusColor,
+                              background: statusBg,
+                            }}
+                          >
+                            {r.status === 'running' && '🔄'}
+                            {r.status === 'success' && '✅'}
+                            {r.status === 'failed' && '❌'}
+                            {r.status}
+                          </span>
+                          {r.message && (
+                            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>{r.message}</div>
+                          )}
+                        </td>
+                      </tr>
                     );
-                  })
-                )}
-              </div>
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
-        )}
-      </section>
-
-      {/* Arbre fichiers */}
-      <section>
-        <h3>Fichiers du projet</h3>
-        {!selectedProject ? (
-          <p>Sélectionne un projet pour afficher ses dossiers.</p>
-        ) : loadingTop ? (
-          <p>Chargement des dossiers…</p>
-        ) : topFolders.length === 0 ? (
-          <p>Aucun dossier trouvé.</p>
-        ) : (
-          <div>
-            {topFolders.map((f) => (
-              <TreeNode
-                key={idOf(f)}
-                node={f}
-                projectId={selectedProject}
-                onLoadChildren={loadChildren}
-                childrenMap={childrenMap}
-                selected={selectedItems}
-                onToggleSelect={toggleSelect}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Sélection + planification */}
-      <section style={{ marginTop: 16 }}>
-        <h4>Maquettes sélectionnées ({selectedArray.length})</h4>
-        {selectedArray.length === 0 ? (
-          <div>Aucune sélection.</div>
-        ) : (
-          <>
-            <ul>
-              {selectedArray.map(({ id, name }) => (
-                <li key={id}><RevitIcon />{name}</li>
-              ))}
-            </ul>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 8 }}>
-              <label>
-                CRON:&nbsp;
-                <input value={cronExpression} onChange={(e) => setCronExpression(e.target.value)} style={{ padding: 6, width: 160 }} />
-              </label>
-              <label>
-                Timezone:&nbsp;
-                <input value={timezone} onChange={(e) => setTimezone(e.target.value)} style={{ padding: 6, width: 220 }} />
-              </label>
-              <button onClick={handlePlanifier} style={{ padding: '8px 14px', cursor: 'pointer' }}>
-                Planifier la publication
-              </button>
-            </div>
-          </>
-        )}
-      </section>
-
-      {/* Mes jobs */}
-      <section style={{ marginTop: 24 }}>
-        <h3>Mes jobs</h3>
-        {!selectedProject ? (
-          <div>Sélectionne un projet pour voir les jobs planifiés.</div>
-        ) : loadingJobs ? (
-          <div>Chargement…</div>
-        ) : jobs.length === 0 ? (
-          <div>Aucun job pour ce projet.</div>
-        ) : (
-          <table style={{ borderCollapse: 'collapse', minWidth: 720 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>ID</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Maquettes</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>CRON</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>TZ</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Dernier run</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Status</th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: 8 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((j) => (
-                <tr key={j.id}>
-                  <td style={{ padding: 8 }}>{String(j.id).slice(0, 8)}</td>
-                  <td style={{ padding: 8 }}>{Array.isArray(j.models) ? j.models.length : 0}</td>
-                  <td style={{ padding: 8 }}>{j.cronExpression}</td>
-                  <td style={{ padding: 8 }}>{j.timezone}</td>
-                  <td style={{ padding: 8 }}>{j.lastRun ? new Date(j.lastRun).toLocaleString() : '-'}</td>
-                  <td style={{ padding: 8 }}>{j.status || '-'}</td>
-                  <td style={{ padding: 8, display: 'flex', gap: 8 }}>
-                    <button onClick={() => handleToggleActive(j)} style={{ padding: '4px 8px' }}>
-                      {j.scheduleEnabled ? 'Désactiver' : 'Activer'}
-                    </button>
-                    <button onClick={() => handleRunNow(j)} style={{ padding: '4px 8px' }}>
-                      Run now
-                    </button>
-                    <button onClick={() => handleDelete(j)} style={{ padding: '4px 8px', color: 'crimson' }}>
-                      Supprimer
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      {/* Historique des exécutions */}
-      <section style={{ marginTop: 24 }}>
-        <h3>Historique des publications</h3>
-        {!selectedProject ? (
-          <div>Sélectionne un projet pour consulter l'historique.</div>
-        ) : loadingRuns ? (
-          <div>Chargement…</div>
-        ) : runs.length === 0 ? (
-          <div>Aucune publication pour ce projet.</div>
-        ) : (
-          <HistoriqueTable runs={runs} />
-        )}
-      </section>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
