@@ -59,6 +59,44 @@ function RevitIcon() {
   );
 }
 
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => {
+  const value = `${String(hour).padStart(2, '0')}:00`;
+  let suffix = '';
+  if (value === '00:00') suffix = ' — Minuit';
+  if (value === '12:00') suffix = ' — Midi';
+  if (value === '02:00') suffix = ' — Recommandé';
+  return {
+    value,
+    label: `${value}${suffix}`,
+  };
+});
+
+const TIMEZONE_OPTIONS = [
+  { value: 'America/Vancouver', label: '🇨🇦 Canada - Vancouver (Pacific)' },
+  { value: 'America/Edmonton', label: '🇨🇦 Canada - Calgary (Mountain)' },
+  { value: 'America/Toronto', label: '🇨🇦 Canada - Toronto (Eastern)' },
+  { value: 'America/Halifax', label: '🇨🇦 Canada - Halifax (Atlantic)' },
+  { value: 'America/Los_Angeles', label: '🇺🇸 USA - Los Angeles (Pacific)' },
+  { value: 'America/Denver', label: '🇺🇸 USA - Denver (Mountain)' },
+  { value: 'America/Chicago', label: '🇺🇸 USA - Chicago (Central)' },
+  { value: 'America/New_York', label: '🇺🇸 USA - New York (Eastern)' },
+  { value: 'Europe/London', label: '🇬🇧 Europe - Londres' },
+  { value: 'Europe/Paris', label: '🇫🇷 Europe - Paris' },
+  { value: 'Europe/Berlin', label: '🇩🇪 Europe - Berlin' },
+  { value: 'Europe/Madrid', label: '🇪🇸 Europe - Madrid' },
+  { value: 'Asia/Dubai', label: '🇦🇪 Asie - Dubaï' },
+  { value: 'Asia/Singapore', label: '🇸🇬 Asie - Singapour' },
+  { value: 'Asia/Tokyo', label: '🇯🇵 Asie - Tokyo' },
+  { value: 'Asia/Shanghai', label: '🇨🇳 Asie - Shanghai' },
+  { value: 'Australia/Sydney', label: '🇦🇺 Australie - Sydney' },
+  { value: 'UTC', label: '🌐 UTC' },
+];
+
+const DEFAULT_TIMEZONE =
+  typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().timeZone
+    ? Intl.DateTimeFormat().resolvedOptions().timeZone
+    : 'UTC';
+
 // Tree Node avec style moderne
 function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onToggleSelect }) {
   const [expanded, setExpanded] = React.useState(false);
@@ -250,10 +288,16 @@ export default function Dashboard() {
   const [loadingProjects, setLoadingProjects] = React.useState(false);
   const [loadingTop, setLoadingTop] = React.useState(false);
 
+  const [selectedHour, setSelectedHour] = React.useState('02:00');
   const [cronExpression, setCronExpression] = React.useState('0 2 * * *');
-  const [timezone, setTimezone] = React.useState(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  const [timezone, setTimezone] = React.useState(DEFAULT_TIMEZONE);
   const [error, setError] = React.useState('');
   const [toast, setToast] = React.useState('');
+
+  React.useEffect(() => {
+    const [hour, minute] = selectedHour.split(':');
+    setCronExpression(`${minute} ${hour} * * *`);
+  }, [selectedHour]);
 
   async function loadHubs() {
     setLoadingHubs(true);
@@ -491,6 +535,14 @@ export default function Dashboard() {
     return filtered;
   }, [projects, projectSearch, selectedProject]);
 
+  const timezoneOptions = React.useMemo(() => {
+    const base = [...TIMEZONE_OPTIONS];
+    if (timezone && !base.some((option) => option.value === timezone)) {
+      base.push({ value: timezone, label: `🌐 ${timezone}` });
+    }
+    return base;
+  }, [timezone]);
+
   return (
     <div
       style={{
@@ -717,38 +769,84 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                <input
-                  placeholder="CRON (ex: 0 2 * * *)"
-                  value={cronExpression}
-                  onChange={(e) => setCronExpression(e.target.value)}
-                  style={{
-                    padding: '10px 14px',
-                    borderRadius: 10,
-                    border: '1px solid rgba(148, 163, 184, 0.3)',
-                    background: 'rgba(248, 250, 252, 0.8)',
-                    fontSize: 14,
-                    outline: 'none',
-                    flex: 1,
-                    minWidth: 180,
-                  }}
-                />
-                <input
-                  placeholder="Timezone"
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  style={{
-                    padding: '10px 14px',
-                    borderRadius: 10,
-                    border: '1px solid rgba(148, 163, 184, 0.3)',
-                    background: 'rgba(248, 250, 252, 0.8)',
-                    fontSize: 14,
-                    outline: 'none',
-                    flex: 1,
-                    minWidth: 200,
-                  }}
-                />
-                <Button onClick={handlePlanifier}>🚀 Planifier</Button>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                    Heure de publication
+                  </label>
+                  <select
+                    value={selectedHour}
+                    onChange={(e) => setSelectedHour(e.target.value)}
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(148, 163, 184, 0.3)',
+                      background: 'rgba(248, 250, 252, 0.9)',
+                      fontSize: 14,
+                      outline: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {HOUR_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 220px', minWidth: 220 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                    Fuseau horaire
+                  </label>
+                  <select
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(148, 163, 184, 0.3)',
+                      background: 'rgba(248, 250, 252, 0.9)',
+                      fontSize: 14,
+                      outline: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {timezoneOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: 12, color: '#64748b' }}>
+                    Fuseau détecté : <strong>{DEFAULT_TIMEZONE}</strong>
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                    Expression CRON générée
+                  </label>
+                  <input
+                    value={cronExpression}
+                    readOnly
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(148, 163, 184, 0.2)',
+                      background: 'rgba(226, 232, 240, 0.5)',
+                      fontSize: 14,
+                      outline: 'none',
+                      color: '#1f2937',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                  <Button onClick={handlePlanifier} style={{ padding: '12px 24px' }}>
+                    🚀 Planifier
+                  </Button>
+                </div>
               </div>
             </>
           )}
