@@ -472,13 +472,22 @@ export default function Dashboard() {
   }));
 
   const filteredProjects = React.useMemo(() => {
-    if (!projectSearch.trim()) return projects;
+    const sorted = [...projects].sort((a, b) => {
+      const nameA = nameOf(a, idOf(a)).toLowerCase();
+      const nameB = nameOf(b, idOf(b)).toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+
+    if (!projectSearch.trim()) return sorted;
+
     const query = projectSearch.trim().toLowerCase();
-    const filtered = projects.filter((p) => nameOf(p, idOf(p)).toLowerCase().includes(query));
+    const filtered = sorted.filter((p) => nameOf(p, idOf(p)).toLowerCase().includes(query));
+
     if (selectedProject && !filtered.some((p) => idOf(p) === selectedProject)) {
       const current = projects.find((p) => idOf(p) === selectedProject);
       if (current) filtered.unshift(current);
     }
+
     return filtered;
   }, [projects, projectSearch, selectedProject]);
 
@@ -600,25 +609,59 @@ export default function Dashboard() {
                     outline: 'none',
                   }}
                 />
-                <select
-                  value={selectedProject}
-                  onChange={(e) => setSelectedProject(e.target.value)}
+                <div
                   style={{
-                    padding: '12px 16px',
+                    maxHeight: 280,
+                    overflowY: 'auto',
+                    border: '1px solid rgba(148, 163, 184, 0.2)',
                     borderRadius: 10,
-                    border: '1px solid rgba(148, 163, 184, 0.3)',
-                    background: 'rgba(248, 250, 252, 0.8)',
-                    fontSize: 14,
-                    outline: 'none',
-                    cursor: 'pointer',
+                    background: 'rgba(248, 250, 252, 0.5)',
                   }}
                 >
-                  {filteredProjects.map((p) => (
-                    <option key={idOf(p)} value={idOf(p)}>
-                      {nameOf(p, idOf(p))}
-                    </option>
-                  ))}
-                </select>
+                  {filteredProjects.length === 0 ? (
+                    <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 14 }}>
+                      Aucun projet trouvé
+                    </div>
+                  ) : (
+                    filteredProjects.map((p) => {
+                      const projectId = idOf(p);
+                      const isSelected = projectId === selectedProject;
+                      return (
+                        <button
+                          key={projectId}
+                          type="button"
+                          onClick={() => setSelectedProject(projectId)}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '12px 16px',
+                            background: isSelected ? 'rgba(37, 99, 235, 0.12)' : 'transparent',
+                            color: isSelected ? '#1d4ed8' : '#1f2937',
+                            fontWeight: isSelected ? 600 : 400,
+                            fontSize: 14,
+                            border: 'none',
+                            borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            transition: 'all 0.15s',
+                            outline: 'none',
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isSelected) e.currentTarget.style.background = 'rgba(148, 163, 184, 0.08)';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isSelected) e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          <span>{nameOf(p, projectId)}</span>
+                          {isSelected && <span style={{ fontSize: 12, color: '#2563eb' }}>✓ Sélectionné</span>}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             )}
           </Card>
