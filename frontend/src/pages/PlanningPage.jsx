@@ -267,7 +267,7 @@ function Button({ children, onClick, variant = 'primary', disabled = false, styl
   );
 }
 
-export default function Dashboard() {
+export default function PlanningPage() {
   const [hubs, setHubs] = React.useState([]);
   const [selectedHub, setSelectedHub] = React.useState('');
   const [projects, setProjects] = React.useState([]);

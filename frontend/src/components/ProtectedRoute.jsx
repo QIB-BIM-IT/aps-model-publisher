@@ -5,7 +5,7 @@ import { getToken } from '../services/api';
 /**
  * Bloque l’accès si pas connecté (JWT absent).
  * Usage:
- * <ProtectedRoute><Dashboard /></ProtectedRoute>
+ * <ProtectedRoute><GlobalDashboard /></ProtectedRoute>
  */
 export default function ProtectedRoute({ children }) {
   const token = getToken();
