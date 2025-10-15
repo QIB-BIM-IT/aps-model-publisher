@@ -284,6 +284,9 @@ export default function Dashboard() {
   const [runs, setRuns] = React.useState([]);
   const [loadingRuns, setLoadingRuns] = React.useState(false);
 
+  const [autoRefreshActive, setAutoRefreshActive] = React.useState(false);
+  const autoRefreshTimeoutRef = React.useRef(null);
+
   const [loadingHubs, setLoadingHubs] = React.useState(false);
   const [loadingProjects, setLoadingProjects] = React.useState(false);
   const [loadingTop, setLoadingTop] = React.useState(false);
@@ -395,29 +398,53 @@ export default function Dashboard() {
     });
   }
 
-  async function refreshJobs() {
-    setLoadingJobs(true);
-    try {
-      const list = await getPublishJobs({ hubId: selectedHub, projectId: selectedProject });
-      setJobs(list);
-    } catch (e) {
-      setError(e?.message || 'Erreur jobs');
-    } finally {
-      setLoadingJobs(false);
-    }
-  }
+  const refreshJobs = React.useCallback(
+    async ({ silent = false } = {}) => {
+      if (!selectedHub || !selectedProject) return;
 
-  async function refreshRuns() {
-    setLoadingRuns(true);
-    try {
-      const list = await getRuns({ hubId: selectedHub, projectId: selectedProject, limit: 50 });
-      setRuns(list);
-    } catch (e) {
-      setError(e?.message || 'Erreur historique');
-    } finally {
-      setLoadingRuns(false);
-    }
-  }
+      if (!silent) setLoadingJobs(true);
+      try {
+        const list = await getPublishJobs({ hubId: selectedHub, projectId: selectedProject });
+        setJobs(list);
+      } catch (e) {
+        setError(e?.message || 'Erreur jobs');
+      } finally {
+        if (!silent) setLoadingJobs(false);
+      }
+    },
+    [selectedHub, selectedProject]
+  );
+
+  const refreshRuns = React.useCallback(
+    async ({ silent = false } = {}) => {
+      if (!selectedHub || !selectedProject) return;
+
+      if (!silent) setLoadingRuns(true);
+      try {
+        const list = await getRuns({ hubId: selectedHub, projectId: selectedProject, limit: 50 });
+        setRuns(list);
+      } catch (e) {
+        setError(e?.message || 'Erreur historique');
+      } finally {
+        if (!silent) setLoadingRuns(false);
+      }
+    },
+    [selectedHub, selectedProject]
+  );
+
+  const triggerAutoRefreshWindow = React.useCallback(
+    (duration = 20000) => {
+      setAutoRefreshActive(true);
+      if (autoRefreshTimeoutRef.current) {
+        clearTimeout(autoRefreshTimeoutRef.current);
+      }
+      autoRefreshTimeoutRef.current = setTimeout(() => {
+        setAutoRefreshActive(false);
+        autoRefreshTimeoutRef.current = null;
+      }, duration);
+    },
+    []
+  );
 
   async function handlePlanifier() {
     const items = Object.values(selectedItems).map((item) => item.publishUrn);
@@ -439,7 +466,11 @@ export default function Dashboard() {
       setToast('✅ Job créé avec succès!');
       setTimeout(() => setToast(''), 3000);
       setSelectedItems({});
-      await Promise.all([refreshJobs(), refreshRuns()]);
+      triggerAutoRefreshWindow();
+      await Promise.all([
+        refreshJobs({ silent: true }),
+        refreshRuns({ silent: true }),
+      ]);
     } catch (e) {
       setToast('❌ ' + (e?.message || 'Erreur'));
       setTimeout(() => setToast(''), 3000);
@@ -448,7 +479,7 @@ export default function Dashboard() {
 
   async function handleToggleActive(job) {
     await patchPublishJob(job.id, { scheduleEnabled: !job.scheduleEnabled });
-    await refreshJobs();
+    await refreshJobs({ silent: true });
   }
 
   async function handleRunNow(job) {
@@ -462,7 +493,9 @@ export default function Dashboard() {
           )
         );
       }
-      setTimeout(refreshRuns, 400);
+      setTimeout(() => {
+        void refreshRuns({ silent: true });
+      }, 400);
     } catch (e) {
       setToast('❌ ' + (e?.message || 'Erreur lancement'));
       setTimeout(() => setToast(''), 3000);
@@ -472,7 +505,10 @@ export default function Dashboard() {
   async function handleDelete(job) {
     if (!window.confirm('Supprimer ce job?')) return;
     await deletePublishJob(job.id);
-    await Promise.all([refreshJobs(), refreshRuns()]);
+    await Promise.all([
+      refreshJobs({ silent: true }),
+      refreshRuns({ silent: true }),
+    ]);
   }
 
   React.useEffect(() => {
@@ -495,20 +531,41 @@ export default function Dashboard() {
     }
   }, [selectedHub, selectedProject]);
 
-  // Auto-refresh pendant les runs
   React.useEffect(() => {
-    if (!selectedProject) return;
+    return () => {
+      if (autoRefreshTimeoutRef.current) {
+        clearTimeout(autoRefreshTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (autoRefreshTimeoutRef.current) {
+      clearTimeout(autoRefreshTimeoutRef.current);
+      autoRefreshTimeoutRef.current = null;
+    }
+    setAutoRefreshActive(false);
+  }, [selectedProject]);
+
+  const shouldAutoRefresh = React.useMemo(() => {
+    if (!selectedProject) return false;
     const hasRunningRuns = runs.some((r) => r.status === 'running' || r.status === 'queued');
     const hasRunningJobs = jobs.some((j) => j.status === 'running');
-    if (!hasRunningRuns && !hasRunningJobs) return;
+    return hasRunningRuns || hasRunningJobs || autoRefreshActive;
+  }, [selectedProject, runs, jobs, autoRefreshActive]);
 
-    const interval = setInterval(() => {
-      refreshRuns();
-      refreshJobs();
-    }, 3000);
+  React.useEffect(() => {
+    if (!shouldAutoRefresh) return undefined;
 
+    const tick = () => {
+      void refreshRuns({ silent: true });
+      void refreshJobs({ silent: true });
+    };
+
+    tick();
+    const interval = setInterval(tick, 3000);
     return () => clearInterval(interval);
-  }, [selectedProject, runs, jobs]);
+  }, [shouldAutoRefresh, refreshRuns, refreshJobs]);
 
   const selectedArray = Object.entries(selectedItems).map(([id, node]) => ({
     id,
