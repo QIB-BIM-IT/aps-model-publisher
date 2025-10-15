@@ -453,10 +453,15 @@ export default function PlanningPage() {
       setTimeout(() => setToast(''), 3000);
       return;
     }
+
+    const hubObj = hubs.find((h) => idOf(h) === selectedHub);
+    const projectObj = projects.find((p) => idOf(p) === selectedProject);
     try {
       await createPublishJob({
         hubId: selectedHub,
+        hubName: nameOf(hubObj, ''),
         projectId: selectedProject,
+        projectName: nameOf(projectObj, ''),
         items,
         scheduleEnabled: true,
         cronExpression,

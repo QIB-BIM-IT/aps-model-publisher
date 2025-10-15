@@ -400,7 +400,7 @@ export default function GlobalDashboard() {
                         {job.projectName || `Projet ${job.projectId?.slice(0, 8)}`}
                       </div>
                       <div style={{ fontSize: 12, color: '#6b7280' }}>
-                        {Array.isArray(job.models) ? job.models.length : 0} maquettes • {job.timezone}
+                        👤 {job.userName || 'Inconnu'} • 🏢 {job.hubName || job.hubId?.slice(0, 10)} • {Array.isArray(job.models) ? job.models.length : 0} maquettes • {job.timezone}
                       </div>
                     </div>
                     <div style={{ fontSize: 13, color: '#64748b', textAlign: 'right' }}>
@@ -440,6 +440,7 @@ export default function GlobalDashboard() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid rgba(148, 163, 184, 0.2)', background: 'rgba(248, 250, 252, 0.5)' }}>
+                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Utilisateur</th>
                     <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Hub</th>
                     <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Projet</th>
                     <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Maquettes</th>
@@ -453,7 +454,7 @@ export default function GlobalDashboard() {
                     const cronParts = job.cronExpression?.split(' ') || [];
                     const hour = cronParts[1]?.padStart(2, '0') || '02';
                     const minute = cronParts[0]?.padStart(2, '0') || '00';
-                    
+
                     return (
                       <tr
                         key={job.id}
@@ -462,6 +463,9 @@ export default function GlobalDashboard() {
                           borderBottom: '1px solid rgba(148, 163, 184, 0.1)'
                         }}
                       >
+                        <td style={{ padding: '12px 16px', fontSize: 13, color: '#64748b', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                          👤 {job.userName || 'Inconnu'}
+                        </td>
                         <td style={{ padding: '12px 16px', fontSize: 13, color: '#64748b', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
                           {job.hubName || job.hubId?.slice(0, 10) || '-'}
                         </td>

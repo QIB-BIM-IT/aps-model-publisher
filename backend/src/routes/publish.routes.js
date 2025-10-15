@@ -48,7 +48,11 @@ function validTz(tz) {
 function normalizeJobInput(body) {
   const out = {};
   out.hubId = String(body.hubId || '').trim();
+  const rawHubName = body.hubName;
+  out.hubName = rawHubName == null ? null : String(rawHubName).trim() || null;
   out.projectId = String(body.projectId || '').trim();
+  const rawProjectName = body.projectName;
+  out.projectName = rawProjectName == null ? null : String(rawProjectName).trim() || null;
 
   // items (URN lineage)
   const items = Array.isArray(body.items) ? body.items : [];
@@ -141,7 +145,9 @@ router.post('/jobs', rateLimit, async (req, res) => {
     const job = await PublishJob.create({
       userId: user.id,
       hubId: payload.hubId,
+      hubName: payload.hubName || null,
       projectId: payload.projectId,
+      projectName: payload.projectName || null,
       models: payload.models,
 
       scheduleEnabled: payload.scheduleEnabled,
@@ -182,8 +188,27 @@ router.get('/jobs', async (req, res) => {
     if (String(req.query.active || '').length)
       where.scheduleEnabled = String(req.query.active).toLowerCase() === 'true';
 
-    const jobs = await PublishJob.findAll({ where, order: [['createdAt', 'DESC']] });
-    return res.json({ success: true, data: jobs, realPublishEnabled: ENABLE_REAL });
+    const jobs = await PublishJob.findAll({
+      where,
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['id', 'name', 'email'],
+        },
+      ],
+      order: [['createdAt', 'DESC']],
+    });
+
+    const jobsWithUser = jobs.map(job => {
+      const jobData = job.toJSON();
+      return {
+        ...jobData,
+        userName: jobData.user?.name || jobData.user?.email || 'Utilisateur inconnu',
+      };
+    });
+
+    return res.json({ success: true, data: jobsWithUser, realPublishEnabled: ENABLE_REAL });
   } catch (err) {
     logger.error(`GET /api/publish/jobs error: ${err.message}`);
     return res.status(500).json({ success: false, message: 'Erreur lecture jobs' });
@@ -202,7 +227,9 @@ router.patch('/jobs/:id', rateLimit, async (req, res) => {
     if (err) return res.status(400).json({ success: false, message: err });
 
     job.hubId = merged.hubId;
+    job.hubName = merged.hubName;
     job.projectId = merged.projectId;
+    job.projectName = merged.projectName;
     job.models = merged.models;
 
     job.scheduleEnabled = merged.scheduleEnabled;

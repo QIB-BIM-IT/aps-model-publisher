@@ -9,16 +9,15 @@ const User = require('./User');
 const PublishJob = require('./PublishJob');
 const PublishRun = require('./PublishRun');
 
-// Si tu as besoin d'associations, tu peux les définir ici.
-// (Optionnel — à activer si nécessaire)
-// PublishJob.belongsTo(User, { foreignKey: 'userId' });
-// User.hasMany(PublishJob, { as: 'publishJobs', foreignKey: 'userId' });
+// Associations
+PublishJob.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(PublishJob, { foreignKey: 'userId', as: 'publishJobs' });
 
-// PublishRun.belongsTo(User, { foreignKey: 'userId' });
-// User.hasMany(PublishRun, { as: 'publishRuns', foreignKey: 'userId' });
+PublishRun.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(PublishRun, { foreignKey: 'userId', as: 'publishRuns' });
 
-// PublishRun.belongsTo(PublishJob, { foreignKey: 'jobId' });
-// PublishJob.hasMany(PublishRun, { as: 'runs', foreignKey: 'jobId' });
+PublishRun.belongsTo(PublishJob, { foreignKey: 'jobId', as: 'job' });
+PublishJob.hasMany(PublishRun, { foreignKey: 'jobId', as: 'runs' });
 
 module.exports = {
   sequelize,
