@@ -164,30 +164,57 @@ export default function GlobalDashboard() {
   // Prochaines exécutions (next 5)
   const upcomingJobs = React.useMemo(() => {
     const now = new Date();
-    
+
     return allJobs
-      .filter(j => j.scheduleEnabled)
-      .map(job => {
+      .filter((j) => j.scheduleEnabled)
+      .map((job) => {
         const cronParts = job.cronExpression?.split(' ') || [];
-        const minute = parseInt(cronParts[0] || '0', 10);
-        const hour = parseInt(cronParts[1] || '2', 10);
-        
-        // Calculer la prochaine exécution
-        const next = new Date();
-        next.setHours(hour, minute, 0, 0);
-        
-        // Si l'heure est déjà passée aujourd'hui, prendre demain
-        if (next <= now) {
-          next.setDate(next.getDate() + 1);
+        const minute = cronParts[0] || '0';
+        const hour = cronParts[1] || '2';
+
+        // Vérifier si c'est un cron quotidien simple (ex: "0 2 * * *")
+        const isDaily =
+          !minute.includes('*') &&
+          !minute.includes('/') &&
+          !hour.includes('*') &&
+          !hour.includes('/');
+
+        let nextExecution;
+        let timeUntil;
+
+        if (isDaily) {
+          // Cron quotidien: calculer la prochaine occurrence
+          const next = new Date();
+          next.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
+
+          if (next <= now) {
+            next.setDate(next.getDate() + 1);
+          }
+
+          nextExecution = next;
+          timeUntil = Math.round((next - now) / (1000 * 60 * 60)); // heures
+        } else {
+          // Cron complexe (*/15, */2, etc.): afficher "Variable"
+          nextExecution = null;
+          timeUntil = null;
         }
-        
+
         return {
           ...job,
-          nextExecution: next,
-          timeUntil: Math.round((next - now) / (1000 * 60 * 60)), // heures
+          nextExecution,
+          timeUntil,
+          isComplexCron: !isDaily,
         };
       })
-      .sort((a, b) => a.nextExecution - b.nextExecution)
+      .sort((a, b) => {
+        // Mettre les crons complexes à la fin
+        if (a.isComplexCron && !b.isComplexCron) return 1;
+        if (!a.isComplexCron && b.isComplexCron) return -1;
+        if (a.isComplexCron && b.isComplexCron) return 0;
+
+        // Trier par prochaine exécution
+        return a.nextExecution - b.nextExecution;
+      })
       .slice(0, 5);
   }, [allJobs]);
 
@@ -377,7 +404,11 @@ export default function GlobalDashboard() {
                       </div>
                     </div>
                     <div style={{ fontSize: 13, color: '#64748b', textAlign: 'right' }}>
-                      Dans {job.timeUntil}h
+                      {job.isComplexCron ? (
+                        <span style={{ fontStyle: 'italic' }}>Fréquence variable</span>
+                      ) : (
+                        `Dans ${job.timeUntil}h`
+                      )}
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <span style={{
