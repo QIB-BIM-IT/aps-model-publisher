@@ -4,7 +4,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import App from './App.jsx';
 import Login from './pages/Login.jsx';
 import AuthCallback from './pages/AuthCallback.jsx';
-import Dashboard from './pages/Dashboard.jsx';
+import GlobalDashboard from './pages/GlobalDashboard.jsx';
+import PlanningPage from './pages/PlanningPage.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 function Root() {
@@ -15,11 +16,22 @@ function Root() {
           <Route index element={<Navigate to="/login" replace />} />
           <Route path="login" element={<Login />} />
           <Route path="callback" element={<AuthCallback />} />
+          {/* ✅ Vue d'ensemble = page par défaut après login */}
           <Route
             path="dashboard"
             element={
               <ProtectedRoute>
-                <Dashboard />
+                <GlobalDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* ✅ Page de planification */}
+          <Route
+            path="planning"
+            element={
+              <ProtectedRoute>
+                <PlanningPage />
               </ProtectedRoute>
             }
           />
