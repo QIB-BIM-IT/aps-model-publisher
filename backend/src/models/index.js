@@ -9,15 +9,48 @@ const User = require('./User');
 const PublishJob = require('./PublishJob');
 const PublishRun = require('./PublishRun');
 
-// Associations
-PublishJob.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-User.hasMany(PublishJob, { foreignKey: 'userId', as: 'publishJobs' });
+// Associations avec contraintes d'intégrité référentielle activées
+PublishJob.belongsTo(User, {
+  foreignKey: 'userId',
+  as: 'user',
+  constraints: true,
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+User.hasMany(PublishJob, {
+  foreignKey: 'userId',
+  as: 'publishJobs',
+  constraints: true,
+  onDelete: 'CASCADE',
+});
 
-PublishRun.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-User.hasMany(PublishRun, { foreignKey: 'userId', as: 'publishRuns' });
+PublishRun.belongsTo(User, {
+  foreignKey: 'userId',
+  as: 'user',
+  constraints: true,
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+User.hasMany(PublishRun, {
+  foreignKey: 'userId',
+  as: 'publishRuns',
+  constraints: true,
+  onDelete: 'CASCADE',
+});
 
-PublishRun.belongsTo(PublishJob, { foreignKey: 'jobId', as: 'job' });
-PublishJob.hasMany(PublishRun, { foreignKey: 'jobId', as: 'runs' });
+PublishRun.belongsTo(PublishJob, {
+  foreignKey: 'jobId',
+  as: 'job',
+  constraints: true,
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+PublishJob.hasMany(PublishRun, {
+  foreignKey: 'jobId',
+  as: 'runs',
+  constraints: true,
+  onDelete: 'CASCADE',
+});
 
 module.exports = {
   sequelize,
