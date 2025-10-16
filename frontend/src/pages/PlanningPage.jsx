@@ -908,12 +908,30 @@ export default function PlanningPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid rgba(148, 163, 184, 0.2)' }}>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>ID</th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Maquettes</th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Heure planifiée</th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Fuseau horaire</th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Status</th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Actions</th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                      ID
+                    </th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                      Hub
+                    </th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                      Projet
+                    </th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                      Heure
+                    </th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                      Timezone
+                    </th>
+                    <th style={{ textAlign: 'center', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                      Maquettes
+                    </th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                      Status
+                    </th>
+                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -925,21 +943,35 @@ export default function PlanningPage() {
                     const displayTime = isSimpleTime
                       ? `${hourPart.padStart(2, '0')}:${minutePart.padStart(2, '0')}`
                       : 'Planification personnalisée';
+                    const displayHub = j.hubName || `Hub ${j.hubId?.slice(0, 8) || '?'}`;
+                    const displayProject = j.projectName || `Projet ${j.projectId?.slice(0, 8) || '?'}`;
 
                     return (
                       <tr key={j.id} style={{ borderBottom: '1px solid rgba(148, 163, 184, 0.1)' }}>
                         <td style={{ padding: '10px 8px', fontSize: 13, fontFamily: 'monospace', color: '#6b7280' }}>
                           {String(j.id).slice(0, 8)}
                         </td>
-                        <td style={{ padding: '10px 8px', fontSize: 14, fontWeight: 500 }}>
-                          {Array.isArray(j.models) ? j.models.length : 0}
+
+                        <td style={{ padding: '10px 8px', fontSize: 13, color: '#475569' }}>
+                          🏢 {displayHub}
                         </td>
+
                         <td style={{ padding: '10px 8px', fontSize: 14, fontWeight: 500 }}>
+                          📁 {displayProject}
+                        </td>
+
+                        <td style={{ padding: '10px 8px', fontSize: 14, fontWeight: 500, fontFamily: 'monospace' }}>
                           🕐 {displayTime}
                         </td>
+
                         <td style={{ padding: '10px 8px', fontSize: 13, color: '#475569' }}>
                           {j.timezone || 'UTC'}
                         </td>
+
+                        <td style={{ padding: '10px 8px', textAlign: 'center', fontSize: 14, fontWeight: 600, color: '#2563eb' }}>
+                          {Array.isArray(j.models) ? j.models.length : 0}
+                        </td>
+
                         <td style={{ padding: '10px 8px' }}>
                           <span
                             style={{
@@ -947,13 +979,22 @@ export default function PlanningPage() {
                               borderRadius: 6,
                               fontSize: 12,
                               fontWeight: 600,
-                              background: j.status === 'running' ? 'rgba(251, 146, 60, 0.15)' : 'rgba(34, 197, 94, 0.15)',
-                              color: j.status === 'running' ? '#ea580c' : '#16a34a',
+                              background: !j.scheduleEnabled
+                                ? 'rgba(156, 163, 175, 0.15)'
+                                : j.status === 'running'
+                                ? 'rgba(251, 146, 60, 0.15)'
+                                : 'rgba(34, 197, 94, 0.15)',
+                              color: !j.scheduleEnabled
+                                ? '#6b7280'
+                                : j.status === 'running'
+                                ? '#ea580c'
+                                : '#16a34a',
                             }}
                           >
-                            {j.status || 'idle'}
+                            {!j.scheduleEnabled ? 'Pausé' : j.status || 'idle'}
                           </span>
                         </td>
+
                         <td style={{ padding: '10px 8px' }}>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <Button
@@ -961,14 +1002,15 @@ export default function PlanningPage() {
                               onClick={() => handleToggleActive(j)}
                               style={{ padding: '6px 12px', fontSize: 12 }}
                             >
-                              {j.scheduleEnabled ? 'Pause' : 'Activer'}
+                              {j.scheduleEnabled ? '⏸️ Pause' : '▶️ Activer'}
                             </Button>
                             <Button
                               variant="primary"
                               onClick={() => handleRunNow(j)}
+                              disabled={j.status === 'running'}
                               style={{ padding: '6px 12px', fontSize: 12 }}
                             >
-                              ▶️
+                              🚀
                             </Button>
                             <Button
                               variant="danger"
