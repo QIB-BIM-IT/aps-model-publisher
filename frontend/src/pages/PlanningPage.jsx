@@ -14,8 +14,16 @@ import {
 
 // Helpers
 function nameOf(node, fall = '') {
+  if (!node) return fall;
   const a = node?.attributes || {};
-  return a.displayName || a.name || node?.name || node?.hubName || node?.projectName || fall;
+  return (
+    a.displayName ||
+    a.name ||
+    node?.name ||
+    node?.hubName ||
+    node?.projectName ||
+    fall
+  );
 }
 function idOf(node) {
   return node?.id || node?.hubId || node?.projectId || node?.urn || '';
@@ -307,6 +315,8 @@ export default function PlanningPage() {
     setError('');
     try {
       const data = await fetchHubs();
+      console.log('🏢 Hubs reçus:', data);
+      console.log('🏢 Premier hub:', data?.[0]);
       setHubs(data);
       if (data.length) setSelectedHub(idOf(data[0]));
     } catch (e) {
@@ -336,6 +346,8 @@ export default function PlanningPage() {
     setError('');
     try {
       const data = await fetchProjects(hubId);
+      console.log('📁 Projets reçus:', data);
+      console.log('📁 Premier projet:', data?.[0]);
       setProjects(data);
       setProjectSearch('');
       if (data.length) {
@@ -456,12 +468,21 @@ export default function PlanningPage() {
 
     const hubObj = hubs.find((h) => idOf(h) === selectedHub);
     const projectObj = projects.find((p) => idOf(p) === selectedProject);
+    const hubName = nameOf(hubObj, '');
+    const projectName = nameOf(projectObj, '');
+    console.log('📦 Données envoyées:', {
+      hubId: selectedHub,
+      hubName,
+      projectId: selectedProject,
+      projectName,
+      items: items.length,
+    });
     try {
       await createPublishJob({
         hubId: selectedHub,
-        hubName: nameOf(hubObj, ''),
+        hubName,
         projectId: selectedProject,
-        projectName: nameOf(projectObj, ''),
+        projectName,
         items,
         scheduleEnabled: true,
         cronExpression,

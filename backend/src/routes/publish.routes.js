@@ -10,6 +10,8 @@ const cron = require('node-cron');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { PublishJob, PublishRun, User } = require('../models');
 const scheduler = require('../services/scheduler.service');
+const apsAuthService = require('../services/apsAuth.service');
+const apsDataService = require('../services/apsData.service');
 
 // ------------- helpers -------------
 const ENABLE_REAL = String(process.env.ENABLE_REAL_PUBLISH || 'false').toLowerCase() === 'true';
@@ -128,6 +130,36 @@ router.post('/jobs', rateLimit, async (req, res) => {
     const err = validateJobPayload(payload);
     if (err) return res.status(400).json({ success: false, message: err });
 
+    let hubName = payload.hubName;
+    let projectName = payload.projectName;
+
+    if (!hubName || !projectName) {
+      try {
+        const accessToken = await apsAuthService.ensureValidToken(user.id);
+
+        if (!hubName) {
+          const hubs = await apsDataService.getHubs(accessToken);
+          const hub = Array.isArray(hubs) ? hubs.find(h => h.id === payload.hubId) : null;
+          hubName = hub?.attributes?.name || hub?.attributes?.displayName || payload.hubId;
+          logger.info(`[Enrich] Hub name: ${hubName}`);
+        }
+
+        if (!projectName) {
+          const projects = await apsDataService.getProjects(payload.hubId, accessToken);
+          const project = Array.isArray(projects) ? projects.find(p => p.id === payload.projectId) : null;
+          projectName = project?.attributes?.name || project?.attributes?.displayName || payload.projectId;
+          logger.info(`[Enrich] Project name: ${projectName}`);
+        }
+      } catch (enrichError) {
+        logger.warn(`[Enrich] Erreur récupération noms: ${enrichError.message}`);
+        hubName = hubName || payload.hubId;
+        projectName = projectName || payload.projectId;
+      }
+    }
+
+    hubName = hubName || payload.hubId;
+    projectName = projectName || payload.projectId;
+
     // Idempotence simple: existe-t-il un job identique ? (même user/hub/project/models/cron/tz)
     const existing = await PublishJob.findAll({
       where: {
@@ -145,9 +177,9 @@ router.post('/jobs', rateLimit, async (req, res) => {
     const job = await PublishJob.create({
       userId: user.id,
       hubId: payload.hubId,
-      hubName: payload.hubName || null,
+      hubName,
       projectId: payload.projectId,
-      projectName: payload.projectName || null,
+      projectName,
       models: payload.models,
 
       scheduleEnabled: payload.scheduleEnabled,
