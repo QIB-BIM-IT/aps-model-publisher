@@ -1,4 +1,4 @@
-﻿// src/server.js
+// src/server.js
 require('dotenv').config();
 
 const express = require('express');
@@ -9,14 +9,21 @@ const compression = require('compression');
 const cookieParser = require('cookie-parser');
 
 const logger = require('./config/logger');
-// ✅ on utilise la fonction connectDB fournie par src/config/database.js
 const { connectDB } = require('./config/database');
+// ✅ Import du error handler
+const {
+  errorHandler,
+  setupGlobalErrorHandlers,
+} = require('./middleware/errorHandler.middleware');
+
+// ✅ Setup handlers globaux (doit être fait avant tout le reste)
+setupGlobalErrorHandlers();
 
 // Routes
 const authRoutes = require('./routes/auth.routes');
 const apsRoutes = require('./routes/aps.routes');
-const publishRoutes = require('./routes/publish.routes');              // jobs/runs existants
-const publishDirectRoutes = require('./routes/publish.direct.routes'); // endpoints de test direct
+const publishRoutes = require('./routes/publish.routes');
+const publishDirectRoutes = require('./routes/publish.direct.routes');
 
 const app = express();
 
@@ -42,34 +49,32 @@ app.get('/health', (req, res) => {
 // -------- Routes applicatives
 app.use('/api/auth', authRoutes);
 app.use('/api/aps', apsRoutes);
-app.use('/api/publish', publishRoutes);       // REST (jobs/runs)
-app.use('/api/publish', publishDirectRoutes); // NEW: /api/publish/direct/*
+app.use('/api/publish', publishRoutes);
+app.use('/api/publish', publishDirectRoutes);
 
-// -------- 404
+// -------- 404 handler (doit être AVANT le error handler)
 app.use((req, res, next) => {
-  res.status(404).json({ success: false, message: 'Not found' });
+  const error = new Error(`Route non trouvée: ${req.method} ${req.path}`);
+  error.statusCode = 404;
+  next(error);
 });
 
-// -------- Error handler
-app.use((err, req, res, next) => {
-  logger.error(`[Unhandled] ${err.message}`);
-  res.status(500).json({ success: false, message: err.message });
-});
+// -------- ✅ Error handler centralisé (doit être le DERNIER middleware)
+app.use(errorHandler);
 
 // -------- Bootstrap
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
 (async () => {
   try {
-    // 🔧 Initialise la DB via la fonction maison connectDB(alter)
-    const alter = String(process.env.DB_SYNC_ALTER || 'true').toLowerCase() === 'true';
+    const alter = String(process.env.DB_SYNC_ALTER || 'false').toLowerCase() === 'true';
     await connectDB(alter);
     logger.info(`Synchronisation Sequelize terminée (alter=${alter})`);
 
     const server = app.listen(PORT, () => {
-      logger.info(`Serveur démarré sur le port ${PORT}`);
-      logger.info(`Environnement: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`URL: http://localhost:${PORT}`);
+      logger.info(`🚀 Serveur démarré sur le port ${PORT}`);
+      logger.info(`📊 Environnement: ${process.env.NODE_ENV || 'development'}`);
+      logger.info(`🌐 URL: http://localhost:${PORT}`);
     });
 
     // Arrêt propre
@@ -80,10 +85,11 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
         process.exit(0);
       });
     };
+
     process.on('SIGTERM', () => graceful('SIGTERM'));
     process.on('SIGINT', () => graceful('SIGINT'));
   } catch (e) {
-    logger.error(`Erreur de connexion/synchronisation PostgreSQL: ${e.message}`);
+    logger.error(`❌ Erreur de démarrage: ${e.message}`);
     process.exit(1);
   }
 })();
