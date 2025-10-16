@@ -397,10 +397,10 @@ export default function GlobalDashboard() {
                     </div>
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 500, color: '#1f2937', marginBottom: 2 }}>
-                        {job.projectName || `Projet ${job.projectId?.slice(0, 8)}`}
+                        {job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`}
                       </div>
                       <div style={{ fontSize: 12, color: '#6b7280' }}>
-                        👤 {job.userName || 'Inconnu'} • 🏢 {job.hubName || job.hubId?.slice(0, 10)} • {Array.isArray(job.models) ? job.models.length : 0} maquettes • {job.timezone}
+                        👤 {job.userName || 'Inconnu'} • 🏢 {job.hubName || `Hub ${job.hubId?.slice(0, 8) || '?'}`} • {Array.isArray(job.models) ? job.models.length : 0} maquettes • {job.timezone}
                       </div>
                     </div>
                     <div style={{ fontSize: 13, color: '#64748b', textAlign: 'right' }}>
@@ -467,10 +467,10 @@ export default function GlobalDashboard() {
                           👤 {job.userName || 'Inconnu'}
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: 13, color: '#64748b', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
-                          {job.hubName || job.hubId?.slice(0, 10) || '-'}
+                          {job.hubName || `Hub ${job.hubId?.slice(0, 8) || '?'}`}
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 500, borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
-                          {job.projectName || job.projectId?.slice(0, 12) || '-'}
+                          {job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`}
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: 14, fontWeight: 600, color: '#2563eb', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
                           {Array.isArray(job.models) ? job.models.length : 0}
