@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   fetchHubs,
   fetchProjects,
@@ -198,9 +199,10 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
 }
 
 // Composant Card moderne
-function Card({ children, title, style = {} }) {
+function Card({ children, title, style = {}, id }) {
   return (
     <div
+      id={id}
       style={{
         background: 'rgba(255, 255, 255, 0.9)',
         backdropFilter: 'blur(20px)',
@@ -276,6 +278,7 @@ function Button({ children, onClick, variant = 'primary', disabled = false, styl
 }
 
 export default function PlanningPage() {
+  const location = useLocation();
   const [hubs, setHubs] = React.useState([]);
   const [selectedHub, setSelectedHub] = React.useState('');
   const [projects, setProjects] = React.useState([]);
@@ -305,6 +308,19 @@ export default function PlanningPage() {
   const [error, setError] = React.useState('');
   const [toast, setToast] = React.useState('');
 
+  const preSelectHub = location.state?.preSelectHub;
+  const preSelectProject = location.state?.preSelectProject;
+  const highlightJobId = location.state?.highlightJobId;
+  const preselectHubApplied = React.useRef(false);
+  const preselectProjectApplied = React.useRef(false);
+  const appliedHighlightJob = React.useRef(null);
+
+  React.useEffect(() => {
+    appliedHighlightJob.current = null;
+    preselectHubApplied.current = false;
+    preselectProjectApplied.current = false;
+  }, [location.key]);
+
   React.useEffect(() => {
     const [hour, minute] = selectedHour.split(':');
     setCronExpression(`${minute} ${hour} * * *`);
@@ -318,7 +334,14 @@ export default function PlanningPage() {
       console.log('🏢 Hubs reçus:', data);
       console.log('🏢 Premier hub:', data?.[0]);
       setHubs(data);
-      if (data.length) setSelectedHub(idOf(data[0]));
+      if (data.length) {
+        if (preSelectHub && data.some((hub) => idOf(hub) === preSelectHub)) {
+          setSelectedHub(preSelectHub);
+          preselectHubApplied.current = true;
+        } else {
+          setSelectedHub(idOf(data[0]));
+        }
+      }
     } catch (e) {
       setError(e?.message || 'Erreur hubs');
     } finally {
@@ -351,7 +374,12 @@ export default function PlanningPage() {
       setProjects(data);
       setProjectSearch('');
       if (data.length) {
-        setSelectedProject(idOf(data[0]));
+        if (preSelectProject && data.some((project) => idOf(project) === preSelectProject)) {
+          setSelectedProject(preSelectProject);
+          preselectProjectApplied.current = true;
+        } else {
+          setSelectedProject(idOf(data[0]));
+        }
       } else {
         resetProjectData();
       }
@@ -542,8 +570,38 @@ export default function PlanningPage() {
   }, []);
 
   React.useEffect(() => {
+    if (
+      preSelectHub &&
+      !preselectHubApplied.current &&
+      hubs.length > 0 &&
+      hubs.some((hub) => idOf(hub) === preSelectHub)
+    ) {
+      setSelectedHub(preSelectHub);
+      preselectHubApplied.current = true;
+    }
+  }, [preSelectHub, hubs]);
+
+  React.useEffect(() => {
     if (selectedHub) loadProjects(selectedHub);
   }, [selectedHub]);
+
+  React.useEffect(() => {
+    if (
+      preSelectProject &&
+      !preselectProjectApplied.current &&
+      projects.length > 0 &&
+      projects.some((project) => idOf(project) === preSelectProject)
+    ) {
+      setSelectedProject(preSelectProject);
+      preselectProjectApplied.current = true;
+      setTimeout(() => {
+        const jobsSection = document.getElementById('jobs-section');
+        if (jobsSection) {
+          jobsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 500);
+    }
+  }, [preSelectProject, projects]);
 
   React.useEffect(() => {
     if (selectedHub && selectedProject) {
@@ -592,6 +650,47 @@ export default function PlanningPage() {
     const interval = setInterval(tick, 3000);
     return () => clearInterval(interval);
   }, [shouldAutoRefresh, refreshRuns, refreshJobs]);
+
+  React.useEffect(() => {
+    if (!highlightJobId || jobs.length === 0) return;
+    if (appliedHighlightJob.current === highlightJobId) return;
+    const highlightTimeout = setTimeout(() => {
+      const jobElement = document.getElementById(`job-${highlightJobId}`);
+      if (!jobElement) return;
+      const originalBackground = jobElement.style.background;
+      const originalBorder = jobElement.style.border;
+      jobElement.dataset.originalBackground = originalBackground;
+      jobElement.dataset.originalBorder = originalBorder;
+      jobElement.style.background = 'rgba(37, 99, 235, 0.15)';
+      jobElement.style.border = '2px solid rgba(37, 99, 235, 0.4)';
+      jobElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const resetTimeout = setTimeout(() => {
+        jobElement.style.background = originalBackground;
+        jobElement.style.border = originalBorder;
+        delete jobElement.dataset.originalBackground;
+        delete jobElement.dataset.originalBorder;
+      }, 3000);
+      jobElement.dataset.highlightTimeout = String(resetTimeout);
+      appliedHighlightJob.current = highlightJobId;
+    }, 800);
+    return () => {
+      clearTimeout(highlightTimeout);
+      const jobElement = document.getElementById(`job-${highlightJobId}`);
+      const resetTimeoutId = jobElement?.dataset?.highlightTimeout;
+      if (resetTimeoutId) {
+        clearTimeout(Number(resetTimeoutId));
+        delete jobElement.dataset.highlightTimeout;
+        if ('originalBackground' in jobElement.dataset) {
+          jobElement.style.background = jobElement.dataset.originalBackground || '';
+          delete jobElement.dataset.originalBackground;
+        }
+        if ('originalBorder' in jobElement.dataset) {
+          jobElement.style.border = jobElement.dataset.originalBorder || '';
+          delete jobElement.dataset.originalBorder;
+        }
+      }
+    };
+  }, [highlightJobId, jobs]);
 
   const selectedArray = Object.entries(selectedItems).map(([id, node]) => ({
     id,
