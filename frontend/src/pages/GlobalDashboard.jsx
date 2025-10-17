@@ -72,6 +72,17 @@ export default function GlobalDashboard() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
 
+  function handleJobClick(job) {
+    if (!job) return;
+    navigate('/planning', {
+      state: {
+        preSelectHub: job.hubId,
+        preSelectProject: job.projectId,
+        highlightJobId: job.id,
+      },
+    });
+  }
+
   // Charger tous les jobs (tous projets confondus)
   async function loadAllData() {
     setLoading(true);
@@ -377,10 +388,12 @@ export default function GlobalDashboard() {
                 const cronParts = job.cronExpression?.split(' ') || [];
                 const hour = cronParts[1]?.padStart(2, '0') || '02';
                 const minute = cronParts[0]?.padStart(2, '0') || '00';
-                
+
                 return (
-                  <div
+                  <button
                     key={job.id}
+                    type="button"
+                    onClick={() => handleJobClick(job)}
                     style={{
                       display: 'grid',
                       gridTemplateColumns: '120px 1fr 150px 100px',
@@ -389,7 +402,20 @@ export default function GlobalDashboard() {
                       background: 'rgba(239, 246, 255, 0.5)',
                       borderRadius: 10,
                       border: '1px solid rgba(37, 99, 235, 0.15)',
-                      gap: 16
+                      gap: 16,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      textAlign: 'left',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(239, 246, 255, 0.8)';
+                      e.currentTarget.style.transform = 'translateX(4px)';
+                      e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.3)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(239, 246, 255, 0.5)';
+                      e.currentTarget.style.transform = 'none';
+                      e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.15)';
                     }}
                   >
                     <div style={{ fontSize: 16, fontWeight: 600, color: '#2563eb', fontFamily: 'monospace' }}>
@@ -422,7 +448,7 @@ export default function GlobalDashboard() {
                         {job.status || 'idle'}
                       </span>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -458,9 +484,17 @@ export default function GlobalDashboard() {
                     return (
                       <tr
                         key={job.id}
+                        onClick={() => handleJobClick(job)}
                         style={{
                           background: index % 2 === 0 ? 'rgba(248, 250, 252, 0.3)' : 'transparent',
-                          borderBottom: '1px solid rgba(148, 163, 184, 0.1)'
+                          borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
+                          cursor: 'pointer'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(239, 246, 255, 0.6)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = index % 2 === 0 ? 'rgba(248, 250, 252, 0.3)' : 'transparent';
                         }}
                       >
                         <td style={{ padding: '12px 16px', fontSize: 13, color: '#64748b', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
