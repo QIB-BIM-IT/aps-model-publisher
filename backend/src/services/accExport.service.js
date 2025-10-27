@@ -25,6 +25,7 @@ class ACCExportService {
         accFolderId = null,
         downloadLocally = false,
         localPath = null,
+        autoTranslate = true,
       } = options;
 
       if (!projectId) {
@@ -49,6 +50,8 @@ class ACCExportService {
       );
 
       const notReady = readinessByFile.filter(({ readiness }) => !readiness.ready);
+      const translationTriggered = notReady.length > 0 && autoTranslate;
+
       if (notReady.length > 0) {
         const notReadyDetails = notReady
           .map(
@@ -59,11 +62,40 @@ class ACCExportService {
 
         logger.warn(`[ACCExport] ${notReady.length} fichier(s) non prêt(s): ${notReadyDetails}`);
 
-        throw new Error(
-          `${notReady.length} fichier(s) non prêt(s) pour export PDF. ` +
-            "Les fichiers doivent être publiés dans ACC et extraits par APS d'abord. " +
-            `Status: ${notReady.map(({ readiness }) => readiness.status).join(', ')}`
-        );
+        if (!autoTranslate) {
+          throw new Error(
+            `${notReady.length} fichier(s) non prêt(s) pour export PDF. ` +
+              "Les fichiers doivent être publiés dans ACC et extraits par APS d'abord. " +
+              `Status: ${notReady.map(({ readiness }) => readiness.status).join(', ')}`
+          );
+        }
+
+        logger.info(`[ACCExport] ${notReady.length} fichier(s) non traduit(s), lancement extraction...`);
+
+        for (const { urn } of notReady) {
+          try {
+            await this.triggerTranslation(urn, accessToken);
+          } catch (translationError) {
+            logger.warn(
+              `[ACCExport] Erreur traduction ${urn}: ${translationError.message}`
+            );
+          }
+        }
+
+        logger.info('[ACCExport] Attente de la traduction (~2-5 minutes)...');
+        for (const { urn } of notReady) {
+          try {
+            await this.waitForTranslation(urn, accessToken, 300000);
+          } catch (waitError) {
+            logger.error(`[ACCExport] Timeout traduction ${urn}: ${waitError.message}`);
+            throw new Error(
+              `Le fichier ${urn} n'a pas pu être traduit dans le délai imparti. ` +
+                'Réessayez dans quelques minutes.'
+            );
+          }
+        }
+
+        logger.info('[ACCExport] ✅ Tous les fichiers sont maintenant prêts');
       }
 
       logger.info('[ACCExport] ✅ Tous les fichiers sont prêts pour export');
@@ -116,6 +148,7 @@ class ACCExportService {
         method: 'acc-export',
         cost: 0,
         jobId: exportJob.id,
+        translationTriggered,
         pdfs: pdfs.map((p) => ({
           name: p.name,
           size: p.buffer.length,
@@ -126,6 +159,98 @@ class ACCExportService {
       logger.error(`[ACCExport] Erreur: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Déclenche la traduction d'un fichier via Model Derivative
+   */
+  async triggerTranslation(fileUrn, accessToken) {
+    try {
+      const encodedUrn = Buffer.from(fileUrn)
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+
+      const url = 'https://developer.api.autodesk.com/modelderivative/v2/designdata/job';
+
+      logger.info(`[ACCExport] Lancement traduction pour: ${fileUrn}`);
+
+      const response = await axios.post(
+        url,
+        {
+          input: {
+            urn: encodedUrn,
+          },
+          output: {
+            formats: [
+              {
+                type: 'svf2',
+                views: ['2d', '3d'],
+              },
+            ],
+          },
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'x-ads-force': 'true',
+          },
+        }
+      );
+
+      logger.info('[ACCExport] Traduction lancée avec succès');
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        if (error.response.status === 409) {
+          logger.info('[ACCExport] Traduction déjà en cours pour ce fichier');
+          return { status: 'inprogress' };
+        }
+
+        logger.error(
+          `[ACCExport] Erreur traduction: ${error.response.status} - ${JSON.stringify(
+            error.response.data
+          )}`
+        );
+        throw new Error(
+          `Erreur traduction: ${error.response.data.diagnostic || error.response.statusText}`
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Attend que la traduction soit terminée
+   */
+  async waitForTranslation(fileUrn, accessToken, maxWaitMs = 300000) {
+    const startTime = Date.now();
+    const pollInterval = 10000;
+
+    logger.info('[ACCExport] Attente de la traduction...');
+
+    while (Date.now() - startTime < maxWaitMs) {
+      const readiness = await this.checkFileReadiness(fileUrn, accessToken);
+
+      if (readiness.ready) {
+        logger.info('[ACCExport] ✅ Traduction terminée');
+        return true;
+      }
+
+      if (readiness.status === 'failed') {
+        throw new Error('La traduction a échoué');
+      }
+
+      logger.debug(
+        `[ACCExport] Status: ${readiness.status}, Progress: ${readiness.progress}`
+      );
+      await this.sleep(pollInterval);
+    }
+
+    throw new Error(`Traduction timeout après ${maxWaitMs}ms`);
   }
 
   /**
