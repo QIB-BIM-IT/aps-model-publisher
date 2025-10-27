@@ -4,6 +4,10 @@ const axios = require('axios');
 const router = express.Router();
 const logger = require('../config/logger');
 const { authenticateToken } = require('../middleware/auth.middleware');
+const {
+  asyncHandler,
+  ValidationError,
+} = require('../middleware/errorHandler.middleware');
 const apsDataService = require('../services/apsData.service');
 const apsAuthService = require('../services/apsAuth.service');
 
@@ -196,5 +200,97 @@ router.get('/debug/folder-contents', async (req, res) => {
     });
   }
 });
+
+router.post(
+  '/items/versions',
+  asyncHandler(async (req, res) => {
+    const { projectId, itemUrns } = req.body;
+
+    if (!projectId) {
+      throw new ValidationError('projectId requis');
+    }
+
+    if (!Array.isArray(itemUrns) || itemUrns.length === 0) {
+      throw new ValidationError('itemUrns requis (array non vide)');
+    }
+
+    logger.info(`[APS] Récupération versions pour ${itemUrns.length} item(s)`);
+    const accessToken = await apsAuthService.ensureValidToken(req.userId);
+
+    const cleanProjectId = projectId.replace(/^b\./, '');
+    const baseUrl = `https://developer.api.autodesk.com/data/v1/projects/b.${cleanProjectId}`;
+    const versionResults = [];
+
+    for (const itemUrn of itemUrns) {
+      try {
+        const url = `${baseUrl}/items?filter[id]=${encodeURIComponent(itemUrn)}`;
+        logger.debug(`[APS] Requête: ${url}`);
+
+        const response = await axios.get(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        const item = response.data.data?.[0];
+
+        if (!item) {
+          logger.warn(`[APS] Item non trouvé: ${itemUrn}`);
+          versionResults.push({
+            itemUrn,
+            versionUrn: null,
+            error: 'Item introuvable',
+          });
+          continue;
+        }
+
+        const tipVersionUrn = item.relationships?.tip?.data?.id;
+
+        if (tipVersionUrn) {
+          logger.info(`[APS] ✓ Version trouvée: ${tipVersionUrn.substring(0, 50)}...`);
+          versionResults.push({
+            itemUrn,
+            versionUrn: tipVersionUrn,
+            itemName: item.attributes?.displayName || 'Sans nom',
+          });
+        } else {
+          logger.warn(`[APS] Pas de tip pour: ${itemUrn}`);
+          versionResults.push({
+            itemUrn,
+            versionUrn: null,
+            error: 'Pas de version (tip) disponible',
+          });
+        }
+      } catch (error) {
+        logger.error(`[APS] Erreur pour ${itemUrn}: ${error.message}`);
+
+        if (error.response) {
+          logger.error(
+            `[APS] Status: ${error.response.status}, Data: ${JSON.stringify(error.response.data)}`
+          );
+        }
+
+        versionResults.push({
+          itemUrn,
+          versionUrn: null,
+          error: error.message,
+        });
+      }
+    }
+
+    const successCount = versionResults.filter((v) => v.versionUrn).length;
+    logger.info(`[APS] ${successCount}/${itemUrns.length} version(s) récupérée(s)`);
+
+    res.json({
+      success: true,
+      data: versionResults,
+      summary: {
+        total: itemUrns.length,
+        found: successCount,
+        notFound: itemUrns.length - successCount,
+      },
+    });
+  })
+);
 
 module.exports = router;
