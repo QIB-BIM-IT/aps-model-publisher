@@ -100,4 +100,20 @@ export async function exportPDFs(projectId, fileUrns, options = {}) {
   return response.data;
 }
 
+/**
+ *
+ * Récupère les version URNs (fs.file) depuis les item URNs (dm.lineage)
+ * Nécessaire pour l'export PDF car Model Derivative requiert version URN
+ * @param {string} projectId - ID du projet
+ * @param {string[]} itemUrns - Item URNs (dm.lineage)
+ * @returns {Promise<object>}
+ */
+export async function getItemVersions(projectId, itemUrns) {
+  const response = await api.post('/aps/items/versions', {
+    projectId,
+    itemUrns
+  });
+  return response.data;
+}
+
 export default api;
