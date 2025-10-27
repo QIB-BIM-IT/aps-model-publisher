@@ -11,6 +11,7 @@ import {
   deletePublishJob,
   runPublishJobNow,
   getRuns,
+  exportPDFs,
 } from '../services/api';
 
 // Helpers
@@ -288,6 +289,9 @@ export default function PlanningPage() {
   const [topFolders, setTopFolders] = React.useState([]);
   const [childrenMap, setChildrenMap] = React.useState(new Map());
   const [selectedItems, setSelectedItems] = React.useState({});
+  const [exportPDFsEnabled, setExportPDFsEnabled] = React.useState(false);
+  const [uploadPDFsToACC, setUploadPDFsToACC] = React.useState(true);
+  const [exportingPDFs, setExportingPDFs] = React.useState(false);
 
   const [jobs, setJobs] = React.useState([]);
   const [loadingJobs, setLoadingJobs] = React.useState(false);
@@ -436,6 +440,51 @@ export default function PlanningPage() {
       }
       return nxt;
     });
+  }
+
+  async function handleExportPDFs() {
+    if (!selectedProject || selectedArray.length === 0) {
+      setToast('⚠️ Sélectionne au moins une maquette');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+    if (!window.confirm(`Exporter ${selectedArray.length} maquette(s) en PDF ?`)) {
+      return;
+    }
+
+    setExportingPDFs(true);
+
+    try {
+      let targetFolderId = null;
+      if (uploadPDFsToACC && topFolders.length > 0) {
+        targetFolderId = idOf(topFolders[0]);
+      }
+
+      const result = await exportPDFs(
+        selectedProject,
+        selectedArray.map((item) => item.id),
+        {
+          uploadToACC: uploadPDFsToACC,
+          accFolderId: targetFolderId,
+        }
+      );
+
+      const pdfCount = Array.isArray(result?.data?.pdfs) ? result.data.pdfs.length : 0;
+
+      const successMsg = uploadPDFsToACC
+        ? `✅ ${pdfCount} PDF(s) exportés et uploadés vers ACC !`
+        : `✅ ${pdfCount} PDF(s) exportés !`;
+
+      setToast(successMsg);
+      setTimeout(() => setToast(''), 5000);
+
+      setSelectedItems({});
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur export PDF'));
+      setTimeout(() => setToast(''), 5000);
+    } finally {
+      setExportingPDFs(false);
+    }
   }
 
   const refreshJobs = React.useCallback(
@@ -932,6 +981,7 @@ export default function PlanningPage() {
             <p style={{ color: '#9ca3af' }}>Aucune sélection</p>
           ) : (
             <>
+              {/* Liste des maquettes sélectionnées */}
               <div style={{ marginBottom: 16, maxHeight: 150, overflowY: 'auto' }}>
                 {selectedArray.map(({ id, name }) => (
                   <div
@@ -951,6 +1001,102 @@ export default function PlanningPage() {
                   </div>
                 ))}
               </div>
+
+              {/* Export PDF */}
+              <div
+                style={{
+                  marginBottom: 20,
+                  padding: 16,
+                  background: 'rgba(239, 246, 255, 0.5)',
+                  borderRadius: 10,
+                  border: '1px solid rgba(37, 99, 235, 0.2)',
+                }}
+              >
+                <h4
+                  style={{
+                    margin: '0 0 12px 0',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: '#1f2937',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  📄 Export PDF
+                </h4>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    marginBottom: 8,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={exportPDFsEnabled}
+                    onChange={(e) => setExportPDFsEnabled(e.target.checked)}
+                    style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                  />
+                  <span style={{ fontSize: 14, color: '#1f2937' }}>
+                    Exporter les sheets et vues 2D en PDF
+                  </span>
+                </label>
+
+                {exportPDFsEnabled && (
+                  <div style={{ marginLeft: 26, fontSize: 13, color: '#64748b' }}>
+                    <div style={{ marginBottom: 4 }}>✅ Tous les sheets disponibles</div>
+                    <div style={{ marginBottom: 4 }}>✅ Toutes les vues 2D</div>
+                    <div style={{ marginBottom: 4 }}>✅ Inclut les markups et annotations</div>
+                    <div style={{ marginBottom: 12 }}>⚡ Gratuit (utilise l'extraction APS)</div>
+
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        marginTop: 12,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={uploadPDFsToACC}
+                        onChange={(e) => setUploadPDFsToACC(e.target.checked)}
+                        style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                      />
+                      <span style={{ fontSize: 13, color: '#475569', fontWeight: 500 }}>
+                        Uploader les PDFs vers ACC (même dossier que les maquettes)
+                      </span>
+                    </label>
+
+                    <Button
+                      onClick={handleExportPDFs}
+                      disabled={exportingPDFs}
+                      style={{
+                        marginTop: 12,
+                        width: '100%',
+                        background: exportingPDFs
+                          ? 'rgba(148, 163, 184, 0.5)'
+                          : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        cursor: exportingPDFs ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {exportingPDFs ? '⏳ Export en cours...' : '📄 Exporter les PDFs maintenant'}
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div
+                style={{
+                  height: 1,
+                  background: 'linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.3), transparent)',
+                  marginBottom: 20,
+                }}
+              />
+
               <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
                   <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
