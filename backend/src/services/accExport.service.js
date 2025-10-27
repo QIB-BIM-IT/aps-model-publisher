@@ -40,6 +40,34 @@ class ACCExportService {
       // 1. Obtenir le token d'accès
       const accessToken = await apsAuthService.ensureValidToken(userId);
 
+      // ✅ Vérifier que les fichiers sont prêts pour l'export
+      const readinessByFile = await Promise.all(
+        fileUrns.map(async (urn) => ({
+          urn,
+          readiness: await this.checkFileReadiness(urn, accessToken),
+        }))
+      );
+
+      const notReady = readinessByFile.filter(({ readiness }) => !readiness.ready);
+      if (notReady.length > 0) {
+        const notReadyDetails = notReady
+          .map(
+            ({ urn, readiness }) =>
+              `${urn}: status=${readiness.status}, hasPDF=${readiness.hasPdfDerivatives}`
+          )
+          .join(', ');
+
+        logger.warn(`[ACCExport] ${notReady.length} fichier(s) non prêt(s): ${notReadyDetails}`);
+
+        throw new Error(
+          `${notReady.length} fichier(s) non prêt(s) pour export PDF. ` +
+            "Les fichiers doivent être publiés dans ACC et extraits par APS d'abord. " +
+            `Status: ${notReady.map(({ readiness }) => readiness.status).join(', ')}`
+        );
+      }
+
+      logger.info('[ACCExport] ✅ Tous les fichiers sont prêts pour export');
+
       // 2. Lancer l'export
       const exportJob = await this.startExport(projectId, fileUrns, accessToken);
       logger.info(`[ACCExport] Job lancé: ${exportJob.id}`);
@@ -96,6 +124,64 @@ class ACCExportService {
       };
     } catch (error) {
       logger.error(`[ACCExport] Erreur: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Vérifie si un fichier a déjà été traduit par Model Derivative
+   * et possède des dérivés PDF utilisables.
+   */
+  async checkFileReadiness(fileUrn, accessToken) {
+    try {
+      const encodedUrn = Buffer.from(fileUrn)
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+
+      const url = `https://developer.api.autodesk.com/modelderivative/v2/designdata/${encodedUrn}/manifest`;
+
+      logger.info(`[ACCExport] Vérification du manifest pour: ${fileUrn}`);
+
+      const response = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const manifest = response.data;
+      const status = manifest.status;
+      const progress = manifest.progress;
+
+      logger.info(`[ACCExport] Manifest status: ${status}, progress: ${progress}`);
+
+      const hasPdfDerivatives = manifest.derivatives?.some((derivative) =>
+        derivative.children?.some(
+          (child) => child.role === '2d' && child.properties?.['Print Setting']
+        )
+      );
+
+      logger.info(`[ACCExport] PDF derivatives disponibles: ${hasPdfDerivatives}`);
+
+      return {
+        ready: status === 'success' && Boolean(hasPdfDerivatives),
+        status,
+        progress,
+        hasPdfDerivatives: Boolean(hasPdfDerivatives),
+      };
+    } catch (error) {
+      if (error.response?.status === 404) {
+        logger.warn(`[ACCExport] Aucun manifest trouvé pour ${fileUrn} - fichier jamais traduit`);
+        return {
+          ready: false,
+          status: 'not_translated',
+          progress: 0,
+          hasPdfDerivatives: false,
+        };
+      }
+
+      logger.error(`[ACCExport] Erreur vérification readiness: ${error.message}`);
       throw error;
     }
   }

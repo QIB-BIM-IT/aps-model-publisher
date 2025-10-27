@@ -5,6 +5,7 @@ const router = express.Router();
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { asyncHandler, ValidationError } = require('../middleware/errorHandler.middleware');
 const accExportService = require('../services/accExport.service');
+const apsAuthService = require('../services/apsAuth.service');
 const logger = require('../config/logger');
 
 router.use(authenticateToken);
@@ -52,6 +53,26 @@ router.post('/export', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * GET /api/pdf-export/check-readiness
+ * Vérifie si un fichier est prêt pour export PDF
+ */
+router.get('/check-readiness', asyncHandler(async (req, res) => {
+  const { fileUrn } = req.query;
+
+  if (!fileUrn) {
+    throw new ValidationError('fileUrn requis');
+  }
+
+  const accessToken = await apsAuthService.ensureValidToken(req.userId);
+  const readiness = await accExportService.checkFileReadiness(fileUrn, accessToken);
+
+  res.json({
+    success: true,
+    data: readiness,
+  });
+}));
+
+/**
  * GET /api/pdf-export/test
  * Route de test (à supprimer en prod)
  */
@@ -60,7 +81,8 @@ router.get('/test', asyncHandler(async (req, res) => {
     success: true,
     message: 'PDF Export API fonctionnelle',
     endpoints: {
-      export: 'POST /api/pdf-export/export'
+      export: 'POST /api/pdf-export/export',
+      checkReadiness: 'GET /api/pdf-export/check-readiness'
     }
   });
 }));

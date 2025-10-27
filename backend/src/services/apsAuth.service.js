@@ -12,7 +12,7 @@ class APSAuthService {
     this.twoLegged = {
       access_token: null,
       expires_at: 0,
-      scopes: (process.env.APS_TWO_LEGGED_SCOPES || 'data:read data:write data:create bucket:create bucket:read account:read')
+      scopes: (process.env.APS_TWO_LEGGED_SCOPES || 'data:read data:write data:create bucket:create bucket:read account:read viewables:read')
         .split(/\s+/)
         .filter(Boolean),
     };
