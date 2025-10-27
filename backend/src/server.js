@@ -24,6 +24,7 @@ const authRoutes = require('./routes/auth.routes');
 const apsRoutes = require('./routes/aps.routes');
 const publishRoutes = require('./routes/publish.routes');
 const publishDirectRoutes = require('./routes/publish.direct.routes');
+const pdfExportRoutes = require('./routes/pdfExport.routes');
 
 const app = express();
 
@@ -51,6 +52,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/aps', apsRoutes);
 app.use('/api/publish', publishRoutes);
 app.use('/api/publish', publishDirectRoutes);
+app.use('/api/pdf-export', pdfExportRoutes);
 
 // -------- 404 handler (doit être AVANT le error handler)
 app.use((req, res, next) => {
