@@ -12,6 +12,7 @@ import {
   runPublishJobNow,
   getRuns,
   exportPDFs,
+  getItemVersions,
 } from '../services/api';
 
 // Helpers
@@ -460,26 +461,62 @@ export default function PlanningPage() {
         targetFolderId = idOf(topFolders[0]);
       }
 
+      setToast('⏳ Récupération des versions des fichiers...');
+
+      const itemUrns = selectedArray.map((item) => item.id);
+
+      console.log('[PDFExport] Item URNs:', itemUrns);
+
+      const versionsData = await getItemVersions(selectedProject, itemUrns);
+
+      console.log('[PDFExport] Versions récupérées:', versionsData);
+
+      const versionUrns = versionsData.data.filter((v) => v.versionUrn).map((v) => v.versionUrn);
+
+      if (versionUrns.length === 0) {
+        throw new Error('Aucune version trouvée pour les fichiers sélectionnés');
+      }
+
+      if (versionUrns.length < itemUrns.length) {
+        const notFoundCount = itemUrns.length - versionUrns.length;
+        setToast(`⚠️ ${notFoundCount} fichier(s) ignoré(s) (pas de version disponible)`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      setToast('⏳ Export PDF en cours (peut prendre 2-5 min)...');
+
+      console.log('[PDFExport] Version URNs pour export:', versionUrns);
+
       const result = await exportPDFs(
         selectedProject,
-        selectedArray.map((item) => item.id),
+        versionUrns,
         {
           uploadToACC: uploadPDFsToACC,
           accFolderId: targetFolderId,
         }
       );
 
-      const pdfCount = Array.isArray(result?.data?.pdfs) ? result.data.pdfs.length : 0;
+      console.log('[PDFExport] Résultat:', result);
 
-      const successMsg = uploadPDFsToACC
-        ? `✅ ${pdfCount} PDF(s) exportés et uploadés vers ACC !`
-        : `✅ ${pdfCount} PDF(s) exportés !`;
+      const pdfCount = result.data?.pdfs?.length || 0;
+      const uploadCount = result.data?.uploadResults?.filter((u) => u.success).length || 0;
+
+      let successMsg = `✅ ${pdfCount} PDF(s) exporté(s) !`;
+
+      if (uploadPDFsToACC && uploadCount > 0) {
+        successMsg = `✅ ${pdfCount} PDF(s) exporté(s) et ${uploadCount} uploadé(s) vers ACC !`;
+      }
+
+      if (result.data?.translationTriggered) {
+        successMsg += ' (Première extraction effectuée)';
+      }
 
       setToast(successMsg);
-      setTimeout(() => setToast(''), 5000);
+      setTimeout(() => setToast(''), 6000);
 
       setSelectedItems({});
     } catch (e) {
+      console.error('[PDFExport] Erreur:', e);
       setToast('❌ ' + (e?.message || 'Erreur export PDF'));
       setTimeout(() => setToast(''), 5000);
     } finally {
