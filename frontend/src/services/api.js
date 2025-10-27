@@ -80,4 +80,24 @@ export async function getJobRuns(jobId, params = {}) {
   return data?.data || [];
 }
 
+/**
+ *
+ * Export PDF des sheets et vues 2D
+ * @param {string} projectId - ID du projet
+ * @param {string[]} fileUrns - URNs des fichiers Revit
+ * @param {object} options - Options d'export
+ * @returns {Promise<object>}
+ */
+export async function exportPDFs(projectId, fileUrns, options = {}) {
+  const { uploadToACC = false, accFolderId = null } = options;
+
+  const response = await api.post('/pdf-export/export', {
+    projectId,
+    fileUrns,
+    uploadToACC,
+    accFolderId
+  });
+  return response.data;
+}
+
 export default api;
