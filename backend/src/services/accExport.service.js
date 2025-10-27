@@ -107,13 +107,22 @@ class ACCExportService {
     // Retirer le préfixe 'b.' si présent
     const cleanProjectId = projectId.replace(/^b\./, '');
 
+    logger.info(`[ACCExport] projectId original: ${projectId}`);
+    logger.info(`[ACCExport] projectId nettoyé: ${cleanProjectId}`);
+    logger.info(`[ACCExport] fileUrns: ${JSON.stringify(fileUrns)}`);
+
     const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${cleanProjectId}/export/pdf-files`;
+
+    logger.info(`[ACCExport] URL complète: ${url}`);
+
     const files = fileUrns.map((urn) => ({
       id: urn,
       markupVersionStatus: 'published',
       includeFeatureMarkups: true,
       featureMarkupStatus: 'published',
     }));
+
+    logger.info(`[ACCExport] Body envoyé: ${JSON.stringify({ files }, null, 2)}`);
 
     try {
       const response = await axios.post(
@@ -131,6 +140,18 @@ class ACCExportService {
     } catch (error) {
       if (error.response) {
         logger.error(`[ACCExport] Erreur API: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
+        logger.error(`[ACCExport] Headers response: ${JSON.stringify(error.response.headers)}`);
+        logger.error(
+          `[ACCExport] Request config: ${JSON.stringify(
+            {
+              url: error.config?.url,
+              method: error.config?.method,
+              data: error.config?.data,
+            },
+            null,
+            2
+          )}`
+        );
         throw new Error(`API ACC Export: ${error.response.data.message || error.response.statusText}`);
       }
       throw error;
