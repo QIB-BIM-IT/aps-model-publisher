@@ -12,7 +12,6 @@ import {
   runPublishJobNow,
   getRuns,
   exportPDFs,
-  getItemVersions,
 } from '../services/api';
 
 // Helpers
@@ -167,7 +166,15 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
           <input
             type="checkbox"
             checked={checked}
-            onChange={() => onToggleSelect(id, node)}
+            onChange={() => {
+              const tipVersionUrn = node?.relationships?.tip?.data?.id || null;
+              const itemData = {
+                ...node,
+                publishUrn: id,
+                versionUrn: tipVersionUrn,
+              };
+              onToggleSelect(id, itemData);
+            }}
             style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#2563eb' }}
           />
         )}
@@ -428,15 +435,18 @@ export default function PlanningPage() {
     }
   }
 
-  function toggleSelect(itemId, node) {
+  function toggleSelect(itemId, nodeData) {
     setSelectedItems((prev) => {
       const nxt = { ...prev };
       if (nxt[itemId]) {
         delete nxt[itemId];
       } else {
+        const versionUrn =
+          nodeData?.versionUrn || nodeData?.relationships?.tip?.data?.id || null;
         nxt[itemId] = {
-          ...node,
+          ...nodeData,
           publishUrn: itemId,
+          versionUrn,
         };
       }
       return nxt;
@@ -461,24 +471,27 @@ export default function PlanningPage() {
         targetFolderId = idOf(topFolders[0]);
       }
 
-      setToast('⏳ Récupération des versions des fichiers...');
+      const selectedValues = Object.values(selectedItems);
+      const versionUrns = Array.from(
+        new Set(
+          selectedValues
+            .map((item) => item?.versionUrn)
+            .filter((urn) => typeof urn === 'string' && urn.length > 0)
+        )
+      );
 
-      const itemUrns = selectedArray.map((item) => item.id);
-
-      console.log('[PDFExport] Item URNs:', itemUrns);
-
-      const versionsData = await getItemVersions(selectedProject, itemUrns);
-
-      console.log('[PDFExport] Versions récupérées:', versionsData);
-
-      const versionUrns = versionsData.data.filter((v) => v.versionUrn).map((v) => v.versionUrn);
+      console.log('[PDFExport] selectedItems:', selectedItems);
+      console.log('[PDFExport] Version URNs extraits:', versionUrns);
 
       if (versionUrns.length === 0) {
-        throw new Error('Aucune version trouvée pour les fichiers sélectionnés');
+        throw new Error(
+          'Aucune version URN disponible. ' +
+            'Les fichiers doivent être re-sélectionnés après cette mise à jour.'
+        );
       }
 
-      if (versionUrns.length < itemUrns.length) {
-        const notFoundCount = itemUrns.length - versionUrns.length;
+      if (versionUrns.length < selectedValues.length) {
+        const notFoundCount = selectedValues.length - versionUrns.length;
         setToast(`⚠️ ${notFoundCount} fichier(s) ignoré(s) (pas de version disponible)`);
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
