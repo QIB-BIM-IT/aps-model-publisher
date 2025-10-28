@@ -19,7 +19,8 @@ router.post('/export', asyncHandler(async (req, res) => {
     projectId,
     fileUrns,
     uploadToACC = false,
-    accFolderId = null
+    accFolderId = null,
+    versionUrns = [],
   } = req.body;
 
   // Validation
@@ -33,6 +34,10 @@ router.post('/export', asyncHandler(async (req, res) => {
     throw new ValidationError('accFolderId requis si uploadToACC=true');
   }
 
+  if (versionUrns && !Array.isArray(versionUrns)) {
+    throw new ValidationError('versionUrns doit être un array si fourni');
+  }
+
   logger.info(`[PDFExport] Export demandé par user ${req.userId} pour ${fileUrns.length} fichier(s)`);
 
   // Lancer l'export
@@ -42,7 +47,8 @@ router.post('/export', asyncHandler(async (req, res) => {
     {
       userId: req.userId,
       uploadToACC,
-      accFolderId
+      accFolderId,
+      versionUrns,
     }
   );
 
@@ -57,14 +63,15 @@ router.post('/export', asyncHandler(async (req, res) => {
  * Vérifie si un fichier est prêt pour export PDF
  */
 router.get('/check-readiness', asyncHandler(async (req, res) => {
-  const { fileUrn } = req.query;
+  const { versionUrn, fileUrn } = req.query;
+  const targetUrn = versionUrn || fileUrn;
 
-  if (!fileUrn) {
-    throw new ValidationError('fileUrn requis');
+  if (!targetUrn) {
+    throw new ValidationError('versionUrn requis');
   }
 
   const accessToken = await apsAuthService.ensureValidToken(req.userId);
-  const readiness = await accExportService.checkFileReadiness(fileUrn, accessToken);
+  const readiness = await accExportService.checkFileReadiness(targetUrn, accessToken);
 
   res.json({
     success: true,

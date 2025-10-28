@@ -26,6 +26,7 @@ class ACCExportService {
         downloadLocally = false,
         localPath = null,
         autoTranslate = true,
+        versionUrns = [],
       } = options;
 
       if (!projectId) {
@@ -41,16 +42,34 @@ class ACCExportService {
       // 1. Obtenir le token d'accès
       const accessToken = await apsAuthService.ensureValidToken(userId);
 
+      const usingVersionUrns = Array.isArray(versionUrns) && versionUrns.length > 0;
+      const readinessUrns = usingVersionUrns ? versionUrns : fileUrns;
+
+      if (usingVersionUrns) {
+        logger.info(
+          `[ACCExport] Vérification readiness via ${versionUrns.length} version URN(s)`
+        );
+        if (versionUrns.length !== fileUrns.length) {
+          logger.warn(
+            `[ACCExport] ${versionUrns.length} version(s) pour ${fileUrns.length} fichier(s) sélectionné(s)`
+          );
+        }
+      } else {
+        logger.warn(
+          '[ACCExport] Pas de version URNs fournis, vérification via lineage URNs (fallback)'
+        );
+      }
+
       // ✅ Vérifier que les fichiers sont prêts pour l'export
-      const readinessByFile = await Promise.all(
-        fileUrns.map(async (urn) => ({
+      const readinessByUrn = await Promise.all(
+        readinessUrns.map(async (urn) => ({
           urn,
           readiness: await this.checkFileReadiness(urn, accessToken),
         }))
       );
 
-      const notReady = readinessByFile.filter(({ readiness }) => !readiness.ready);
-      const translationTriggered = notReady.length > 0 && autoTranslate;
+      const notReady = readinessByUrn.filter(({ readiness }) => !readiness.ready);
+      let translationTriggered = false;
 
       if (notReady.length > 0) {
         const notReadyDetails = notReady
@@ -62,12 +81,18 @@ class ACCExportService {
 
         logger.warn(`[ACCExport] ${notReady.length} fichier(s) non prêt(s): ${notReadyDetails}`);
 
-        if (!autoTranslate) {
-          throw new Error(
+        if (!autoTranslate || !usingVersionUrns) {
+          const baseMessage =
             `${notReady.length} fichier(s) non prêt(s) pour export PDF. ` +
-              "Les fichiers doivent être publiés dans ACC et extraits par APS d'abord. " +
-              `Status: ${notReady.map(({ readiness }) => readiness.status).join(', ')}`
-          );
+            "Les fichiers doivent être publiés dans ACC et extraits par APS d'abord. ";
+
+          const translationHint = usingVersionUrns
+            ? `Status: ${notReady.map(({ readiness }) => readiness.status).join(', ')}`
+            :
+                'Impossible de lancer la traduction sans version URN valide. ' +
+                'Réessayez après avoir rechargé la liste des fichiers.';
+
+          throw new Error(baseMessage + translationHint);
         }
 
         logger.info(`[ACCExport] ${notReady.length} fichier(s) non traduit(s), lancement extraction...`);
@@ -95,6 +120,7 @@ class ACCExportService {
           }
         }
 
+        translationTriggered = true;
         logger.info('[ACCExport] ✅ Tous les fichiers sont maintenant prêts');
       }
 
@@ -162,11 +188,12 @@ class ACCExportService {
   }
 
   /**
-   * Déclenche la traduction d'un fichier via Model Derivative
+   * Déclenche la traduction d'une version via Model Derivative
+   * @param {string} versionUrn - URN de version (fs.file:...)
    */
-  async triggerTranslation(fileUrn, accessToken) {
+  async triggerTranslation(versionUrn, accessToken) {
     try {
-      const encodedUrn = Buffer.from(fileUrn)
+      const encodedUrn = Buffer.from(versionUrn)
         .toString('base64')
         .replace(/\+/g, '-')
         .replace(/\//g, '_')
@@ -174,7 +201,7 @@ class ACCExportService {
 
       const url = 'https://developer.api.autodesk.com/modelderivative/v2/designdata/job';
 
-      logger.info(`[ACCExport] Lancement traduction pour: ${fileUrn}`);
+      logger.info(`[ACCExport] Lancement traduction pour: ${versionUrn}`);
 
       const response = await axios.post(
         url,
@@ -224,16 +251,17 @@ class ACCExportService {
   }
 
   /**
-   * Attend que la traduction soit terminée
+   * Attend que la traduction d'une version soit terminée
+   * @param {string} versionUrn - URN de version (fs.file:...)
    */
-  async waitForTranslation(fileUrn, accessToken, maxWaitMs = 300000) {
+  async waitForTranslation(versionUrn, accessToken, maxWaitMs = 300000) {
     const startTime = Date.now();
     const pollInterval = 10000;
 
     logger.info('[ACCExport] Attente de la traduction...');
 
     while (Date.now() - startTime < maxWaitMs) {
-      const readiness = await this.checkFileReadiness(fileUrn, accessToken);
+      const readiness = await this.checkFileReadiness(versionUrn, accessToken);
 
       if (readiness.ready) {
         logger.info('[ACCExport] ✅ Traduction terminée');
@@ -254,12 +282,12 @@ class ACCExportService {
   }
 
   /**
-   * Vérifie si un fichier a déjà été traduit par Model Derivative
-   * et possède des dérivés PDF utilisables.
+   * Vérifie si une version dispose déjà d'un manifest Model Derivative utilisable.
+   * @param {string} modelDerivativeUrn - URN compatible Model Derivative (version URN recommandé)
    */
-  async checkFileReadiness(fileUrn, accessToken) {
+  async checkFileReadiness(modelDerivativeUrn, accessToken) {
     try {
-      const encodedUrn = Buffer.from(fileUrn)
+      const encodedUrn = Buffer.from(modelDerivativeUrn)
         .toString('base64')
         .replace(/\+/g, '-')
         .replace(/\//g, '_')
@@ -267,7 +295,7 @@ class ACCExportService {
 
       const url = `https://developer.api.autodesk.com/modelderivative/v2/designdata/${encodedUrn}/manifest`;
 
-      logger.info(`[ACCExport] Vérification du manifest pour: ${fileUrn}`);
+      logger.info(`[ACCExport] Vérification du manifest pour: ${modelDerivativeUrn}`);
 
       const response = await axios.get(url, {
         headers: {
@@ -297,7 +325,9 @@ class ACCExportService {
       };
     } catch (error) {
       if (error.response?.status === 404) {
-        logger.warn(`[ACCExport] Aucun manifest trouvé pour ${fileUrn} - fichier jamais traduit`);
+        logger.warn(
+          `[ACCExport] Aucun manifest trouvé pour ${modelDerivativeUrn} - fichier jamais traduit`
+        );
         return {
           ready: false,
           status: 'not_translated',
