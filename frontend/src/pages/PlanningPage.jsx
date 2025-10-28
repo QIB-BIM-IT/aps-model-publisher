@@ -168,10 +168,14 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
             checked={checked}
             onChange={() => {
               const tipVersionUrn = node?.relationships?.tip?.data?.id || null;
+              const cleanedVersionUrn =
+                typeof tipVersionUrn === 'string' && tipVersionUrn.includes('?version=')
+                  ? tipVersionUrn.split('?')[0]
+                  : tipVersionUrn;
               const itemData = {
                 ...node,
                 publishUrn: id,
-                versionUrn: tipVersionUrn,
+                versionUrn: cleanedVersionUrn,
               };
               onToggleSelect(id, itemData);
             }}
@@ -489,7 +493,15 @@ export default function PlanningPage() {
       const versionUrns = Array.from(
         new Set(
           selectedValues
-            .map((item) => item?.versionUrn)
+            .map((item) => {
+              const versionUrn = item?.versionUrn;
+              if (typeof versionUrn !== 'string' || versionUrn.length === 0) {
+                return null;
+              }
+              return versionUrn.includes('?version=')
+                ? versionUrn.split('?')[0]
+                : versionUrn;
+            })
             .filter((urn) => typeof urn === 'string' && urn.length > 0)
         )
       );
@@ -500,7 +512,7 @@ export default function PlanningPage() {
 
       console.log('[PDFExport] selectedItems:', selectedItems);
       console.log('[PDFExport] Lineage URNs extraits:', lineageUrns);
-      console.log('[PDFExport] Version URNs extraits:', versionUrns);
+      console.log('[PDFExport] Version URNs extraits (nettoyés):', versionUrns);
 
       if (lineageUrns.length === 0) {
         throw new Error(
