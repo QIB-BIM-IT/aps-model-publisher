@@ -109,7 +109,7 @@ export async function exportPDFs(projectId, fileUrns, options = {}) {
  * @returns {Promise<object>}
  */
 export async function getItemVersions(projectId, itemUrns) {
-  const response = await api.post('/aps/items/versions', {
+  const response = await api.post('/api/aps/items/versions', {
     projectId,
     itemUrns
   });
