@@ -203,29 +203,70 @@ class ACCExportService {
 
       logger.info(`[ACCExport] Lancement traduction pour: ${versionUrn}`);
 
-      const response = await axios.post(
-        url,
-        {
-          input: {
-            urn: encodedUrn,
+      // ✅ Essayer d'abord avec le token 3-legged
+      let response;
+      try {
+        response = await axios.post(
+          url,
+          {
+            input: {
+              urn: encodedUrn,
+            },
+            output: {
+              formats: [
+                {
+                  type: 'svf2',
+                  views: ['2d', '3d'],
+                },
+              ],
+            },
           },
-          output: {
-            formats: [
-              {
-                type: 'svf2',
-                views: ['2d', '3d'],
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+              'x-ads-force': 'true',
+            },
+          }
+        );
+      } catch (error) {
+        // Si 401, essayer avec token 2-legged
+        if (error.response?.status === 401) {
+          logger.warn(`[ACCExport] 401 traduction avec token 3-legged, essai 2-legged...`);
+
+          const twoLeggedToken = await apsAuthService.getTwoLeggedToken([
+            'data:read',
+            'data:write',
+            'viewables:read',
+          ]);
+
+          response = await axios.post(
+            url,
+            {
+              input: {
+                urn: encodedUrn,
               },
-            ],
-          },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'x-ads-force': 'true',
-          },
+              output: {
+                formats: [
+                  {
+                    type: 'svf2',
+                    views: ['2d', '3d'],
+                  },
+                ],
+              },
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${twoLeggedToken.access_token}`,
+                'Content-Type': 'application/json',
+                'x-ads-force': 'true',
+              },
+            }
+          );
+        } else {
+          throw error;
         }
-      );
+      }
 
       logger.info('[ACCExport] Traduction lancée avec succès');
       return response.data;
@@ -297,11 +338,31 @@ class ACCExportService {
 
       logger.info(`[ACCExport] Vérification du manifest pour: ${modelDerivativeUrn}`);
 
-      const response = await axios.get(url, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
+      // ✅ IMPORTANT : Model Derivative API préfère un token avec SEULEMENT viewables:read
+      // Essayer d'abord avec le token 3-legged, puis fallback sur 2-legged
+      let response;
+      try {
+        response = await axios.get(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+      } catch (error) {
+        // Si 401, essayer avec un token 2-legged (viewables:read seulement)
+        if (error.response?.status === 401) {
+          logger.warn(`[ACCExport] 401 avec token 3-legged, essai avec token 2-legged...`);
+
+          const twoLeggedToken = await apsAuthService.getTwoLeggedToken(['viewables:read']);
+
+          response = await axios.get(url, {
+            headers: {
+              Authorization: `Bearer ${twoLeggedToken.access_token}`,
+            },
+          });
+        } else {
+          throw error;
+        }
+      }
 
       const manifest = response.data;
       const status = manifest.status;
