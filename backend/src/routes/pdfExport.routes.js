@@ -5,7 +5,6 @@ const router = express.Router();
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { asyncHandler, ValidationError } = require('../middleware/errorHandler.middleware');
 const accExportService = require('../services/accExport.service');
-const apsAuthService = require('../services/apsAuth.service');
 const logger = require('../config/logger');
 
 router.use(authenticateToken);
@@ -20,7 +19,6 @@ router.post('/export', asyncHandler(async (req, res) => {
     fileUrns,
     uploadToACC = false,
     accFolderId = null,
-    versionUrns = [],
   } = req.body;
 
   // Validation
@@ -34,10 +32,6 @@ router.post('/export', asyncHandler(async (req, res) => {
     throw new ValidationError('accFolderId requis si uploadToACC=true');
   }
 
-  if (versionUrns && !Array.isArray(versionUrns)) {
-    throw new ValidationError('versionUrns doit être un array si fourni');
-  }
-
   logger.info(`[PDFExport] Export demandé par user ${req.userId} pour ${fileUrns.length} fichier(s)`);
 
   // Lancer l'export
@@ -48,7 +42,6 @@ router.post('/export', asyncHandler(async (req, res) => {
       userId: req.userId,
       uploadToACC,
       accFolderId,
-      versionUrns,
     }
   );
 
@@ -60,22 +53,16 @@ router.post('/export', asyncHandler(async (req, res) => {
 
 /**
  * GET /api/pdf-export/check-readiness
- * Vérifie si un fichier est prêt pour export PDF
+ * Point de terminaison conservé pour compatibilité mais toujours prêt côté ACC Export.
  */
 router.get('/check-readiness', asyncHandler(async (req, res) => {
-  const { versionUrn, fileUrn } = req.query;
-  const targetUrn = versionUrn || fileUrn;
-
-  if (!targetUrn) {
-    throw new ValidationError('versionUrn requis');
-  }
-
-  const accessToken = await apsAuthService.ensureValidToken(req.userId);
-  const readiness = await accExportService.checkFileReadiness(targetUrn, accessToken);
-
   res.json({
     success: true,
-    data: readiness,
+    data: {
+      ready: true,
+      status: 'managed_by_acc_export',
+      message: "L'ACC Export API gère automatiquement la préparation des fichiers.",
+    },
   });
 }));
 
