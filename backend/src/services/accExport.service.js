@@ -42,6 +42,21 @@ class ACCExportService {
       // 1. Obtenir le token d'accès
       const accessToken = await apsAuthService.ensureValidToken(userId);
 
+      logger.info(`[ACCExport] Token utilisateur commence par: ${accessToken.substring(0, 20)}...`);
+
+      try {
+        const tokenParts = accessToken.split('.');
+        if (tokenParts.length === 3) {
+          const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
+          logger.info(`[ACCExport] Scopes du token utilisateur: ${JSON.stringify(payload.scope)}`);
+          logger.info(
+            `[ACCExport] Token expire à: ${new Date(payload.exp * 1000).toISOString()}`
+          );
+        }
+      } catch (e) {
+        logger.warn(`[ACCExport] Impossible de décoder le token: ${e.message}`);
+      }
+
       const usingVersionUrns = Array.isArray(versionUrns) && versionUrns.length > 0;
       const readinessUrns = usingVersionUrns ? versionUrns : fileUrns;
 
@@ -353,6 +368,13 @@ class ACCExportService {
           logger.warn(`[ACCExport] 401 avec token 3-legged, essai avec token 2-legged...`);
 
           const twoLeggedToken = await apsAuthService.getTwoLeggedToken(['viewables:read']);
+
+          logger.info(
+            `[ACCExport] Token 2-legged obtenu, scopes: ${twoLeggedToken.scope}`
+          );
+          logger.info(
+            `[ACCExport] Token commence par: ${twoLeggedToken.access_token.substring(0, 20)}...`
+          );
 
           response = await axios.get(url, {
             headers: {
