@@ -89,13 +89,18 @@ export async function getJobRuns(jobId, params = {}) {
  * @returns {Promise<object>}
  */
 export async function exportPDFs(projectId, fileUrns, options = {}) {
-  const { uploadToACC = false, accFolderId = null } = options;
+  const {
+    uploadToACC = false,
+    accFolderId = null,
+    versionUrns = [],
+  } = options;
 
   const response = await api.post('/api/pdf-export/export', {
     projectId,
     fileUrns,
     uploadToACC,
-    accFolderId
+    accFolderId,
+    versionUrns,
   });
   return response.data;
 }

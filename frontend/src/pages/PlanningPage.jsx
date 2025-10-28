@@ -472,6 +472,20 @@ export default function PlanningPage() {
       }
 
       const selectedValues = Object.values(selectedItems);
+
+      const lineageUrns = Array.from(
+        new Set(
+          selectedValues
+            .map((item) => item?.publishUrn || item?.id || null)
+            .filter((urn) => typeof urn === 'string' && urn.length > 0)
+        )
+      );
+
+      const missingLineageCount = selectedValues.filter((item) => {
+        const urn = item?.publishUrn || item?.id;
+        return !(typeof urn === 'string' && urn.length > 0);
+      }).length;
+
       const versionUrns = Array.from(
         new Set(
           selectedValues
@@ -480,8 +494,25 @@ export default function PlanningPage() {
         )
       );
 
+      const missingVersionCount = selectedValues.filter(
+        (item) => !(typeof item?.versionUrn === 'string' && item.versionUrn.length > 0)
+      ).length;
+
       console.log('[PDFExport] selectedItems:', selectedItems);
+      console.log('[PDFExport] Lineage URNs extraits:', lineageUrns);
       console.log('[PDFExport] Version URNs extraits:', versionUrns);
+
+      if (lineageUrns.length === 0) {
+        throw new Error(
+          'Aucun lineage URN disponible. ' +
+            'Réessaie après avoir rechargé la liste des maquettes.'
+        );
+      }
+
+      if (missingLineageCount > 0) {
+        setToast(`⚠️ ${missingLineageCount} fichier(s) ignoré(s) (item URN manquant)`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
 
       if (versionUrns.length === 0) {
         throw new Error(
@@ -490,22 +521,23 @@ export default function PlanningPage() {
         );
       }
 
-      if (versionUrns.length < selectedValues.length) {
-        const notFoundCount = selectedValues.length - versionUrns.length;
-        setToast(`⚠️ ${notFoundCount} fichier(s) ignoré(s) (pas de version disponible)`);
+      if (missingVersionCount > 0) {
+        setToast(`⚠️ ${missingVersionCount} fichier(s) ignoré(s) (pas de version disponible)`);
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
 
       setToast('⏳ Export PDF en cours (peut prendre 2-5 min)...');
 
-      console.log('[PDFExport] Version URNs pour export:', versionUrns);
+      console.log('[PDFExport] Lineage URNs pour export:', lineageUrns);
+      console.log('[PDFExport] Version URNs pour vérification:', versionUrns);
 
       const result = await exportPDFs(
         selectedProject,
-        versionUrns,
+        lineageUrns,
         {
           uploadToACC: uploadPDFsToACC,
           accFolderId: targetFolderId,
+          versionUrns,
         }
       );
 
