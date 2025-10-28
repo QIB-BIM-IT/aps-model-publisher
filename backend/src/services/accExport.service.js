@@ -12,6 +12,9 @@ class ACCExportService {
   /**
    * Export des sheets et vues 2D d'un ou plusieurs fichiers Revit en PDFs
    *
+   * IMPORTANT : l'ACC Export API gère automatiquement la préparation Model Derivative.
+   * Aucune vérification de manifest ou déclenchement de traduction n'est nécessaire côté app.
+   *
    * @param {string} projectId - ID du projet ACC (format: b.{guid})
    * @param {string[]} fileUrns - URNs des fichiers Revit
    * @param {object} options - Options d'export
@@ -25,8 +28,6 @@ class ACCExportService {
         accFolderId = null,
         downloadLocally = false,
         localPath = null,
-        autoTranslate = true,
-        versionUrns = [],
       } = options;
 
       if (!projectId) {
@@ -56,90 +57,6 @@ class ACCExportService {
       } catch (e) {
         logger.warn(`[ACCExport] Impossible de décoder le token: ${e.message}`);
       }
-
-      const usingVersionUrns = Array.isArray(versionUrns) && versionUrns.length > 0;
-      const readinessUrns = usingVersionUrns ? versionUrns : fileUrns;
-
-      if (usingVersionUrns) {
-        logger.info(
-          `[ACCExport] Vérification readiness via ${versionUrns.length} version URN(s)`
-        );
-        if (versionUrns.length !== fileUrns.length) {
-          logger.warn(
-            `[ACCExport] ${versionUrns.length} version(s) pour ${fileUrns.length} fichier(s) sélectionné(s)`
-          );
-        }
-      } else {
-        logger.warn(
-          '[ACCExport] Pas de version URNs fournis, vérification via lineage URNs (fallback)'
-        );
-      }
-
-      // ✅ Vérifier que les fichiers sont prêts pour l'export
-      const readinessByUrn = await Promise.all(
-        readinessUrns.map(async (urn) => ({
-          urn,
-          readiness: await this.checkFileReadiness(urn, accessToken),
-        }))
-      );
-
-      const notReady = readinessByUrn.filter(({ readiness }) => !readiness.ready);
-      let translationTriggered = false;
-
-      if (notReady.length > 0) {
-        const notReadyDetails = notReady
-          .map(
-            ({ urn, readiness }) =>
-              `${urn}: status=${readiness.status}, hasPDF=${readiness.hasPdfDerivatives}`
-          )
-          .join(', ');
-
-        logger.warn(`[ACCExport] ${notReady.length} fichier(s) non prêt(s): ${notReadyDetails}`);
-
-        if (!autoTranslate || !usingVersionUrns) {
-          const baseMessage =
-            `${notReady.length} fichier(s) non prêt(s) pour export PDF. ` +
-            "Les fichiers doivent être publiés dans ACC et extraits par APS d'abord. ";
-
-          const translationHint = usingVersionUrns
-            ? `Status: ${notReady.map(({ readiness }) => readiness.status).join(', ')}`
-            :
-                'Impossible de lancer la traduction sans version URN valide. ' +
-                'Réessayez après avoir rechargé la liste des fichiers.';
-
-          throw new Error(baseMessage + translationHint);
-        }
-
-        logger.info(`[ACCExport] ${notReady.length} fichier(s) non traduit(s), lancement extraction...`);
-
-        for (const { urn } of notReady) {
-          try {
-            await this.triggerTranslation(urn, accessToken);
-          } catch (translationError) {
-            logger.warn(
-              `[ACCExport] Erreur traduction ${urn}: ${translationError.message}`
-            );
-          }
-        }
-
-        logger.info('[ACCExport] Attente de la traduction (~2-5 minutes)...');
-        for (const { urn } of notReady) {
-          try {
-            await this.waitForTranslation(urn, accessToken, 300000);
-          } catch (waitError) {
-            logger.error(`[ACCExport] Timeout traduction ${urn}: ${waitError.message}`);
-            throw new Error(
-              `Le fichier ${urn} n'a pas pu être traduit dans le délai imparti. ` +
-                'Réessayez dans quelques minutes.'
-            );
-          }
-        }
-
-        translationTriggered = true;
-        logger.info('[ACCExport] ✅ Tous les fichiers sont maintenant prêts');
-      }
-
-      logger.info('[ACCExport] ✅ Tous les fichiers sont prêts pour export');
 
       // 2. Lancer l'export
       const exportJob = await this.startExport(projectId, fileUrns, accessToken);
@@ -189,7 +106,6 @@ class ACCExportService {
         method: 'acc-export',
         cost: 0,
         jobId: exportJob.id,
-        translationTriggered,
         pdfs: pdfs.map((p) => ({
           name: p.name,
           size: p.buffer.length,
@@ -203,229 +119,9 @@ class ACCExportService {
   }
 
   /**
-   * Déclenche la traduction d'une version via Model Derivative
-   * @param {string} versionUrn - URN de version (fs.file:...)
-   */
-  async triggerTranslation(versionUrn, accessToken) {
-    try {
-      const encodedUrn = Buffer.from(versionUrn)
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-
-      const url = 'https://developer.api.autodesk.com/modelderivative/v2/designdata/job';
-
-      logger.info(`[ACCExport] Lancement traduction pour: ${versionUrn}`);
-
-      // ✅ Essayer d'abord avec le token 3-legged
-      let response;
-      try {
-        response = await axios.post(
-          url,
-          {
-            input: {
-              urn: encodedUrn,
-            },
-            output: {
-              formats: [
-                {
-                  type: 'svf2',
-                  views: ['2d', '3d'],
-                },
-              ],
-            },
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              'Content-Type': 'application/json',
-              'x-ads-force': 'true',
-            },
-          }
-        );
-      } catch (error) {
-        // Si 401, essayer avec token 2-legged
-        if (error.response?.status === 401) {
-          logger.warn(`[ACCExport] 401 traduction avec token 3-legged, essai 2-legged...`);
-
-          const twoLeggedToken = await apsAuthService.getTwoLeggedToken([
-            'data:read',
-            'data:write',
-            'viewables:read',
-          ]);
-
-          response = await axios.post(
-            url,
-            {
-              input: {
-                urn: encodedUrn,
-              },
-              output: {
-                formats: [
-                  {
-                    type: 'svf2',
-                    views: ['2d', '3d'],
-                  },
-                ],
-              },
-            },
-            {
-              headers: {
-                Authorization: `Bearer ${twoLeggedToken.access_token}`,
-                'Content-Type': 'application/json',
-                'x-ads-force': 'true',
-              },
-            }
-          );
-        } else {
-          throw error;
-        }
-      }
-
-      logger.info('[ACCExport] Traduction lancée avec succès');
-      return response.data;
-    } catch (error) {
-      if (error.response) {
-        if (error.response.status === 409) {
-          logger.info('[ACCExport] Traduction déjà en cours pour ce fichier');
-          return { status: 'inprogress' };
-        }
-
-        logger.error(
-          `[ACCExport] Erreur traduction: ${error.response.status} - ${JSON.stringify(
-            error.response.data
-          )}`
-        );
-        throw new Error(
-          `Erreur traduction: ${error.response.data.diagnostic || error.response.statusText}`
-        );
-      }
-
-      throw error;
-    }
-  }
-
-  /**
-   * Attend que la traduction d'une version soit terminée
-   * @param {string} versionUrn - URN de version (fs.file:...)
-   */
-  async waitForTranslation(versionUrn, accessToken, maxWaitMs = 300000) {
-    const startTime = Date.now();
-    const pollInterval = 10000;
-
-    logger.info('[ACCExport] Attente de la traduction...');
-
-    while (Date.now() - startTime < maxWaitMs) {
-      const readiness = await this.checkFileReadiness(versionUrn, accessToken);
-
-      if (readiness.ready) {
-        logger.info('[ACCExport] ✅ Traduction terminée');
-        return true;
-      }
-
-      if (readiness.status === 'failed') {
-        throw new Error('La traduction a échoué');
-      }
-
-      logger.debug(
-        `[ACCExport] Status: ${readiness.status}, Progress: ${readiness.progress}`
-      );
-      await this.sleep(pollInterval);
-    }
-
-    throw new Error(`Traduction timeout après ${maxWaitMs}ms`);
-  }
-
-  /**
-   * Vérifie si une version dispose déjà d'un manifest Model Derivative utilisable.
-   * @param {string} modelDerivativeUrn - URN compatible Model Derivative (version URN recommandé)
-   */
-  async checkFileReadiness(modelDerivativeUrn, accessToken) {
-    try {
-      const encodedUrn = Buffer.from(modelDerivativeUrn)
-        .toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-
-      const url = `https://developer.api.autodesk.com/modelderivative/v2/designdata/${encodedUrn}/manifest`;
-
-      logger.info(`[ACCExport] Vérification du manifest pour: ${modelDerivativeUrn}`);
-
-      // ✅ IMPORTANT : Model Derivative API préfère un token avec SEULEMENT viewables:read
-      // Essayer d'abord avec le token 3-legged, puis fallback sur 2-legged
-      let response;
-      try {
-        response = await axios.get(url, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-      } catch (error) {
-        // Si 401, essayer avec un token 2-legged (viewables:read seulement)
-        if (error.response?.status === 401) {
-          logger.warn(`[ACCExport] 401 avec token 3-legged, essai avec token 2-legged...`);
-
-          const twoLeggedToken = await apsAuthService.getTwoLeggedToken(['viewables:read']);
-
-          logger.info(
-            `[ACCExport] Token 2-legged obtenu, scopes: ${twoLeggedToken.scope}`
-          );
-          logger.info(
-            `[ACCExport] Token commence par: ${twoLeggedToken.access_token.substring(0, 20)}...`
-          );
-
-          response = await axios.get(url, {
-            headers: {
-              Authorization: `Bearer ${twoLeggedToken.access_token}`,
-            },
-          });
-        } else {
-          throw error;
-        }
-      }
-
-      const manifest = response.data;
-      const status = manifest.status;
-      const progress = manifest.progress;
-
-      logger.info(`[ACCExport] Manifest status: ${status}, progress: ${progress}`);
-
-      const hasPdfDerivatives = manifest.derivatives?.some((derivative) =>
-        derivative.children?.some(
-          (child) => child.role === '2d' && child.properties?.['Print Setting']
-        )
-      );
-
-      logger.info(`[ACCExport] PDF derivatives disponibles: ${hasPdfDerivatives}`);
-
-      return {
-        ready: status === 'success' && Boolean(hasPdfDerivatives),
-        status,
-        progress,
-        hasPdfDerivatives: Boolean(hasPdfDerivatives),
-      };
-    } catch (error) {
-      if (error.response?.status === 404) {
-        logger.warn(
-          `[ACCExport] Aucun manifest trouvé pour ${modelDerivativeUrn} - fichier jamais traduit`
-        );
-        return {
-          ready: false,
-          status: 'not_translated',
-          progress: 0,
-          hasPdfDerivatives: false,
-        };
-      }
-
-      logger.error(`[ACCExport] Erreur vérification readiness: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Lance l'export PDF via l'API ACC
+   * Lance l'export PDF via l'API ACC.
+   *
+   * IMPORTANT : fournir les LINEAGE URNs (dm.lineage) et non les URNs de version.
    */
   async startExport(projectId, fileUrns, accessToken) {
     // Retirer le préfixe 'b.' si présent
@@ -463,20 +159,18 @@ class ACCExportService {
       return response.data;
     } catch (error) {
       if (error.response) {
-        logger.error(`[ACCExport] Erreur API: ${error.response.status} - ${JSON.stringify(error.response.data)}`);
-        logger.error(`[ACCExport] Headers response: ${JSON.stringify(error.response.headers)}`);
         logger.error(
-          `[ACCExport] Request config: ${JSON.stringify(
-            {
-              url: error.config?.url,
-              method: error.config?.method,
-              data: error.config?.data,
-            },
-            null,
-            2
-          )}`
+          `[ACCExport] Erreur API: ${error.response.status} - ${JSON.stringify(error.response.data)}`
         );
-        throw new Error(`API ACC Export: ${error.response.data.message || error.response.statusText}`);
+        logger.error(`[ACCExport] Headers response: ${JSON.stringify(error.response.headers)}`);
+        // Certains statuts comme 207 (partial success) renvoient quand même un payload exploitable
+        if (error.response.status === 200 || error.response.status === 207) {
+          return error.response.data;
+        }
+
+        throw new Error(
+          `API ACC Export: ${error.response.data.message || error.response.statusText}`
+        );
       }
       throw error;
     }

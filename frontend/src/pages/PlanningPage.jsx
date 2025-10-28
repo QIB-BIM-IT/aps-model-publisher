@@ -167,15 +167,9 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
             type="checkbox"
             checked={checked}
             onChange={() => {
-              const tipVersionUrn = node?.relationships?.tip?.data?.id || null;
-              const cleanedVersionUrn =
-                typeof tipVersionUrn === 'string' && tipVersionUrn.includes('?version=')
-                  ? tipVersionUrn.split('?')[0]
-                  : tipVersionUrn;
               const itemData = {
                 ...node,
                 publishUrn: id,
-                versionUrn: cleanedVersionUrn,
               };
               onToggleSelect(id, itemData);
             }}
@@ -445,12 +439,9 @@ export default function PlanningPage() {
       if (nxt[itemId]) {
         delete nxt[itemId];
       } else {
-        const versionUrn =
-          nodeData?.versionUrn || nodeData?.relationships?.tip?.data?.id || null;
         nxt[itemId] = {
           ...nodeData,
           publishUrn: itemId,
-          versionUrn,
         };
       }
       return nxt;
@@ -490,29 +481,8 @@ export default function PlanningPage() {
         return !(typeof urn === 'string' && urn.length > 0);
       }).length;
 
-      const versionUrns = Array.from(
-        new Set(
-          selectedValues
-            .map((item) => {
-              const versionUrn = item?.versionUrn;
-              if (typeof versionUrn !== 'string' || versionUrn.length === 0) {
-                return null;
-              }
-              return versionUrn.includes('?version=')
-                ? versionUrn.split('?')[0]
-                : versionUrn;
-            })
-            .filter((urn) => typeof urn === 'string' && urn.length > 0)
-        )
-      );
-
-      const missingVersionCount = selectedValues.filter(
-        (item) => !(typeof item?.versionUrn === 'string' && item.versionUrn.length > 0)
-      ).length;
-
       console.log('[PDFExport] selectedItems:', selectedItems);
       console.log('[PDFExport] Lineage URNs extraits:', lineageUrns);
-      console.log('[PDFExport] Version URNs extraits (nettoyés):', versionUrns);
 
       if (lineageUrns.length === 0) {
         throw new Error(
@@ -526,22 +496,9 @@ export default function PlanningPage() {
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
 
-      if (versionUrns.length === 0) {
-        throw new Error(
-          'Aucune version URN disponible. ' +
-            'Les fichiers doivent être re-sélectionnés après cette mise à jour.'
-        );
-      }
-
-      if (missingVersionCount > 0) {
-        setToast(`⚠️ ${missingVersionCount} fichier(s) ignoré(s) (pas de version disponible)`);
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
-
       setToast('⏳ Export PDF en cours (peut prendre 2-5 min)...');
 
       console.log('[PDFExport] Lineage URNs pour export:', lineageUrns);
-      console.log('[PDFExport] Version URNs pour vérification:', versionUrns);
 
       const result = await exportPDFs(
         selectedProject,
@@ -549,7 +506,6 @@ export default function PlanningPage() {
         {
           uploadToACC: uploadPDFsToACC,
           accFolderId: targetFolderId,
-          versionUrns,
         }
       );
 
@@ -562,10 +518,6 @@ export default function PlanningPage() {
 
       if (uploadPDFsToACC && uploadCount > 0) {
         successMsg = `✅ ${pdfCount} PDF(s) exporté(s) et ${uploadCount} uploadé(s) vers ACC !`;
-      }
-
-      if (result.data?.translationTriggered) {
-        successMsg += ' (Première extraction effectuée)';
       }
 
       setToast(successMsg);
