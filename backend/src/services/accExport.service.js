@@ -131,7 +131,7 @@ class ACCExportService {
     logger.info(`[ACCExport] projectId nettoyé: ${cleanProjectId}`);
     logger.info(`[ACCExport] fileUrns: ${JSON.stringify(fileUrns)}`);
 
-    const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${cleanProjectId}/export/pdf-files`;
+    const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${cleanProjectId}/exports/pdf-files`;
 
     logger.info(`[ACCExport] URL complète: ${url}`);
 
@@ -230,7 +230,7 @@ class ACCExportService {
    * Vérifie le statut d'un job d'export
    */
   async checkStatus(projectId, jobId, accessToken) {
-    const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${projectId}/export/${jobId}/status`;
+    const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${projectId}/exports/${jobId}/status`;
 
     try {
       const response = await axios.get(url, {
