@@ -43,6 +43,8 @@ class ACCExportService {
       // 1. Obtenir le token d'accès
       const accessToken = await apsAuthService.ensureValidToken(userId);
 
+      logger.info(`[ACCExport] TOKEN COMPLET (à copier): ${accessToken}`);
+
       logger.info(`[ACCExport] Token utilisateur commence par: ${accessToken.substring(0, 20)}...`);
 
       try {
