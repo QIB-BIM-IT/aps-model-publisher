@@ -67,12 +67,22 @@ class ACCExportService {
       // 3. Attendre la completion (polling)
       const result = await this.waitForCompletion(projectId, exportJob.id, accessToken);
 
-      if (!result || !result.signedUrl) {
+      logger.info('[ACCExport] Result reçu:', JSON.stringify(result, null, 2));
+      logger.info('[ACCExport] result.signedUrl:', result?.signedUrl);
+      logger.info('[ACCExport] result.output:', JSON.stringify(result?.output, null, 2));
+      logger.info('[ACCExport] result.output?.signedUrl:', result?.output?.signedUrl);
+
+      const signedUrl = result?.signedUrl || result?.output?.signedUrl;
+
+      if (!signedUrl) {
+        logger.error('[ACCExport] ❌ Aucun signedUrl trouvé dans:', JSON.stringify(result, null, 2));
         throw new Error('Résultat export invalide: URL de téléchargement manquante');
       }
 
+      logger.info(`[ACCExport] ✅ SignedUrl trouvé: ${signedUrl.substring(0, 60)}...`);
+
       // 4. Télécharger le ZIP
-      const zipBuffer = await this.downloadZip(result.signedUrl);
+      const zipBuffer = await this.downloadZip(signedUrl);
       logger.info(`[ACCExport] ZIP téléchargé: ${zipBuffer.length} bytes`);
 
       // 5. Extraire les PDFs individuels
@@ -193,6 +203,9 @@ class ACCExportService {
 
       if (status.status === 'successful') {
         logger.info('[ACCExport] ✅ Job terminé avec succès');
+        logger.info('[ACCExport] Réponse complète:', JSON.stringify(status, null, 2));
+        logger.info('[ACCExport] status.result:', JSON.stringify(status.result, null, 2));
+        logger.info('[ACCExport] status.result?.output:', JSON.stringify(status.result?.output, null, 2));
         return status.result;
       }
 
