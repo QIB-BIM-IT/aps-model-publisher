@@ -191,7 +191,7 @@ class ACCExportService {
 
       logger.debug(`[ACCExport] Status: ${status.status}`);
 
-      if (status.status === 'success') {
+      if (status.status === 'successful') {
         logger.info('[ACCExport] ✅ Job terminé avec succès');
         return status.result;
       }
@@ -220,8 +220,8 @@ class ACCExportService {
       }
 
       // Status inconnu
-      logger.warn(`[ACCExport] Status inconnu: ${status.status}`);
-      await this.sleep(pollInterval);
+      logger.error(`[ACCExport] Status inconnu: ${status.status}`);
+      throw new Error(`Status export inconnu: ${status.status}`);
     }
 
     throw new Error(`Export PDF timeout après ${maxWaitMs}ms`);
