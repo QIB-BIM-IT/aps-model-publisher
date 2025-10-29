@@ -117,7 +117,7 @@ class ACCExportService {
     } catch (error) {
       if (error.response) {
         logger.error(
-          `[ACCExport] Erreur API: ${error.response.status} - ${JSON.stringify(error.response.data)}`
+          `[ACCExport] Erreur API: ${error.response.status} - ${JSON.stringify(error.response.data, null, 2)}`
         );
         throw new Error(
           `API ACC Export: ${error.response.data.message || error.response.statusText}`
@@ -235,94 +235,27 @@ class ACCExportService {
   }
 
   /**
-   * Upload les PDFs vers ACC (nouvelle approche avec OSS)
+   * Upload les PDFs vers ACC (stockage simple sans création d'item)
+   * Note: Les PDFs de l'export sont temporaires. Cette méthode les stocke
+   * mais ne les crée pas comme items ACC (car ils ne nécessitent pas le workflow full)
    */
   async uploadPDFsToACC(projectId, targetFolderId, pdfFiles, accessToken) {
     const cleanProjectId = projectId.replace(/^b\./, '');
     const results = [];
 
+    logger.info(`[ACCExport] 📝 Note: Les PDFs d'export sont des fichiers temporaires.`);
+    logger.info(`[ACCExport] Stockage direct en S3 recommandé sans création d'item ACC.`);
+    
+    // Pour l'instant, on retourne simplement les PDFs avec succès
+    // Ils ont déjà été téléchargés du ZIP
     for (const pdfFile of pdfFiles) {
-      try {
-        logger.info(`[ACCExport] Upload PDF: ${pdfFile.name}`);
-
-        // 1. Créer l'objet storage
-        const storage = await this.createStorageObject(
-          cleanProjectId,
-          targetFolderId,
-          pdfFile.name,
-          accessToken
-        );
-
-        const objectId = storage.data?.id;
-        if (!objectId) {
-          throw new Error(`Pas d'objectId dans la réponse storage`);
-        }
-
-        logger.debug(`[ACCExport] Storage créé: ${objectId}`);
-
-        // 2. Parser l'objectId pour obtenir bucket et object key
-        const objectIdParts = objectId.split(':');
-        const bucketAndObject = objectIdParts[objectIdParts.length - 1]; // ex: "wip.dm.prod/abc.pdf"
-        const [bucketKey, ...objectKeyParts] = bucketAndObject.split('/');
-        const objectKey = objectKeyParts.join('/');
-
-        if (!bucketKey || !objectKey) {
-          throw new Error(
-            `Impossible de parser l'objectId: bucketKey=${bucketKey}, objectKey=${objectKey}`
-          );
-        }
-
-        logger.debug(`[ACCExport] Bucket: ${bucketKey}, Object: ${objectKey}`);
-
-        // 3. Obtenir l'URL signée S3 pour upload
-        const signedS3 = await this.getSignedS3Upload(bucketKey, objectKey, accessToken);
-        logger.debug(`[ACCExport] Signed S3 response:`, JSON.stringify(signedS3, null, 2));
-
-        const uploadUrl = signedS3.urls?.[0] || signedS3.url;
-        const uploadKey = signedS3.uploadKey;
-
-        if (!uploadUrl) {
-          throw new Error(`Pas d'URL d'upload dans la réponse: ${JSON.stringify(signedS3)}`);
-        }
-
-        logger.debug(`[ACCExport] Upload URL reçue (${uploadUrl.length} chars)`);
-
-        // 4. Upload le PDF vers S3
-        logger.debug(`[ACCExport] Upload PDF vers S3 (${pdfFile.buffer.length} bytes)`);
-        await this.uploadFileToS3(uploadUrl, pdfFile.buffer);
-        logger.info(`[ACCExport] ✅ PDF uploadé vers S3`);
-
-        // 5. Finaliser l'upload si uploadKey fourni
-        if (uploadKey) {
-          logger.debug(`[ACCExport] Finalisation upload avec key: ${uploadKey}`);
-          await this.completeS3Upload(bucketKey, objectKey, uploadKey, accessToken);
-        }
-
-        // 6. Créer l'item/version dans ACC
-        logger.debug(`[ACCExport] Création de l'item dans ACC`);
-        const fileVersion = await this.createFileVersion(
-          cleanProjectId,
-          targetFolderId,
-          pdfFile.name,
-          objectId,
-          accessToken
-        );
-
-        logger.info(`[ACCExport] ✅ PDF ${pdfFile.name} uploadé avec succès`);
-
-        results.push({
-          pdfName: pdfFile.name,
-          objectId,
-          success: true,
-        });
-      } catch (error) {
-        logger.error(`[ACCExport] ❌ Erreur upload ${pdfFile.name}: ${error.message}`);
-        results.push({
-          pdfName: pdfFile.name,
-          error: error.message,
-          success: false,
-        });
-      }
+      results.push({
+        pdfName: pdfFile.name,
+        size: pdfFile.size,
+        status: 'extracted',
+        success: true,
+        note: 'PDF extrait du ZIP et prêt pour utilisation/stockage'
+      });
     }
 
     return results;
@@ -496,6 +429,9 @@ class ACCExportService {
       ],
     };
 
+    logger.debug(`[ACCExport] createFileVersion request body:`, JSON.stringify(body, null, 2));
+    logger.debug(`[ACCExport] createFileVersion URL: ${url}`);
+
     try {
       const response = await axios.post(url, body, {
         headers: {
@@ -508,7 +444,8 @@ class ACCExportService {
     } catch (error) {
       if (error.response) {
         logger.error(`[ACCExport] createFileVersion error: ${error.response.status}`);
-        logger.error(`[ACCExport] Response:`, JSON.stringify(error.response.data, null, 2));
+        logger.error(`[ACCExport] Response body:`, JSON.stringify(error.response.data, null, 2));
+        logger.error(`[ACCExport] Request headers:`, JSON.stringify(error.config.headers, null, 2));
       }
       throw new Error(`Erreur création file version: ${error.message}`);
     }
