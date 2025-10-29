@@ -181,12 +181,13 @@ class ACCExportService {
    * Polling pour attendre la completion de l'export
    */
   async waitForCompletion(projectId, jobId, accessToken, maxWaitMs = 300000) {
+    const cleanProjectId = projectId.replace(/^b\./, '');
     const startTime = Date.now();
     const pollInterval = 5000; // 5 secondes
 
     logger.info(`[ACCExport] Attente completion du job ${jobId}...`);
     while (Date.now() - startTime < maxWaitMs) {
-      const status = await this.checkStatus(projectId, jobId, accessToken);
+      const status = await this.checkStatus(cleanProjectId, jobId, accessToken);
 
       logger.debug(`[ACCExport] Status: ${status.status}`);
 
@@ -230,7 +231,8 @@ class ACCExportService {
    * Vérifie le statut d'un job d'export
    */
   async checkStatus(projectId, jobId, accessToken) {
-    const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${projectId}/exports/${jobId}/status`;
+    const cleanProjectId = projectId.replace(/^b\./, '');
+    const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${cleanProjectId}/exports/${jobId}`;
 
     try {
       const response = await axios.get(url, {
