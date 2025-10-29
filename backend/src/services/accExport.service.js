@@ -124,11 +124,10 @@ class ACCExportService {
    * IMPORTANT : fournir les LINEAGE URNs (dm.lineage) et non les URNs de version.
    */
   async startExport(projectId, fileUrns, accessToken) {
-    // Retirer le préfixe 'b.' si présent
-    const cleanProjectId = projectId.replace(/^b\./, '');
+    const cleanProjectId = projectId;
 
     logger.info(`[ACCExport] projectId original: ${projectId}`);
-    logger.info(`[ACCExport] projectId nettoyé: ${cleanProjectId}`);
+    logger.info(`[ACCExport] projectId utilisé: ${cleanProjectId}`);
     logger.info(`[ACCExport] fileUrns: ${JSON.stringify(fileUrns)}`);
 
     const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${cleanProjectId}/exports/pdf-files`;
@@ -180,13 +179,12 @@ class ACCExportService {
    * Polling pour attendre la completion de l'export
    */
   async waitForCompletion(projectId, jobId, accessToken, maxWaitMs = 300000) {
-    const cleanProjectId = projectId.replace(/^b\./, '');
     const startTime = Date.now();
     const pollInterval = 5000; // 5 secondes
 
     logger.info(`[ACCExport] Attente completion du job ${jobId}...`);
     while (Date.now() - startTime < maxWaitMs) {
-      const status = await this.checkStatus(cleanProjectId, jobId, accessToken);
+      const status = await this.checkStatus(projectId, jobId, accessToken);
 
       logger.debug(`[ACCExport] Status: ${status.status}`);
 
