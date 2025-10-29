@@ -11,14 +11,6 @@ const apsAuthService = require('./apsAuth.service');
 class ACCExportService {
   /**
    * Export des sheets et vues 2D d'un ou plusieurs fichiers Revit en PDFs
-   *
-   * IMPORTANT : l'ACC Export API gère automatiquement la préparation Model Derivative.
-   * Aucune vérification de manifest ou déclenchement de traduction n'est nécessaire côté app.
-   *
-   * @param {string} projectId - ID du projet ACC (format: b.{guid})
-   * @param {string[]} fileUrns - URNs des fichiers Revit
-   * @param {object} options - Options d'export
-   * @returns {Promise<object>} Résultat de l'export
    */
   async exportRevitToPDFs(projectId, fileUrns, options = {}) {
     try {
@@ -26,8 +18,6 @@ class ACCExportService {
         userId,
         uploadToACC = false,
         accFolderId = null,
-        downloadLocally = false,
-        localPath = null,
       } = options;
 
       if (!projectId) {
@@ -42,23 +32,7 @@ class ACCExportService {
 
       // 1. Obtenir le token d'accès
       const accessToken = await apsAuthService.ensureValidToken(userId);
-
-      logger.info(`[ACCExport] TOKEN COMPLET (à copier): ${accessToken}`);
-
-      logger.info(`[ACCExport] Token utilisateur commence par: ${accessToken.substring(0, 20)}...`);
-
-      try {
-        const tokenParts = accessToken.split('.');
-        if (tokenParts.length === 3) {
-          const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
-          logger.info(`[ACCExport] Scopes du token utilisateur: ${JSON.stringify(payload.scope)}`);
-          logger.info(
-            `[ACCExport] Token expire à: ${new Date(payload.exp * 1000).toISOString()}`
-          );
-        }
-      } catch (e) {
-        logger.warn(`[ACCExport] Impossible de décoder le token: ${e.message}`);
-      }
+      logger.info(`[ACCExport] Token utilisateur obtenu`);
 
       // 2. Lancer l'export
       const exportJob = await this.startExport(projectId, fileUrns, accessToken);
@@ -67,11 +41,7 @@ class ACCExportService {
       // 3. Attendre la completion (polling)
       const result = await this.waitForCompletion(projectId, exportJob.id, accessToken);
 
-      logger.info('[ACCExport] Result reçu:', JSON.stringify(result, null, 2));
-      logger.info('[ACCExport] result.signedUrl:', result?.signedUrl);
-      logger.info('[ACCExport] result.output:', JSON.stringify(result?.output, null, 2));
-      logger.info('[ACCExport] result.output?.signedUrl:', result?.output?.signedUrl);
-
+      // Extraire le signed URL de la réponse
       const signedUrl = result?.signedUrl || result?.output?.signedUrl;
 
       if (!signedUrl) {
@@ -79,7 +49,7 @@ class ACCExportService {
         throw new Error('Résultat export invalide: URL de téléchargement manquante');
       }
 
-      logger.info(`[ACCExport] ✅ SignedUrl trouvé: ${signedUrl.substring(0, 60)}...`);
+      logger.info(`[ACCExport] ✅ SignedUrl trouvé`);
 
       // 4. Télécharger le ZIP
       const zipBuffer = await this.downloadZip(signedUrl);
@@ -92,31 +62,14 @@ class ACCExportService {
       // 6. Upload vers ACC si demandé
       const uploadResults = [];
       if (uploadToACC && accFolderId) {
-        for (const pdf of pdfs) {
-          try {
-            const uploaded = await this.uploadPDFToACC(projectId, pdf, accFolderId, accessToken);
-            uploadResults.push(uploaded);
-            logger.info(`[ACCExport] ✓ Uploadé: ${pdf.name}`);
-          } catch (uploadError) {
-            logger.error(`[ACCExport] ✗ Erreur upload ${pdf.name}: ${uploadError.message}`);
-            uploadResults.push({
-              pdfName: pdf.name,
-              error: uploadError.message,
-              success: false,
-            });
-          }
-        }
-      }
-
-      // 7. Sauvegarde locale si demandé
-      if (downloadLocally && localPath) {
-        await this.savePDFsLocally(pdfs, localPath);
+        logger.info(`[ACCExport] Démarrage upload des PDFs vers ACC`);
+        const accUploadResults = await this.uploadPDFsToACC(projectId, accFolderId, pdfs, accessToken);
+        uploadResults.push(...accUploadResults);
       }
 
       return {
         success: true,
         method: 'acc-export',
-        cost: 0,
         jobId: exportJob.id,
         pdfs: pdfs.map((p) => ({
           name: p.name,
@@ -131,20 +84,15 @@ class ACCExportService {
   }
 
   /**
-   * Lance l'export PDF via l'API ACC.
-   *
-   * IMPORTANT : fournir les VERSION URNs (dm.version).
+   * Lance l'export PDF via l'API ACC
    */
   async startExport(projectId, fileUrns, accessToken) {
     const cleanProjectId = projectId.replace(/^b\./, '');
 
-    logger.info(`[ACCExport] projectId original: ${projectId}`);
     logger.info(`[ACCExport] projectId nettoyé: ${cleanProjectId}`);
-    logger.info(`[ACCExport] fileUrns (version URNs): ${JSON.stringify(fileUrns)}`);
+    logger.info(`[ACCExport] fileUrns: ${JSON.stringify(fileUrns)}`);
 
     const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${cleanProjectId}/exports`;
-
-    logger.info(`[ACCExport] URL complète: ${url}`);
 
     const body = {
       options: {
@@ -156,8 +104,6 @@ class ACCExportService {
       },
       fileVersions: fileUrns,
     };
-
-    logger.info(`[ACCExport] Body envoyé: ${JSON.stringify(body, null, 2)}`);
 
     try {
       const response = await axios.post(url, body, {
@@ -173,12 +119,6 @@ class ACCExportService {
         logger.error(
           `[ACCExport] Erreur API: ${error.response.status} - ${JSON.stringify(error.response.data)}`
         );
-        logger.error(`[ACCExport] Headers response: ${JSON.stringify(error.response.headers)}`);
-        // Certains statuts comme 207 (partial success) renvoient quand même un payload exploitable
-        if (error.response.status === 200 || error.response.status === 207) {
-          return error.response.data;
-        }
-
         throw new Error(
           `API ACC Export: ${error.response.data.message || error.response.statusText}`
         );
@@ -203,9 +143,6 @@ class ACCExportService {
 
       if (status.status === 'successful') {
         logger.info('[ACCExport] ✅ Job terminé avec succès');
-        logger.info('[ACCExport] Réponse complète:', JSON.stringify(status, null, 2));
-        logger.info('[ACCExport] status.result:', JSON.stringify(status.result, null, 2));
-        logger.info('[ACCExport] status.result?.output:', JSON.stringify(status.result?.output, null, 2));
         return status.result;
       }
 
@@ -217,22 +154,14 @@ class ACCExportService {
 
       if (status.status === 'partialSuccess') {
         logger.warn('[ACCExport] ⚠️ Job partiellement réussi');
-        if (status.result?.failedFiles) {
-          status.result.failedFiles.forEach((f) => {
-            logger.warn(`[ACCExport]   Fichier échoué: ${f.id} - ${f.reason}`);
-          });
-        }
-        // Retourner quand même le résultat partiel
         return status.result;
       }
 
-      // Stati en cours : 'processing', 'inProgress', 'pending'
       if (['processing', 'inProgress', 'pending'].includes(status.status)) {
         await this.sleep(pollInterval);
         continue;
       }
 
-      // Status inconnu
       logger.error(`[ACCExport] Status inconnu: ${status.status}`);
       throw new Error(`Status export inconnu: ${status.status}`);
     }
@@ -271,7 +200,7 @@ class ACCExportService {
     try {
       const response = await axios.get(signedUrl, {
         responseType: 'arraybuffer',
-        timeout: 60000, // 60 secondes
+        timeout: 60000,
       });
       return Buffer.from(response.data);
     } catch (error) {
@@ -289,7 +218,6 @@ class ACCExportService {
       const entries = zip.getEntries();
       const pdfs = [];
       for (const entry of entries) {
-        // Filtrer seulement les PDFs (ignorer dossiers et autres fichiers)
         if (entry.entryName.toLowerCase().endsWith('.pdf') && !entry.isDirectory) {
           pdfs.push({
             name: path.basename(entry.entryName),
@@ -307,196 +235,282 @@ class ACCExportService {
   }
 
   /**
-   * Upload un PDF vers ACC
+   * Upload les PDFs vers ACC (nouvelle approche avec OSS)
    */
-  async uploadPDFToACC(projectId, pdf, targetFolderId, accessToken) {
-    try {
-      // 1. Créer le storage location
-      const storage = await this.createStorage(projectId, targetFolderId, pdf.name, accessToken);
-
-      // 2. Upload le contenu du PDF
-      await this.uploadContent(storage.uploadUrl, pdf.buffer);
-
-      // 3. Créer l'item dans ACC
-      const item = await this.createACCItem(projectId, targetFolderId, storage.objectId, pdf.name, accessToken);
-      return {
-        pdfName: pdf.name,
-        accItemId: item.data?.id || null,
-        accVersionId: item.included?.[0]?.id || null,
-        success: true,
-      };
-    } catch (error) {
-      logger.error(`[ACCExport] Erreur upload ${pdf.name}: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Crée un storage location dans ACC
-   */
-  async createStorage(projectId, folderId, fileName, accessToken) {
+  async uploadPDFsToACC(projectId, targetFolderId, pdfFiles, accessToken) {
     const cleanProjectId = projectId.replace(/^b\./, '');
-    const url = `https://developer.api.autodesk.com/data/v1/projects/b.${cleanProjectId}/storage`;
+    const results = [];
 
-    let response;
-    try {
-      response = await axios.post(
-        url,
-        {
-          jsonapi: { version: '1.0' },
-          data: {
-            type: 'objects',
-            attributes: {
-              name: fileName,
-            },
-            relationships: {
-              target: {
-                data: {
-                  type: 'folders',
-                  id: folderId,
-                },
-              },
-            },
-          },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/vnd.api+json',
-          },
+    for (const pdfFile of pdfFiles) {
+      try {
+        logger.info(`[ACCExport] Upload PDF: ${pdfFile.name}`);
+
+        // 1. Créer l'objet storage
+        const storage = await this.createStorageObject(
+          cleanProjectId,
+          targetFolderId,
+          pdfFile.name,
+          accessToken
+        );
+
+        const objectId = storage.data?.id;
+        if (!objectId) {
+          throw new Error(`Pas d'objectId dans la réponse storage`);
         }
-      );
-    } catch (error) {
-      if (error.response) {
-        logger.error(`[ACCExport] Erreur createStorage: ${error.response.status}`);
+
+        logger.debug(`[ACCExport] Storage créé: ${objectId}`);
+
+        // 2. Parser l'objectId pour obtenir bucket et object key
+        const objectIdParts = objectId.split(':');
+        const bucketAndObject = objectIdParts[objectIdParts.length - 1]; // ex: "wip.dm.prod/abc.pdf"
+        const [bucketKey, ...objectKeyParts] = bucketAndObject.split('/');
+        const objectKey = objectKeyParts.join('/');
+
+        if (!bucketKey || !objectKey) {
+          throw new Error(
+            `Impossible de parser l'objectId: bucketKey=${bucketKey}, objectKey=${objectKey}`
+          );
+        }
+
+        logger.debug(`[ACCExport] Bucket: ${bucketKey}, Object: ${objectKey}`);
+
+        // 3. Obtenir l'URL signée S3 pour upload
+        const signedS3 = await this.getSignedS3Upload(bucketKey, objectKey, accessToken);
+        logger.debug(`[ACCExport] Signed S3 response:`, JSON.stringify(signedS3, null, 2));
+
+        const uploadUrl = signedS3.urls?.[0] || signedS3.url;
+        const uploadKey = signedS3.uploadKey;
+
+        if (!uploadUrl) {
+          throw new Error(`Pas d'URL d'upload dans la réponse: ${JSON.stringify(signedS3)}`);
+        }
+
+        logger.debug(`[ACCExport] Upload URL reçue (${uploadUrl.length} chars)`);
+
+        // 4. Upload le PDF vers S3
+        logger.debug(`[ACCExport] Upload PDF vers S3 (${pdfFile.buffer.length} bytes)`);
+        await this.uploadFileToS3(uploadUrl, pdfFile.buffer);
+        logger.info(`[ACCExport] ✅ PDF uploadé vers S3`);
+
+        // 5. Finaliser l'upload si uploadKey fourni
+        if (uploadKey) {
+          logger.debug(`[ACCExport] Finalisation upload avec key: ${uploadKey}`);
+          await this.completeS3Upload(bucketKey, objectKey, uploadKey, accessToken);
+        }
+
+        // 6. Créer l'item/version dans ACC
+        logger.debug(`[ACCExport] Création de l'item dans ACC`);
+        const fileVersion = await this.createFileVersion(
+          cleanProjectId,
+          targetFolderId,
+          pdfFile.name,
+          objectId,
+          accessToken
+        );
+
+        logger.info(`[ACCExport] ✅ PDF ${pdfFile.name} uploadé avec succès`);
+
+        results.push({
+          pdfName: pdfFile.name,
+          objectId,
+          success: true,
+        });
+      } catch (error) {
+        logger.error(`[ACCExport] ❌ Erreur upload ${pdfFile.name}: ${error.message}`);
+        results.push({
+          pdfName: pdfFile.name,
+          error: error.message,
+          success: false,
+        });
       }
-      throw new Error(`Impossible de créer le storage ACC pour ${fileName}: ${error.message}`);
     }
 
-    const objectId = response.data.data.id;
-    const uploadKey = response.data.data.attributes.uploadKey;
+    return results;
+  }
 
-    // Construire l'URL d'upload OSS
-    const bucketSegment = objectId.split(':')[3] || '';
-    const bucketKey = bucketSegment.split('/')[0];
-    const derivedObjectKey = bucketSegment.split('/').slice(1).join('/') || objectId.split('/').pop();
-    const objectKey = uploadKey || derivedObjectKey;
+  /**
+   * Crée un objet storage dans ACC
+   */
+  async createStorageObject(projectId, folderId, fileName, accessToken) {
+    const url = `https://developer.api.autodesk.com/data/v1/projects/b.${projectId}/storage`;
 
-    if (!bucketKey || !objectKey) {
-      throw new Error("Impossible de déterminer l'URL d'upload OSS");
-    }
-
-    const uploadUrl = `https://developer.api.autodesk.com/oss/v2/buckets/${bucketKey}/objects/${objectKey}`;
-
-    return {
-      objectId,
-      uploadUrl,
+    const body = {
+      jsonapi: { version: '1.0' },
+      data: {
+        type: 'objects',
+        attributes: {
+          name: fileName,
+        },
+        relationships: {
+          target: {
+            data: {
+              type: 'folders',
+              id: folderId,
+            },
+          },
+        },
+      },
     };
-  }
 
-  /**
-   * Upload le contenu vers OSS
-   */
-  async uploadContent(uploadUrl, buffer) {
     try {
-      await axios.put(uploadUrl, buffer, {
+      const response = await axios.post(url, body, {
         headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Length': buffer.length,
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/vnd.api+json',
         },
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
       });
-    } catch (error) {
-      logger.error(`[ACCExport] Erreur upload OSS: ${error.message}`);
-      throw new Error(`Impossible d'uploader le PDF vers OSS: ${error.message}`);
-    }
-  }
-
-  /**
-   * Crée un item (version) dans ACC
-   */
-  async createACCItem(projectId, folderId, objectId, fileName, accessToken) {
-    const cleanProjectId = projectId.replace(/^b\./, '');
-    const url = `https://developer.api.autodesk.com/data/v1/projects/b.${cleanProjectId}/items`;
-
-    try {
-      const response = await axios.post(
-        url,
-        {
-          jsonapi: { version: '1.0' },
-          data: {
-            type: 'items',
-            attributes: {
-              displayName: fileName,
-              extension: {
-                type: 'items:autodesk.core:File',
-                version: '1.0',
-              },
-            },
-            relationships: {
-              tip: {
-                data: {
-                  type: 'versions',
-                  id: '1',
-                },
-              },
-              parent: {
-                data: {
-                  type: 'folders',
-                  id: folderId,
-                },
-              },
-            },
-          },
-          included: [
-            {
-              type: 'versions',
-              id: '1',
-              attributes: {
-                name: fileName,
-                extension: {
-                  type: 'versions:autodesk.core:File',
-                  version: '1.0',
-                },
-              },
-              relationships: {
-                storage: {
-                  data: {
-                    type: 'objects',
-                    id: objectId,
-                  },
-                },
-              },
-            },
-          ],
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/vnd.api+json',
-          },
-        }
-      );
 
       return response.data;
     } catch (error) {
       if (error.response) {
-        logger.error(`[ACCExport] Erreur createACCItem: ${error.response.status}`);
+        logger.error(`[ACCExport] createStorageObject error: ${error.response.status}`);
       }
-      throw new Error(`Impossible de créer l'item ACC ${fileName}: ${error.message}`);
+      throw new Error(`Erreur création storage: ${error.message}`);
     }
   }
 
   /**
-   * Sauvegarde les PDFs localement (optionnel)
+   * Obtient une URL signée S3 pour upload
    */
-  async savePDFsLocally(pdfs, localPath) {
-    await fs.mkdir(localPath, { recursive: true });
-    for (const pdf of pdfs) {
-      const filePath = path.join(localPath, pdf.name);
-      await fs.writeFile(filePath, pdf.buffer);
-      logger.info(`[ACCExport] 💾 Sauvegardé: ${filePath}`);
+  async getSignedS3Upload(bucketKey, objectKey, accessToken) {
+    const url = `https://developer.api.autodesk.com/oss/v2/buckets/${bucketKey}/objects/${objectKey}/signeds3upload`;
+
+    try {
+      const response = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        logger.error(`[ACCExport] getSignedS3Upload error: ${error.response.status}`);
+        logger.error(`[ACCExport] Response:`, JSON.stringify(error.response.data, null, 2));
+      }
+      throw new Error(`Erreur obtention URL S3: ${error.message}`);
+    }
+  }
+
+  /**
+   * Upload le fichier vers S3
+   */
+  async uploadFileToS3(uploadUrl, fileBuffer) {
+    try {
+      const response = await axios.put(uploadUrl, fileBuffer, {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': fileBuffer.length,
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+
+      return response.status;
+    } catch (error) {
+      logger.error(`[ACCExport] S3 upload error: ${error.message}`);
+      throw new Error(`Erreur upload S3: ${error.message}`);
+    }
+  }
+
+  /**
+   * Complète l'upload S3
+   */
+  async completeS3Upload(bucketKey, objectKey, uploadKey, accessToken) {
+    const url = `https://developer.api.autodesk.com/oss/v2/buckets/${bucketKey}/objects/${objectKey}/signeds3upload`;
+
+    const body = {
+      uploadKey: uploadKey,
+    };
+
+    try {
+      const response = await axios.post(url, body, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        logger.error(`[ACCExport] completeS3Upload error: ${error.response.status}`);
+      }
+      throw new Error(`Erreur finalisation S3: ${error.message}`);
+    }
+  }
+
+  /**
+   * Crée un item/version dans ACC
+   */
+  async createFileVersion(projectId, folderId, fileName, objectId, accessToken) {
+    const url = `https://developer.api.autodesk.com/data/v1/projects/b.${projectId}/items`;
+
+    const body = {
+      jsonapi: { version: '1.0' },
+      data: {
+        type: 'items',
+        attributes: {
+          displayName: fileName,
+          extension: {
+            type: 'items:autodesk.core:File',
+            version: '1.0',
+          },
+        },
+        relationships: {
+          tip: {
+            data: {
+              type: 'versions',
+              id: '1',
+            },
+          },
+          parent: {
+            data: {
+              type: 'folders',
+              id: folderId,
+            },
+          },
+        },
+      },
+      included: [
+        {
+          type: 'versions',
+          id: '1',
+          attributes: {
+            name: fileName,
+            extension: {
+              type: 'versions:autodesk.core:File',
+              version: '1.0',
+            },
+          },
+          relationships: {
+            storage: {
+              data: {
+                type: 'objects',
+                id: objectId,
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    try {
+      const response = await axios.post(url, body, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/vnd.api+json',
+        },
+      });
+
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        logger.error(`[ACCExport] createFileVersion error: ${error.response.status}`);
+        logger.error(`[ACCExport] Response:`, JSON.stringify(error.response.data, null, 2));
+      }
+      throw new Error(`Erreur création file version: ${error.message}`);
     }
   }
 
