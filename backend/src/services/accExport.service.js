@@ -123,39 +123,39 @@ class ACCExportService {
   /**
    * Lance l'export PDF via l'API ACC.
    *
-   * IMPORTANT : fournir les LINEAGE URNs (dm.lineage) et non les URNs de version.
+   * IMPORTANT : fournir les VERSION URNs (dm.version).
    */
   async startExport(projectId, fileUrns, accessToken) {
-    const cleanProjectId = projectId;
+    const cleanProjectId = projectId.replace(/^b\./, '');
 
     logger.info(`[ACCExport] projectId original: ${projectId}`);
-    logger.info(`[ACCExport] projectId utilisé: ${cleanProjectId}`);
-    logger.info(`[ACCExport] fileUrns: ${JSON.stringify(fileUrns)}`);
+    logger.info(`[ACCExport] projectId nettoyé: ${cleanProjectId}`);
+    logger.info(`[ACCExport] fileUrns (version URNs): ${JSON.stringify(fileUrns)}`);
 
-    const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${cleanProjectId}/exports/pdf-files`;
+    const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${cleanProjectId}/exports`;
 
     logger.info(`[ACCExport] URL complète: ${url}`);
 
-    const files = fileUrns.map((urn) => ({
-      id: urn,
-      markupVersionStatus: 'published',
-      includeFeatureMarkups: true,
-      featureMarkupStatus: 'published',
-    }));
+    const body = {
+      options: {
+        standardMarkups: {
+          includePublishedMarkups: true,
+          includeUnpublishedMarkups: false,
+          includeMarkupLinks: false,
+        },
+      },
+      fileVersions: fileUrns,
+    };
 
-    logger.info(`[ACCExport] Body envoyé: ${JSON.stringify({ files }, null, 2)}`);
+    logger.info(`[ACCExport] Body envoyé: ${JSON.stringify(body, null, 2)}`);
 
     try {
-      const response = await axios.post(
-        url,
-        { files },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const response = await axios.post(url, body, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
       return response.data;
     } catch (error) {
