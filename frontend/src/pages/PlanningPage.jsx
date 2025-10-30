@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
-import {
+import api, {
   fetchHubs,
   fetchProjects,
   fetchTopFolders,
@@ -12,7 +12,6 @@ import {
   runPublishJobNow,
   getRuns,
   exportPDFs,
-  savePDFsToACC,
 } from '../services/api';
 import { PDFSaveAsModal } from '../components/PDFSaveAsModal';
 
@@ -721,7 +720,6 @@ export default function PlanningPage() {
   const [exportingPDFs, setExportingPDFs] = React.useState(false);
   const [showSaveAsModal, setShowSaveAsModal] = React.useState(false);
   const [exportedPdfs, setExportedPdfs] = React.useState(null);
-  const [savingPdfs, setSavingPdfs] = React.useState(false);
 
   const [jobs, setJobs] = React.useState([]);
   const [loadingJobs, setLoadingJobs] = React.useState(false);
@@ -760,7 +758,6 @@ export default function PlanningPage() {
   React.useEffect(() => {
     setShowSaveAsModal(false);
     setExportedPdfs(null);
-    setSavingPdfs(false);
   }, [selectedProject]);
 
   React.useEffect(() => {
@@ -879,45 +876,6 @@ export default function PlanningPage() {
       return nxt;
     });
   }
-
-  const handleSavePdfsToACC = React.useCallback(
-    async ({ jobId, projectId, folderId, fileName, pdfNames, mergeAll }) => {
-      if (!jobId || !projectId || !folderId) {
-        alert('Paramètres de sauvegarde invalides');
-        return;
-      }
-
-      if (!Array.isArray(pdfNames) || pdfNames.length === 0) {
-        alert('Sélectionne au moins un PDF');
-        return;
-      }
-
-      setSavingPdfs(true);
-      try {
-        const response = await savePDFsToACC({
-          jobId,
-          projectId,
-          folderId,
-          fileName,
-          pdfNames,
-          mergeAll,
-        });
-
-        const message = response?.message || 'PDFs uploadés sur ACC';
-        setToast(message.startsWith('✅') ? message : `✅ ${message}`);
-        setTimeout(() => setToast(''), 5000);
-        setShowSaveAsModal(false);
-        setExportedPdfs(null);
-      } catch (e) {
-        console.error('[PDFSave] Erreur:', e);
-        setToast('❌ ' + (e?.message || 'Erreur sauvegarde PDF'));
-        setTimeout(() => setToast(''), 5000);
-      } finally {
-        setSavingPdfs(false);
-      }
-    },
-    []
-  );
 
   const refreshJobs = React.useCallback(
     async ({ silent = false } = {}) => {
@@ -1208,7 +1166,7 @@ export default function PlanningPage() {
 
   return (
     <>
-      {showSaveAsModal && exportedPdfs && selectedProject && (
+      {showSaveAsModal && exportedPdfs && (
         <PDFSaveAsModal
           jobId={exportedPdfs.jobId}
           pdfs={exportedPdfs.pdfs}
@@ -1219,10 +1177,19 @@ export default function PlanningPage() {
           onClose={() => {
             setShowSaveAsModal(false);
             setExportedPdfs(null);
-            setSavingPdfs(false);
           }}
-          onSave={handleSavePdfsToACC}
-          isSaving={savingPdfs}
+          onSave={async (saveData) => {
+            try {
+              setToast('⏳ Sauvegarde sur ACC...');
+              const result = await api.post('/api/pdf-export/save-to-acc', saveData);
+              setToast(`✅ ${result.data.uploads.length} PDF(s) sauvegardé(s) sur ACC!`);
+              setShowSaveAsModal(false);
+              setExportedPdfs(null);
+            } catch (e) {
+              setToast('❌ ' + (e?.message || 'Erreur sauvegarde'));
+            }
+          }}
+          isSaving={false}
         />
       )}
 
