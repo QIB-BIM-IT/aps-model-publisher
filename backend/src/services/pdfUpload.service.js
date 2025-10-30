@@ -211,20 +211,24 @@ class PDFUploadService {
   async createItem(projectId, folderId, fileName, objectId, accessToken) {
     const url = `https://developer.api.autodesk.com/data/v1/projects/b.${projectId}/items`;
 
-    const body = {
+    const payload = {
       jsonapi: { version: '1.0' },
       data: {
         type: 'items',
         attributes: {
           displayName: fileName,
           extension: {
-            type: 'items:autodesk.core:File',
+            type: 'items:autodesk.bim360:File',
             version: '1.0',
           },
         },
         relationships: {
-          tip: { data: { type: 'versions', id: '1' } },
-          parent: { data: { type: 'folders', id: folderId } },
+          tip: {
+            data: { type: 'versions', id: '1' },
+          },
+          parent: {
+            data: { type: 'folders', id: folderId },
+          },
         },
       },
       included: [
@@ -234,34 +238,58 @@ class PDFUploadService {
           attributes: {
             name: fileName,
             extension: {
-              type: 'versions:autodesk.core:File',
+              type: 'versions:autodesk.bim360:File',
               version: '1.0',
             },
           },
           relationships: {
             storage: {
-              data: { type: 'objects', id: objectId },
+              data: {
+                type: 'objects',
+                id: objectId,
+              },
             },
           },
         },
       ],
     };
 
+    logger.debug(
+      `[PDFUpload] 🔍 DEBUG createItem payload: ${JSON.stringify(payload, null, 2)}`
+    );
+
     try {
-      const response = await axios.post(url, body, {
+      const response = await axios.post(url, payload, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/vnd.api+json',
+          Accept: 'application/vnd.api+json',
         },
       });
+
       return response.data;
     } catch (error) {
+      logger.error('[PDFUpload] 🔍 DEBUG createItem error:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        headers: error.response?.headers,
+      });
+
       if (error.response?.status === 403) {
-        logger.error(`[PDFUpload] Permission denied: ${error.response.data?.message}`);
-        throw new Error(`Permission denied: Vérifie tes droits sur le dossier ACC`);
+        const detail =
+          error.response?.data?.errors?.[0]?.detail ||
+          error.response?.data?.message ||
+          'Détails inconnus';
+        throw new Error(`Permission denied: ${detail}`);
       }
-      logger.error(`[PDFUpload] Item creation failed: ${error.response?.status}`);
-      throw new Error(`Item creation failed: ${error.message}`);
+
+      const errorMsg =
+        error.response?.data?.errors?.[0]?.detail ||
+        error.response?.data?.message ||
+        error.message ||
+        'Erreur inconnue';
+      throw new Error(`Erreur createItem: ${errorMsg}`);
     }
   }
 }
