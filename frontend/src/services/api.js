@@ -92,6 +92,9 @@ export async function exportPDFs(projectId, fileUrns, options = {}) {
   const {
     uploadToACC = false,
     accFolderId = null,
+    includeSheets = true,
+    includeViews2D = true,
+    includeMarkups = true,
   } = options;
 
   const response = await api.post('/api/pdf-export/export', {
@@ -99,6 +102,9 @@ export async function exportPDFs(projectId, fileUrns, options = {}) {
     fileUrns,
     uploadToACC,
     accFolderId,
+    includeSheets,
+    includeViews2D,
+    includeMarkups,
   });
   return response.data;
 }
