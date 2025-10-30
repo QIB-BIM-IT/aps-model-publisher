@@ -1487,11 +1487,14 @@ export default function PlanningPage() {
                         includeMarkups: options.includeMarkups,
                       });
 
+                      setExportedPdfs({
+                        jobId: result.data.jobId,
+                        pdfs: result.data.pdfs,
+                      });
+                      setShowSaveAsModal(true);
+
                       const jobInfo = result?.data || {};
-                      if (jobInfo?.jobId && Array.isArray(jobInfo?.pdfs) && jobInfo.pdfs.length > 0) {
-                        setExportedPdfs({ jobId: jobInfo.jobId, pdfs: jobInfo.pdfs });
-                        setShowSaveAsModal(true);
-                      } else {
+                      if (!jobInfo?.jobId || !Array.isArray(jobInfo?.pdfs) || jobInfo.pdfs.length === 0) {
                         setExportedPdfs(null);
                         setShowSaveAsModal(false);
                       }
