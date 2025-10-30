@@ -719,8 +719,8 @@ export default function PlanningPage() {
   const [childrenMap, setChildrenMap] = React.useState(new Map());
   const [selectedItems, setSelectedItems] = React.useState({});
   const [exportingPDFs, setExportingPDFs] = React.useState(false);
-  const [showSaveModal, setShowSaveModal] = React.useState(false);
-  const [lastExportJob, setLastExportJob] = React.useState(null);
+  const [showSaveAsModal, setShowSaveAsModal] = React.useState(false);
+  const [exportedPdfs, setExportedPdfs] = React.useState(null);
   const [savingPdfs, setSavingPdfs] = React.useState(false);
 
   const [jobs, setJobs] = React.useState([]);
@@ -758,8 +758,8 @@ export default function PlanningPage() {
   }, [location.key]);
 
   React.useEffect(() => {
-    setShowSaveModal(false);
-    setLastExportJob(null);
+    setShowSaveAsModal(false);
+    setExportedPdfs(null);
     setSavingPdfs(false);
   }, [selectedProject]);
 
@@ -906,8 +906,8 @@ export default function PlanningPage() {
         const message = response?.message || 'PDFs uploadés sur ACC';
         setToast(message.startsWith('✅') ? message : `✅ ${message}`);
         setTimeout(() => setToast(''), 5000);
-        setShowSaveModal(false);
-        setLastExportJob(null);
+        setShowSaveAsModal(false);
+        setExportedPdfs(null);
       } catch (e) {
         console.error('[PDFSave] Erreur:', e);
         setToast('❌ ' + (e?.message || 'Erreur sauvegarde PDF'));
@@ -1208,16 +1208,17 @@ export default function PlanningPage() {
 
   return (
     <>
-      {showSaveModal && lastExportJob && selectedProject && (
+      {showSaveAsModal && exportedPdfs && selectedProject && (
         <PDFSaveAsModal
-          jobId={lastExportJob.jobId}
-          pdfs={lastExportJob.pdfs}
+          jobId={exportedPdfs.jobId}
+          pdfs={exportedPdfs.pdfs}
           topFolders={topFolders}
           selectedProject={selectedProject}
           childrenMap={childrenMap}
           onLoadChildren={loadChildren}
           onClose={() => {
-            setShowSaveModal(false);
+            setShowSaveAsModal(false);
+            setExportedPdfs(null);
             setSavingPdfs(false);
           }}
           onSave={handleSavePdfsToACC}
@@ -1488,11 +1489,11 @@ export default function PlanningPage() {
 
                       const jobInfo = result?.data || {};
                       if (jobInfo?.jobId && Array.isArray(jobInfo?.pdfs) && jobInfo.pdfs.length > 0) {
-                        setLastExportJob({ jobId: jobInfo.jobId, pdfs: jobInfo.pdfs });
-                        setShowSaveModal(true);
+                        setExportedPdfs({ jobId: jobInfo.jobId, pdfs: jobInfo.pdfs });
+                        setShowSaveAsModal(true);
                       } else {
-                        setLastExportJob(null);
-                        setShowSaveModal(false);
+                        setExportedPdfs(null);
+                        setShowSaveAsModal(false);
                       }
 
                       const pdfCount = result.data?.pdfs?.length || 0;
@@ -1501,8 +1502,8 @@ export default function PlanningPage() {
 
                       setSelectedItems({});
                     } catch (e) {
-                      setShowSaveModal(false);
-                      setLastExportJob(null);
+                      setShowSaveAsModal(false);
+                      setExportedPdfs(null);
                       console.error('[PDFExport] Erreur:', e);
                       setToast('❌ ' + (e?.message || 'Erreur export PDF'));
                       setTimeout(() => setToast(''), 5000);
