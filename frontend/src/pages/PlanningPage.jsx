@@ -737,6 +737,8 @@ export default function PlanningPage() {
   const [error, setError] = React.useState('');
   const [toast, setToast] = React.useState('');
 
+  const exportPDFsEnabled = true;
+
   const preSelectHub = location.state?.preSelectHub;
   const preSelectProject = location.state?.preSelectProject;
   const highlightJobId = location.state?.highlightJobId;
@@ -865,95 +867,6 @@ export default function PlanningPage() {
       }
       return nxt;
     });
-  }
-
-  async function handleExportPDFs(targetFolderId, exportOptions = {}) {
-    if (!selectedProject || selectedArray.length === 0) {
-      setToast('⚠️ Sélectionne au moins une maquette');
-      setTimeout(() => setToast(''), 3000);
-      return;
-    }
-    if (!window.confirm(`Exporter ${selectedArray.length} maquette(s) en PDF ?`)) {
-      return;
-    }
-
-    setExportingPDFs(true);
-
-    try {
-      const selectedValues = Object.values(selectedItems);
-
-      const lineageUrns = Array.from(
-        new Set(
-          selectedValues
-            .map((item) => item?.publishUrn || item?.id || null)
-            .filter((urn) => typeof urn === 'string' && urn.length > 0)
-        )
-      );
-
-      const missingLineageCount = selectedValues.filter((item) => {
-        const urn = item?.publishUrn || item?.id;
-        return !(typeof urn === 'string' && urn.length > 0);
-      }).length;
-
-      console.log('[PDFExport] selectedItems:', selectedItems);
-      console.log('[PDFExport] Lineage URNs extraits:', lineageUrns);
-
-      if (lineageUrns.length === 0) {
-        throw new Error(
-          'Aucun lineage URN disponible. ' +
-            'Réessaie après avoir rechargé la liste des maquettes.'
-        );
-      }
-
-      if (missingLineageCount > 0) {
-        setToast(`⚠️ ${missingLineageCount} fichier(s) ignoré(s) (item URN manquant)`);
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
-
-      setToast('⏳ Export PDF en cours (peut prendre 2-5 min)...');
-
-      console.log('[PDFExport] Lineage URNs pour export:', lineageUrns);
-
-      const {
-        includeSheets = true,
-        includeViews2D = true,
-        includeMarkups = true,
-      } = exportOptions || {};
-
-      const result = await exportPDFs(
-        selectedProject,
-        lineageUrns,
-        {
-          uploadToACC: !!targetFolderId,
-          accFolderId: targetFolderId || null,
-          includeSheets,
-          includeViews2D,
-          includeMarkups,
-        }
-      );
-
-      console.log('[PDFExport] Résultat:', result);
-
-      const pdfCount = result.data?.pdfs?.length || 0;
-      const uploadCount = result.data?.uploadResults?.filter((u) => u.success).length || 0;
-
-      let successMsg = `✅ ${pdfCount} PDF(s) exporté(s) !`;
-
-      if (targetFolderId && uploadCount > 0) {
-        successMsg = `✅ ${pdfCount} PDF(s) exporté(s) et ${uploadCount} uploadé(s) vers ACC !`;
-      }
-
-      setToast(successMsg);
-      setTimeout(() => setToast(''), 6000);
-
-      setSelectedItems({});
-    } catch (e) {
-      console.error('[PDFExport] Erreur:', e);
-      setToast('❌ ' + (e?.message || 'Erreur export PDF'));
-      setTimeout(() => setToast(''), 5000);
-    } finally {
-      setExportingPDFs(false);
-    }
   }
 
   const refreshJobs = React.useCallback(
@@ -1471,15 +1384,60 @@ export default function PlanningPage() {
                 ))}
               </div>
 
-              <PDFExportSection
-                selectedArray={selectedArray}
-                onExport={handleExportPDFs}
-                isExporting={exportingPDFs}
-                topFolders={topFolders}
-                selectedProject={selectedProject}
-                childrenMap={childrenMap}
-                onLoadChildren={loadChildren}
-              />
+              {/* Export PDF Section */}
+              {exportPDFsEnabled && (
+                <PDFExportSection
+                  selectedArray={selectedArray}
+                  onExport={async (folderId, options) => {
+                    if (!selectedProject || selectedArray.length === 0) {
+                      setToast('⚠️ Sélectionne au moins une maquette');
+                      setTimeout(() => setToast(''), 3000);
+                      return;
+                    }
+
+                    setExportingPDFs(true);
+                    try {
+                      const selectedValues = Object.values(selectedItems);
+                      const lineageUrns = Array.from(
+                        new Set(
+                          selectedValues
+                            .map((item) => item?.publishUrn || item?.id || null)
+                            .filter((urn) => typeof urn === 'string' && urn.length > 0)
+                        )
+                      );
+
+                      if (lineageUrns.length === 0) {
+                        throw new Error('Aucun lineage URN disponible');
+                      }
+
+                      setToast('⏳ Export PDF en cours (peut prendre 2-5 min)...');
+
+                      const result = await exportPDFs(selectedProject, lineageUrns, {
+                        includeSheets: options.includeSheets,
+                        includeViews2D: options.includeViews2D,
+                        includeMarkups: options.includeMarkups,
+                      });
+
+                      const pdfCount = result.data?.pdfs?.length || 0;
+                      setToast(`✅ ${pdfCount} PDF(s) exporté(s)! Prêts au téléchargement.`);
+                      setTimeout(() => setToast(''), 6000);
+
+                      setSelectedItems({});
+                    } catch (e) {
+                      console.error('[PDFExport] Erreur:', e);
+                      setToast('❌ ' + (e?.message || 'Erreur export PDF'));
+                      setTimeout(() => setToast(''), 5000);
+                    } finally {
+                      setExportingPDFs(false);
+                    }
+                  }}
+                  isExporting={exportingPDFs}
+                  topFolders={topFolders}
+                  selectedProject={selectedProject}
+                  childrenMap={childrenMap}
+                  onLoadChildren={loadChildren}
+                />
+              )}
 
               <div
                 style={{
