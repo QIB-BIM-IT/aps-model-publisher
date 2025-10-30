@@ -5,6 +5,8 @@ const router = express.Router();
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { asyncHandler, ValidationError } = require('../middleware/errorHandler.middleware');
 const accExportService = require('../services/accExport.service');
+const apsAuthService = require('../services/apsAuth.service');
+const pdfUploadService = require('../services/pdfUpload.service');
 const logger = require('../config/logger');
 
 router.use(authenticateToken);
@@ -86,6 +88,97 @@ router.post('/export', asyncHandler(async (req, res) => {
     success: true,
     data: result
   });
+}));
+
+/**
+ * POST /api/pdf-export/save-to-acc
+ * Merge + Upload des PDFs sur ACC
+ */
+router.post('/save-to-acc', asyncHandler(async (req, res) => {
+  const {
+    jobId,
+    projectId,
+    folderId,
+    fileName,
+    pdfNames,
+    mergeAll = false,
+  } = req.body;
+
+  // Validation
+  if (!jobId) throw new ValidationError('jobId requis');
+  if (!projectId) throw new ValidationError('projectId requis');
+  if (!folderId) throw new ValidationError('folderId requis');
+  if (!Array.isArray(pdfNames) || pdfNames.length === 0) {
+    throw new ValidationError('Au moins un PDF requis');
+  }
+  if (mergeAll && !fileName) {
+    throw new ValidationError('fileName requis quand mergeAll=true');
+  }
+
+  logger.info(`[PDFUpload] Save-to-ACC demandé: jobId=${jobId}, merge=${mergeAll}`);
+
+  // Récupérer PDFs du cache
+  const pdfCache = global.pdfCache || {};
+  const pdfs = pdfCache[jobId];
+
+  if (!pdfs) {
+    throw new ValidationError('PDFs cache expiré');
+  }
+
+  // Filtrer les PDFs demandés
+  const selectedPdfs = pdfs.filter((p) => pdfNames.includes(p.name));
+
+  if (selectedPdfs.length === 0) {
+    throw new ValidationError('Aucun PDF sélectionné');
+  }
+
+  // Obtenir token
+  const accessToken = await apsAuthService.ensureValidToken(req.userId);
+
+  try {
+    const uploadResults = [];
+
+    if (mergeAll && selectedPdfs.length > 1) {
+      // Fusionner tous les PDFs
+      logger.info(`[PDFUpload] Fusion de ${selectedPdfs.length} PDFs...`);
+      const pdfBuffers = selectedPdfs.map((p) => p.buffer);
+      const mergedBuffer = await pdfUploadService.mergePDFs(pdfBuffers, fileName);
+
+      // Upload le PDF fusionné
+      const result = await pdfUploadService.uploadPDFToACC(
+        projectId,
+        folderId,
+        mergedBuffer,
+        fileName,
+        accessToken
+      );
+
+      uploadResults.push(result);
+      logger.info(`[PDFUpload] ✅ PDF fusionné uploadé: ${fileName}`);
+    } else {
+      // Upload individuels
+      for (const pdf of selectedPdfs) {
+        logger.info(`[PDFUpload] Upload: ${pdf.name}`);
+        const result = await pdfUploadService.uploadPDFToACC(
+          projectId,
+          folderId,
+          pdf.buffer,
+          pdf.name,
+          accessToken
+        );
+        uploadResults.push(result);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${uploadResults.length} PDF(s) uploadé(s) sur ACC`,
+      uploads: uploadResults,
+    });
+  } catch (error) {
+    logger.error(`[PDFUpload] Erreur: ${error.message}`);
+    throw error;
+  }
 }));
 
 /**
