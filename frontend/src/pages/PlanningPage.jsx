@@ -12,7 +12,9 @@ import {
   runPublishJobNow,
   getRuns,
   exportPDFs,
+  savePDFsToACC,
 } from '../services/api';
+import { PDFSaveAsModal } from '../components/PDFSaveAsModal';
 
 // Helpers
 function nameOf(node, fall = '') {
@@ -717,6 +719,9 @@ export default function PlanningPage() {
   const [childrenMap, setChildrenMap] = React.useState(new Map());
   const [selectedItems, setSelectedItems] = React.useState({});
   const [exportingPDFs, setExportingPDFs] = React.useState(false);
+  const [showSaveModal, setShowSaveModal] = React.useState(false);
+  const [lastExportJob, setLastExportJob] = React.useState(null);
+  const [savingPdfs, setSavingPdfs] = React.useState(false);
 
   const [jobs, setJobs] = React.useState([]);
   const [loadingJobs, setLoadingJobs] = React.useState(false);
@@ -751,6 +756,12 @@ export default function PlanningPage() {
     preselectHubApplied.current = false;
     preselectProjectApplied.current = false;
   }, [location.key]);
+
+  React.useEffect(() => {
+    setShowSaveModal(false);
+    setLastExportJob(null);
+    setSavingPdfs(false);
+  }, [selectedProject]);
 
   React.useEffect(() => {
     const [hour, minute] = selectedHour.split(':');
@@ -868,6 +879,45 @@ export default function PlanningPage() {
       return nxt;
     });
   }
+
+  const handleSavePdfsToACC = React.useCallback(
+    async ({ jobId, projectId, folderId, fileName, pdfNames, mergeAll }) => {
+      if (!jobId || !projectId || !folderId) {
+        alert('Paramètres de sauvegarde invalides');
+        return;
+      }
+
+      if (!Array.isArray(pdfNames) || pdfNames.length === 0) {
+        alert('Sélectionne au moins un PDF');
+        return;
+      }
+
+      setSavingPdfs(true);
+      try {
+        const response = await savePDFsToACC({
+          jobId,
+          projectId,
+          folderId,
+          fileName,
+          pdfNames,
+          mergeAll,
+        });
+
+        const message = response?.message || 'PDFs uploadés sur ACC';
+        setToast(message.startsWith('✅') ? message : `✅ ${message}`);
+        setTimeout(() => setToast(''), 5000);
+        setShowSaveModal(false);
+        setLastExportJob(null);
+      } catch (e) {
+        console.error('[PDFSave] Erreur:', e);
+        setToast('❌ ' + (e?.message || 'Erreur sauvegarde PDF'));
+        setTimeout(() => setToast(''), 5000);
+      } finally {
+        setSavingPdfs(false);
+      }
+    },
+    []
+  );
 
   const refreshJobs = React.useCallback(
     async ({ silent = false } = {}) => {
@@ -1157,15 +1207,33 @@ export default function PlanningPage() {
   }, [timezone]);
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
-        padding: '40px 20px',
-      }}
-    >
-      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-        {/* Header */}
+    <>
+      {showSaveModal && lastExportJob && selectedProject && (
+        <PDFSaveAsModal
+          jobId={lastExportJob.jobId}
+          pdfs={lastExportJob.pdfs}
+          topFolders={topFolders}
+          selectedProject={selectedProject}
+          childrenMap={childrenMap}
+          onLoadChildren={loadChildren}
+          onClose={() => {
+            setShowSaveModal(false);
+            setSavingPdfs(false);
+          }}
+          onSave={handleSavePdfsToACC}
+          isSaving={savingPdfs}
+        />
+      )}
+
+      <div
+        style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+          padding: '40px 20px',
+        }}
+      >
+        <div style={{ maxWidth: 1400, margin: '0 auto' }}>
+          {/* Header */}
         <div style={{ marginBottom: 32, textAlign: 'center' }}>
           <h1
             style={{
@@ -1418,12 +1486,23 @@ export default function PlanningPage() {
                         includeMarkups: options.includeMarkups,
                       });
 
+                      const jobInfo = result?.data || {};
+                      if (jobInfo?.jobId && Array.isArray(jobInfo?.pdfs) && jobInfo.pdfs.length > 0) {
+                        setLastExportJob({ jobId: jobInfo.jobId, pdfs: jobInfo.pdfs });
+                        setShowSaveModal(true);
+                      } else {
+                        setLastExportJob(null);
+                        setShowSaveModal(false);
+                      }
+
                       const pdfCount = result.data?.pdfs?.length || 0;
                       setToast(`✅ ${pdfCount} PDF(s) exporté(s)! Prêts au téléchargement.`);
                       setTimeout(() => setToast(''), 6000);
 
                       setSelectedItems({});
                     } catch (e) {
+                      setShowSaveModal(false);
+                      setLastExportJob(null);
                       console.error('[PDFExport] Erreur:', e);
                       setToast('❌ ' + (e?.message || 'Erreur export PDF'));
                       setTimeout(() => setToast(''), 5000);
@@ -1932,6 +2011,6 @@ export default function PlanningPage() {
           )}
         </Card>
       </div>
-    </div>
+    </>
   );
 }

@@ -99,4 +99,9 @@ export async function exportPDFs(projectId, fileUrns, options = {}) {
   return response.data;
 }
 
+export async function savePDFsToACC(payload) {
+  const { data } = await api.post('/api/pdf-export/save-to-acc', payload);
+  return data;
+}
+
 export default api;
