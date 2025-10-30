@@ -1981,6 +1981,7 @@ export default function PlanningPage() {
             </div>
           )}
         </Card>
+        </div>
       </div>
     </>
   );
