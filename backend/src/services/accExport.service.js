@@ -67,6 +67,14 @@ class ACCExportService {
         uploadResults.push(...accUploadResults);
       }
 
+      // Stocker les PDFs en mémoire temporaire (clé = jobId)
+      // À implémenter: cache avec TTL de 1 heure
+      const pdfCache = global.pdfCache || {};
+      pdfCache[exportJob.id] = pdfs;
+      global.pdfCache = pdfCache;
+
+      logger.info(`[ACCExport] PDFs stockés en cache avec clé: ${exportJob.id}`);
+
       return {
         success: true,
         method: 'acc-export',
@@ -74,6 +82,8 @@ class ACCExportService {
         pdfs: pdfs.map((p) => ({
           name: p.name,
           size: p.buffer.length,
+          // Option 2: URL de téléchargement
+          downloadUrl: `/api/pdf-export/download/${exportJob.id}/${encodeURIComponent(p.name)}`,
         })),
         uploadResults: uploadResults.length > 0 ? uploadResults : null,
       };
