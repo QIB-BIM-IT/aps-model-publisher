@@ -1396,6 +1396,7 @@ export default function PlanningPage() {
                     }
 
                     setExportingPDFs(true);
+
                     try {
                       const selectedValues = Object.values(selectedItems);
                       const lineageUrns = Array.from(
@@ -1410,23 +1411,11 @@ export default function PlanningPage() {
                         throw new Error('Aucun lineage URN disponible');
                       }
 
-                      // Vérifier qu'un dossier est sélectionné
-                      if (!selectedFolder) {
-                        alert('Sélectionne un dossier de destination');
-                        return;
-                      }
-
-                      const folderId = idOf(selectedFolder);
-                      if (!folderId) {
-                        alert('Dossier sélectionné invalide');
-                        return;
-                      }
-
                       setToast('⏳ Export et sauvegarde sur ACC en cours (2-5 min)...');
 
-                      // NOUVEAU: Appel combiné export + save
+                      // Appel combiné export + save
                       const result = await api.post('/api/pdf-export/export-and-save', {
-                        fileUrn: lineageUrns[0], // Premier fichier pour l'instant
+                        fileUrn: lineageUrns[0],
                         projectId: selectedProject,
                         folderId: folderId,
                         options: {
@@ -1436,7 +1425,7 @@ export default function PlanningPage() {
                         }
                       });
 
-                      // Afficher résultat final
+                      // Afficher résultat
                       if (result.data.success) {
                         const message = result.data.failed > 0
                           ? `✅ ${result.data.uploaded} PDF(s) sauvegardé(s) sur ACC (${result.data.failed} échec)`
@@ -1444,9 +1433,6 @@ export default function PlanningPage() {
 
                         setToast(message);
                         setTimeout(() => setToast(''), 6000);
-
-                        // Fermer le modal de sélection de dossier
-                        setShowFolderModal(false);
                       } else {
                         throw new Error('Export échoué');
                       }
