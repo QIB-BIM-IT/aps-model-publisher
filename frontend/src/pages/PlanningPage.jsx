@@ -11,6 +11,7 @@ import api, {
   deletePublishJob,
   runPublishJobNow,
   getRuns,
+  getUserApsToken,
 } from '../services/api';
 
 // Helpers
@@ -1413,23 +1414,39 @@ export default function PlanningPage() {
 
                       setToast('⏳ Export et sauvegarde sur ACC en cours (2-5 min)...');
 
-                      // Appel combiné export + save
-                      const result = await api.post('/api/pdf-export/export-and-save', {
-                        fileUrn: lineageUrns[0],
-                        projectId: selectedProject,
-                        folderId: folderId,
-                        options: {
-                          includeSheets: options.includeSheets,
-                          includeViews2D: options.includeViews2D,
-                          includeMarkups: options.includeMarkups,
-                        }
+                      // Obtenir le token utilisateur
+                      const userToken = await getUserApsToken();
+
+                      // Appel avec le token
+                      const result = await fetch('/api/pdf-export/export-and-save', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'x-user-token': userToken, // ← AJOUTER LE TOKEN!
+                        },
+                        body: JSON.stringify({
+                          fileUrn: lineageUrns[0],
+                          projectId: selectedProject,
+                          folderId: folderId,
+                          options: {
+                            includeSheets: options.includeSheets,
+                            includeViews2D: options.includeViews2D,
+                            includeMarkups: options.includeMarkups,
+                          }
+                        })
                       });
 
+                      const data = await result.json();
+
+                      if (!result.ok) {
+                        throw new Error(data.message || 'Export failed');
+                      }
+
                       // Afficher résultat
-                      if (result.data.success) {
-                        const message = result.data.failed > 0
-                          ? `✅ ${result.data.uploaded} PDF(s) sauvegardé(s) sur ACC (${result.data.failed} échec)`
-                          : `✅ ${result.data.uploaded} PDF(s) sauvegardé(s) sur ACC!`;
+                      if (data.success) {
+                        const message = data.failed > 0
+                          ? `✅ ${data.uploaded} PDF(s) sauvegardé(s) sur ACC (${data.failed} échec)`
+                          : `✅ ${data.uploaded} PDF(s) sauvegardé(s) sur ACC!`;
 
                         setToast(message);
                         setTimeout(() => setToast(''), 6000);
