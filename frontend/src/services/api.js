@@ -104,4 +104,12 @@ export async function savePDFsToACC(data) {
   return result;
 }
 
+export async function getUserApsToken() {
+  const { data } = await api.get('/api/aps/user-token');
+  if (data?.success && data?.token) {
+    return data.token;
+  }
+  throw new Error(data?.message || 'Unable to retrieve APS user token');
+}
+
 export default api;

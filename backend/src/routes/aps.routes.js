@@ -73,6 +73,11 @@ router.get('/debug/folder-contents-noauth', async (req, res) => {
 
 router.use(authenticateToken);
 
+router.get('/user-token', asyncHandler(async (req, res) => {
+  const accessToken = await apsAuthService.ensureValidToken(req.userId);
+  res.json({ success: true, token: accessToken });
+}));
+
 // Hubs
 router.get('/hubs', async (req, res) => {
   try {
