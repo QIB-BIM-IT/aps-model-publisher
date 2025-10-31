@@ -11,9 +11,7 @@ import api, {
   deletePublishJob,
   runPublishJobNow,
   getRuns,
-  exportPDFs,
 } from '../services/api';
-import { PDFSaveAsModal } from '../components/PDFSaveAsModal';
 
 // Helpers
 function nameOf(node, fall = '') {
@@ -718,8 +716,6 @@ export default function PlanningPage() {
   const [childrenMap, setChildrenMap] = React.useState(new Map());
   const [selectedItems, setSelectedItems] = React.useState({});
   const [exportingPDFs, setExportingPDFs] = React.useState(false);
-  const [showSaveAsModal, setShowSaveAsModal] = React.useState(false);
-  const [exportedPdfs, setExportedPdfs] = React.useState(null);
 
   const [jobs, setJobs] = React.useState([]);
   const [loadingJobs, setLoadingJobs] = React.useState(false);
@@ -754,11 +750,6 @@ export default function PlanningPage() {
     preselectHubApplied.current = false;
     preselectProjectApplied.current = false;
   }, [location.key]);
-
-  React.useEffect(() => {
-    setShowSaveAsModal(false);
-    setExportedPdfs(null);
-  }, [selectedProject]);
 
   React.useEffect(() => {
     const [hour, minute] = selectedHour.split(':');
@@ -1166,33 +1157,6 @@ export default function PlanningPage() {
 
   return (
     <>
-      {showSaveAsModal && exportedPdfs && (
-        <PDFSaveAsModal
-          jobId={exportedPdfs.jobId}
-          pdfs={exportedPdfs.pdfs}
-          topFolders={topFolders}
-          selectedProject={selectedProject}
-          childrenMap={childrenMap}
-          onLoadChildren={loadChildren}
-          onClose={() => {
-            setShowSaveAsModal(false);
-            setExportedPdfs(null);
-          }}
-          onSave={async (saveData) => {
-            try {
-              setToast('⏳ Sauvegarde sur ACC...');
-              const result = await api.post('/api/pdf-export/save-to-acc', saveData);
-              setToast(`✅ ${result.data.uploads.length} PDF(s) sauvegardé(s) sur ACC!`);
-              setShowSaveAsModal(false);
-              setExportedPdfs(null);
-            } catch (e) {
-              setToast('❌ ' + (e?.message || 'Erreur sauvegarde'));
-            }
-          }}
-          isSaving={false}
-        />
-      )}
-
       <div
         style={{
           minHeight: '100vh',
@@ -1446,37 +1410,51 @@ export default function PlanningPage() {
                         throw new Error('Aucun lineage URN disponible');
                       }
 
-                      setToast('⏳ Export PDF en cours (peut prendre 2-5 min)...');
-
-                      const result = await exportPDFs(selectedProject, lineageUrns, {
-                        includeSheets: options.includeSheets,
-                        includeViews2D: options.includeViews2D,
-                        includeMarkups: options.includeMarkups,
-                      });
-
-                      setExportedPdfs({
-                        jobId: result.data.jobId,
-                        pdfs: result.data.pdfs,
-                      });
-                      setShowSaveAsModal(true);
-
-                      const jobInfo = result?.data || {};
-                      if (!jobInfo?.jobId || !Array.isArray(jobInfo?.pdfs) || jobInfo.pdfs.length === 0) {
-                        setExportedPdfs(null);
-                        setShowSaveAsModal(false);
+                      // Vérifier qu'un dossier est sélectionné
+                      if (!selectedFolder) {
+                        alert('Sélectionne un dossier de destination');
+                        return;
                       }
 
-                      const pdfCount = result.data?.pdfs?.length || 0;
-                      setToast(`✅ ${pdfCount} PDF(s) exporté(s)! Prêts au téléchargement.`);
-                      setTimeout(() => setToast(''), 6000);
+                      const folderId = idOf(selectedFolder);
+                      if (!folderId) {
+                        alert('Dossier sélectionné invalide');
+                        return;
+                      }
 
-                      setSelectedItems({});
-                    } catch (e) {
-                      setShowSaveAsModal(false);
-                      setExportedPdfs(null);
-                      console.error('[PDFExport] Erreur:', e);
-                      setToast('❌ ' + (e?.message || 'Erreur export PDF'));
-                      setTimeout(() => setToast(''), 5000);
+                      setToast('⏳ Export et sauvegarde sur ACC en cours (2-5 min)...');
+
+                      // NOUVEAU: Appel combiné export + save
+                      const result = await api.post('/api/pdf-export/export-and-save', {
+                        fileUrn: lineageUrns[0], // Premier fichier pour l'instant
+                        projectId: selectedProject,
+                        folderId: folderId,
+                        options: {
+                          includeSheets: options.includeSheets,
+                          includeViews2D: options.includeViews2D,
+                          includeMarkups: options.includeMarkups,
+                        }
+                      });
+
+                      // Afficher résultat final
+                      if (result.data.success) {
+                        const message = result.data.failed > 0
+                          ? `✅ ${result.data.uploaded} PDF(s) sauvegardé(s) sur ACC (${result.data.failed} échec)`
+                          : `✅ ${result.data.uploaded} PDF(s) sauvegardé(s) sur ACC!`;
+
+                        setToast(message);
+                        setTimeout(() => setToast(''), 6000);
+
+                        // Fermer le modal de sélection de dossier
+                        setShowFolderModal(false);
+                      } else {
+                        throw new Error('Export échoué');
+                      }
+
+                    } catch (err) {
+                      console.error('Erreur export:', err);
+                      setToast('❌ ' + (err.message || 'Erreur lors de l\'export'));
+                      setTimeout(() => setToast(''), 6000);
                     } finally {
                       setExportingPDFs(false);
                     }
