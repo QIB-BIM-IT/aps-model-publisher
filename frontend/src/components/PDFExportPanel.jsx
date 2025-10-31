@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { toast } from 'react-toastify';
 import { getUserApsToken as getUserToken } from '../services/api';
+import './PDFExportPanel.css';
 
 export function PDFExportPanel({ selectedFile, projectId, folderId }) {
   const [isExporting, setIsExporting] = useState(false);
@@ -88,7 +89,7 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
       >
         {isExporting ? (
           <>
-            <span className="spinner"></span>
+            <span className="spinner" aria-hidden="true"></span>
             {exportProgress || 'Processing...'}
           </>
         ) : (
