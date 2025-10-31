@@ -1,14 +1,33 @@
 'use strict';
 
 const axios = require('axios');
+const { PDFDocument } = require('pdf-lib');
 const logger = require('../config/logger');
 
-// Pour merger les PDFs
-const { PDFDocument } = require('pdf-lib');
-
 class PDFUploadService {
+  constructor() {
+    this.baseUrl = 'https://developer.api.autodesk.com';
+  }
+
   /**
-   * Merge plusieurs PDFs en un seul
+   * Nettoie le nom de fichier en retirant le préfixe « Feuilles- »
+   */
+  sanitizeFileName(name) {
+    if (!name) {
+      return 'document.pdf';
+    }
+
+    const trimmed = name.toString().trim();
+    const cleaned = trimmed.replace(/^Feuilles-/i, '').trim();
+    if (!cleaned) {
+      return trimmed || 'document.pdf';
+    }
+
+    return cleaned;
+  }
+
+  /**
+   * Fusionne plusieurs buffers PDF en un seul fichier
    */
   async mergePDFs(pdfBuffers, outputName = 'merged.pdf') {
     try {
@@ -34,85 +53,251 @@ class PDFUploadService {
   }
 
   /**
-   * Upload un PDF sur ACC
-   * Workflow complet: storage → S3 signed URL → upload → finalize → create item
+   * Upload complet d'un PDF sur ACC (création ou versionning automatique)
    */
-  async uploadPDFToACC(projectId, folderId, pdfBuffer, fileName, accessToken) {
-    try {
-      logger.info(`[PDFUpload] Upload PDF sur ACC: ${fileName}`);
+  async uploadPDFToACC(arg1, arg2, arg3, arg4, arg5) {
+    let projectId;
+    let folderId;
+    let pdfBuffer;
+    let fileName;
+    let accessToken;
 
-      const cleanProjectId = projectId.replace(/^b\./, '');
+    if (arg1 && typeof arg1 === 'object' && !Buffer.isBuffer(arg1) && !(arg1 instanceof Uint8Array)) {
+      const pdf = arg1;
+      projectId = arg2;
+      folderId = arg3;
+      accessToken = arg4;
+      pdfBuffer = pdf.buffer || pdf.data || pdf.fileBuffer;
+      fileName = pdf.filename || pdf.name || pdf.fileName;
+    } else {
+      projectId = arg1;
+      folderId = arg2;
+      pdfBuffer = arg3;
+      fileName = arg4;
+      accessToken = arg5;
+    }
+
+    if (!Buffer.isBuffer(pdfBuffer)) {
+      if (pdfBuffer instanceof Uint8Array) {
+        pdfBuffer = Buffer.from(pdfBuffer);
+      } else if (Array.isArray(pdfBuffer)) {
+        pdfBuffer = Buffer.from(pdfBuffer);
+      } else {
+        throw new Error('pdfBuffer doit être un Buffer');
+      }
+    }
+
+    if (!projectId || !folderId) {
+      throw new Error('projectId et folderId requis pour upload');
+    }
+
+    const cleanProjectId = projectId.replace(/^b\./, '');
+    const sanitizedName = this.ensurePdfExtension(this.sanitizeFileName(fileName || 'document.pdf'));
+
+    try {
+      logger.info(`[PDFUpload] Upload PDF sur ACC: ${sanitizedName}`);
 
       // 1. Créer storage object
-      logger.debug(`[PDFUpload] 1️⃣ Création storage object...`);
       const storageData = await this.createStorageObject(
         cleanProjectId,
         folderId,
-        fileName,
+        sanitizedName,
         accessToken
       );
 
-      const objectId = storageData.data?.id;
+      const objectId = storageData?.data?.id;
       if (!objectId) {
-        throw new Error(`Pas d'objectId retourné`);
+        throw new Error('Pas d\'objectId retourné');
       }
 
-      logger.debug(`[PDFUpload] Storage créé: ${objectId}`);
+      const { bucketKey, objectKey } = this.parseObjectId(objectId);
 
-      // 2. Parser l'objectId pour bucket + object key
-      const objectIdParts = objectId.split(':');
-      const bucketAndObject = objectIdParts[objectIdParts.length - 1];
-      const [bucketKey, ...objectKeyParts] = bucketAndObject.split('/');
-      const objectKey = objectKeyParts.join('/');
-
-      logger.debug(`[PDFUpload] Bucket: ${bucketKey}, Object: ${objectKey}`);
-
-      // 3. Obtenir URL signée S3
-      logger.debug(`[PDFUpload] 2️⃣ Obtention URL signée S3...`);
+      // 2. Obtenir URL signée S3
       const signedS3Data = await this.getSignedS3Upload(bucketKey, objectKey, accessToken);
-
-      const uploadUrl = signedS3Data.urls?.[0];
-      const uploadKey = signedS3Data.uploadKey;
+      const uploadUrl = signedS3Data?.urls?.[0];
+      const uploadKey = signedS3Data?.uploadKey;
 
       if (!uploadUrl) {
-        throw new Error(`Pas d'URL S3 retournée`);
+        throw new Error('Pas d\'URL S3 retournée');
       }
 
-      logger.debug(`[PDFUpload] URL S3 reçue`);
-
-      // 4. Upload vers S3
-      logger.debug(`[PDFUpload] 3️⃣ Upload PDF vers S3 (${pdfBuffer.length} bytes)...`);
+      // 3. Upload vers S3
       await this.uploadToS3(uploadUrl, pdfBuffer);
-      logger.info(`[PDFUpload] ✅ PDF uploadé vers S3`);
+      logger.info(`[PDFUpload] ✅ PDF uploadé vers S3 (${sanitizedName})`);
 
-      // 5. Finaliser upload
+      // 4. Finaliser upload si nécessaire
       if (uploadKey) {
-        logger.debug(`[PDFUpload] 4️⃣ Finalisation upload...`);
         await this.completeS3Upload(bucketKey, objectKey, uploadKey, accessToken);
-        logger.debug(`[PDFUpload] Upload finalisé`);
+        logger.debug('[PDFUpload] Upload S3 finalisé');
       }
 
-      // 6. Créer item dans ACC
-      logger.debug(`[PDFUpload] 5️⃣ Création item dans ACC...`);
-      const itemData = await this.createItem(
+      // 5. Détection d'un item existant
+      const existingItem = await this.findExistingItem(
         cleanProjectId,
         folderId,
-        fileName,
-        objectId,
+        sanitizedName,
         accessToken
       );
 
-      logger.info(`[PDFUpload] ✅ PDF ${fileName} uploadé sur ACC`);
+      let action = 'create-item';
+      let responseData;
+
+      if (existingItem) {
+        logger.info(`[PDFUpload] Item existant trouvé (${existingItem.id}), création nouvelle version...`);
+        action = 'create-version';
+        responseData = await this.createVersion(
+          cleanProjectId,
+          existingItem,
+          objectId,
+          sanitizedName,
+          accessToken
+        );
+      } else {
+        logger.info('[PDFUpload] Aucun item existant, création d\'un nouvel item...');
+        responseData = await this.createItem(
+          cleanProjectId,
+          folderId,
+          objectId,
+          sanitizedName,
+          accessToken
+        );
+      }
+
+      const versionId = this.extractVersionId(responseData);
+      const itemId = existingItem?.id || responseData?.data?.id;
 
       return {
         success: true,
-        fileName,
-        itemId: itemData.data?.id,
-        versionId: itemData.included?.[0]?.id,
+        fileName: sanitizedName,
+        itemId,
+        versionId,
+        action,
       };
     } catch (error) {
-      logger.error(`[PDFUpload] ❌ Erreur upload ${fileName}: ${error.message}`);
+      logger.error(`[PDFUpload] ❌ Erreur upload ${sanitizedName}: ${error.message}`);
       throw error;
+    }
+  }
+
+  ensurePdfExtension(name) {
+    if (!name.toLowerCase().endsWith('.pdf')) {
+      return `${name}.pdf`;
+    }
+    return name;
+  }
+
+  parseObjectId(objectId) {
+    const objectIdParts = objectId.split(':');
+    const bucketAndObject = objectIdParts[objectIdParts.length - 1];
+    const [bucketKey, ...objectKeyParts] = bucketAndObject.split('/');
+    const objectKey = objectKeyParts.join('/');
+
+    return { bucketKey, objectKey };
+  }
+
+  extractVersionId(responseData) {
+    if (!responseData) return null;
+    if (responseData?.data?.type === 'versions') {
+      return responseData.data.id;
+    }
+
+    const includedVersions = Array.isArray(responseData?.included)
+      ? responseData.included.filter((inc) => inc.type === 'versions')
+      : [];
+
+    if (includedVersions.length > 0) {
+      return includedVersions[0].id;
+    }
+
+    return responseData?.data?.relationships?.tip?.data?.id || null;
+  }
+
+  /**
+   * Recherche un item existant dans un dossier ACC
+   */
+  async findExistingItem(projectId, folderId, fileName, accessToken) {
+    const url = `${this.baseUrl}/data/v1/projects/b.${projectId}/folders/${encodeURIComponent(folderId)}/contents`;
+
+    try {
+      const headers = { Authorization: `Bearer ${accessToken}` };
+      const response = await axios.get(url, {
+        headers,
+        params: {
+          'filter[displayName]': fileName,
+          'page[limit]': 50,
+        },
+      });
+
+      let items = Array.isArray(response.data?.data) ? response.data.data : [];
+
+      if (!items.length) {
+        const fallback = await axios.get(url, {
+          headers,
+          params: { 'page[limit]': 200 },
+        });
+        items = Array.isArray(fallback.data?.data) ? fallback.data.data : [];
+      }
+
+      return items.find((item) => {
+        const displayName = item?.attributes?.displayName || '';
+        return displayName.localeCompare(fileName, undefined, { sensitivity: 'accent' }) === 0;
+      }) || null;
+    } catch (error) {
+      logger.warn(
+        `[PDFUpload] Impossible de vérifier l\'existence de ${fileName}: ${error.response?.status || error.message}`
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Crée une nouvelle version pour un item existant
+   */
+  async createVersion(projectId, item, objectId, fileName, accessToken) {
+    const itemId = item?.id || item?.data?.id;
+    if (!itemId) {
+      throw new Error('Item existant sans identifiant');
+    }
+
+    const url = `${this.baseUrl}/data/v1/projects/b.${projectId}/versions`;
+
+    const payload = {
+      jsonapi: { version: '1.0' },
+      data: {
+        type: 'versions',
+        attributes: {
+          name: fileName,
+          extension: {
+            type: 'versions:autodesk.bim360:File',
+            version: '1.0',
+          },
+        },
+        relationships: {
+          item: {
+            data: { type: 'items', id: itemId },
+          },
+          storage: {
+            data: { type: 'objects', id: objectId },
+          },
+        },
+      },
+    };
+
+    logger.debug(`[PDFUpload] createVersion payload: ${JSON.stringify(payload, null, 2)}`);
+
+    try {
+      const response = await axios.post(url, payload, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/vnd.api+json',
+          Accept: 'application/vnd.api+json',
+        },
+      });
+
+      return response.data;
+    } catch (error) {
+      logger.error(`[PDFUpload] createVersion error: ${error.response?.status}`);
+      throw new Error(`Erreur createVersion: ${error.response?.data?.message || error.message}`);
     }
   }
 
@@ -120,7 +305,7 @@ class PDFUploadService {
    * Crée un storage object
    */
   async createStorageObject(projectId, folderId, fileName, accessToken) {
-    const url = `https://developer.api.autodesk.com/data/v1/projects/b.${projectId}/storage`;
+    const url = `${this.baseUrl}/data/v1/projects/b.${projectId}/storage`;
 
     const body = {
       jsonapi: { version: '1.0' },
@@ -129,7 +314,10 @@ class PDFUploadService {
         attributes: { name: fileName },
         relationships: {
           target: {
-            data: { type: 'folders', id: folderId },
+            data: {
+              type: 'folders',
+              id: folderId,
+            },
           },
         },
       },
@@ -153,7 +341,7 @@ class PDFUploadService {
    * Obtient URL signée S3
    */
   async getSignedS3Upload(bucketKey, objectKey, accessToken) {
-    const url = `https://developer.api.autodesk.com/oss/v2/buckets/${bucketKey}/objects/${objectKey}/signeds3upload`;
+    const url = `${this.baseUrl}/oss/v2/buckets/${bucketKey}/objects/${objectKey}/signeds3upload`;
 
     try {
       const response = await axios.get(url, {
@@ -189,7 +377,7 @@ class PDFUploadService {
    * Finalise l'upload S3
    */
   async completeS3Upload(bucketKey, objectKey, uploadKey, accessToken) {
-    const url = `https://developer.api.autodesk.com/oss/v2/buckets/${bucketKey}/objects/${objectKey}/signeds3upload`;
+    const url = `${this.baseUrl}/oss/v2/buckets/${bucketKey}/objects/${objectKey}/signeds3upload`;
 
     try {
       await axios.post(
@@ -206,10 +394,10 @@ class PDFUploadService {
   }
 
   /**
-   * Crée l'item dans ACC
+   * Crée un item dans ACC
    */
-  async createItem(projectId, folderId, fileName, objectId, accessToken) {
-    const url = `https://developer.api.autodesk.com/data/v1/projects/b.${projectId}/items`;
+  async createItem(projectId, folderId, objectId, fileName, accessToken) {
+    const url = `${this.baseUrl}/data/v1/projects/b.${projectId}/items`;
 
     const payload = {
       jsonapi: { version: '1.0' },
@@ -227,7 +415,10 @@ class PDFUploadService {
             data: { type: 'versions', id: '1' },
           },
           parent: {
-            data: { type: 'folders', id: folderId },
+            data: {
+              type: 'folders',
+              id: folderId,
+            },
           },
         },
       },
@@ -254,9 +445,7 @@ class PDFUploadService {
       ],
     };
 
-    logger.debug(
-      `[PDFUpload] 🔍 DEBUG createItem payload: ${JSON.stringify(payload, null, 2)}`
-    );
+    logger.debug(`[PDFUpload] 🔍 DEBUG createItem payload: ${JSON.stringify(payload, null, 2)}`);
 
     try {
       const response = await axios.post(url, payload, {

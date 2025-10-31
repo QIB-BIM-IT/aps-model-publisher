@@ -9,6 +9,87 @@ const logger = require('../config/logger');
 const apsAuthService = require('./apsAuth.service');
 
 class ACCExportService {
+  constructor() {
+    this.jobProjectMap = new Map();
+  }
+
+  /**
+   * Lance un export PDF et retourne l'identifiant du job
+   */
+  async exportPDFs(fileUrns, projectId, accessToken) {
+    if (!projectId) {
+      throw new Error('projectId requis pour lancer un export ACC');
+    }
+
+    if (!Array.isArray(fileUrns) || fileUrns.length === 0) {
+      throw new Error('Aucun fichier Revit fourni pour export');
+    }
+
+    logger.info(`[ACCExport] exportPDFs → ${fileUrns.length} fichier(s)`);
+
+    const job = await this.startExport(projectId, fileUrns, accessToken);
+    if (!job?.id) {
+      throw new Error('Job export invalide (pas d\'identifiant)');
+    }
+
+    this.jobProjectMap.set(job.id, projectId);
+    return job.id;
+  }
+
+  /**
+   * Attend la complétion d'un job d'export PDF
+   */
+  async waitForJobCompletion(jobId, accessToken, maxWaitMs = 300000) {
+    if (!jobId) {
+      throw new Error('jobId requis');
+    }
+
+    const projectId = this.jobProjectMap.get(jobId);
+    if (!projectId) {
+      throw new Error(`Job inconnu: ${jobId}`);
+    }
+
+    const startTime = Date.now();
+    const pollInterval = 5000;
+
+    logger.info(`[ACCExport] Attente job ${jobId} (export-and-save)...`);
+
+    while (Date.now() - startTime < maxWaitMs) {
+      const status = await this.checkStatus(projectId, jobId, accessToken);
+
+      const state = status?.status;
+      if (state === 'successful' || state === 'partialSuccess') {
+        const result = status?.result || {};
+        const signedUrl = result?.signedUrl || result?.output?.signedUrl;
+
+        this.jobProjectMap.delete(jobId);
+
+        return {
+          status: state,
+          signedUrl,
+          result,
+        };
+      }
+
+      if (state === 'failed') {
+        this.jobProjectMap.delete(jobId);
+        const errorMsg = status?.error || status?.result?.error || 'Erreur inconnue';
+        throw new Error(`Export échoué: ${errorMsg}`);
+      }
+
+      if (['processing', 'inProgress', 'pending'].includes(state)) {
+        await this.sleep(pollInterval);
+        continue;
+      }
+
+      logger.warn(`[ACCExport] Status inattendu (${state}) pour job ${jobId}`);
+      await this.sleep(pollInterval);
+    }
+
+    this.jobProjectMap.delete(jobId);
+    throw new Error(`Export PDF timeout après ${maxWaitMs}ms`);
+  }
+
   /**
    * Export des sheets et vues 2D d'un ou plusieurs fichiers Revit en PDFs
    */

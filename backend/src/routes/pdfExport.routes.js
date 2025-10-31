@@ -146,10 +146,9 @@ router.post('/save-to-acc', asyncHandler(async (req, res) => {
 
       // Upload le PDF fusionné
       const result = await pdfUploadService.uploadPDFToACC(
+        { buffer: mergedBuffer, filename: fileName },
         projectId,
         folderId,
-        mergedBuffer,
-        fileName,
         accessToken
       );
 
@@ -160,10 +159,9 @@ router.post('/save-to-acc', asyncHandler(async (req, res) => {
       for (const pdf of selectedPdfs) {
         logger.info(`[PDFUpload] Upload: ${pdf.name}`);
         const result = await pdfUploadService.uploadPDFToACC(
+          { buffer: pdf.buffer, filename: pdf.name },
           projectId,
           folderId,
-          pdf.buffer,
-          pdf.name,
           accessToken
         );
         uploadResults.push(result);
@@ -180,6 +178,98 @@ router.post('/save-to-acc', asyncHandler(async (req, res) => {
     throw error;
   }
 }));
+
+/**
+ * POST /api/pdf-export/export-and-save
+ * Endpoint combiné: Export + Upload en une seule action
+ */
+router.post('/export-and-save', async (req, res) => {
+  try {
+    const { fileUrn, projectId, folderId } = req.body;
+
+    if (!fileUrn || !projectId || !folderId) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['fileUrn', 'projectId', 'folderId']
+      });
+    }
+
+    const userToken = req.headers['x-user-token'];
+    if (!userToken) {
+      return res.status(401).json({ error: 'Missing user token' });
+    }
+
+    logger.info(`[ExportAndSave] Démarrage export + upload pour: ${fileUrn}`);
+
+    // ÉTAPE 1: Export PDF
+    logger.info('[ExportAndSave] 1/2 - Export des PDFs...');
+    const jobId = await accExportService.exportPDFs([fileUrn], projectId, userToken);
+
+    const jobResult = await accExportService.waitForJobCompletion(jobId, userToken);
+
+    if (jobResult.status !== 'successful' && jobResult.status !== 'partialSuccess') {
+      throw new Error(`Export échoué: ${jobResult.status}`);
+    }
+
+    if (!jobResult.signedUrl) {
+      throw new Error('Export terminé mais aucune URL de téléchargement trouvée');
+    }
+
+    const zipBuffer = await accExportService.downloadZip(jobResult.signedUrl);
+    const pdfs = await accExportService.extractPDFsFromZip(zipBuffer);
+
+    logger.info(`[ExportAndSave] ✅ ${pdfs.length} PDF(s) extraits`);
+
+    // ÉTAPE 2: Upload direct sur ACC
+    logger.info('[ExportAndSave] 2/2 - Upload sur ACC...');
+    const uploadResults = [];
+    const uploadErrors = [];
+
+    for (const pdf of pdfs) {
+      const originalName = pdf.filename || pdf.name || 'document.pdf';
+      try {
+        const result = await pdfUploadService.uploadPDFToACC(
+          { buffer: pdf.buffer, filename: originalName },
+          projectId,
+          folderId,
+          userToken
+        );
+
+        uploadResults.push({
+          filename: originalName.replace(/^Feuilles-/i, ''),
+          success: true,
+          itemId: result.itemId,
+          versionId: result.versionId,
+        });
+      } catch (error) {
+        logger.error(`[ExportAndSave] Erreur upload ${originalName}: ${error.message}`);
+        uploadErrors.push({
+          filename: originalName,
+          error: error.message,
+        });
+      }
+    }
+
+    const response = {
+      success: uploadResults.length > 0,
+      exported: pdfs.length,
+      uploaded: uploadResults.length,
+      failed: uploadErrors.length,
+      results: uploadResults,
+      errors: uploadErrors.length > 0 ? uploadErrors : undefined,
+    };
+
+    logger.info(`[ExportAndSave] ✅ Terminé: ${uploadResults.length}/${pdfs.length} PDFs sur ACC`);
+
+    res.json(response);
+  } catch (error) {
+    logger.error(`[ExportAndSave] Erreur: ${error.message}`);
+    res.status(500).json({
+      error: 'Export and save failed',
+      message: error.message,
+    });
+  }
+});
 
 /**
  * GET /api/pdf-export/check-readiness
