@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { toast } from 'react-toastify';
-import { getUserApsToken as getUserToken } from '../services/api';
+import { getToken, getUserApsToken as getUserToken } from '../services/api';
 import './PDFExportPanel.css';
 
 export function PDFExportPanel({ selectedFile, projectId, folderId }) {
@@ -27,11 +27,16 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
       console.log('✅ Token obtenu:', userToken ? 'OK' : 'VIDE');
 
       console.log('🚀 Envoi requête...');
+      const jwtToken = getToken();
+      if (!jwtToken) {
+        throw new Error('Session expired, please sign in again');
+      }
       const response = await fetch('/api/pdf-export/export-and-save', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-token': userToken
+          'x-user-token': userToken,
+          Authorization: `Bearer ${jwtToken}`
         },
         body: JSON.stringify({
           fileUrn: selectedFile.urn,

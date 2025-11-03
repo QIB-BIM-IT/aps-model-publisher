@@ -11,6 +11,7 @@ import api, {
   deletePublishJob,
   runPublishJobNow,
   getRuns,
+  getToken,
   getUserApsToken,
 } from '../services/api';
 
@@ -1419,11 +1420,16 @@ export default function PlanningPage() {
                       console.log('✅ Token obtenu:', userToken ? 'OK' : 'VIDE');
 
                       console.log('🚀 Envoi requête...');
+                      const jwtToken = getToken();
+                      if (!jwtToken) {
+                        throw new Error('Session expirée, veuillez vous reconnecter');
+                      }
                       const result = await fetch('/api/pdf-export/export-and-save', {
                         method: 'POST',
                         headers: {
                           'Content-Type': 'application/json',
-                          'x-user-token': userToken, // ← AJOUTER LE TOKEN!
+                          'x-user-token': userToken,
+                          Authorization: `Bearer ${jwtToken}`,
                         },
                         body: JSON.stringify({
                           fileUrn: lineageUrns[0],
