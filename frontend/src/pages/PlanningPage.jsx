@@ -1414,10 +1414,11 @@ export default function PlanningPage() {
 
                       setToast('⏳ Export et sauvegarde sur ACC en cours (2-5 min)...');
 
-                      // Obtenir le token utilisateur
+                      console.log('🔐 Récupération token...');
                       const userToken = await getUserApsToken();
+                      console.log('✅ Token obtenu:', userToken ? 'OK' : 'VIDE');
 
-                      // Appel avec le token
+                      console.log('🚀 Envoi requête...');
                       const result = await fetch('/api/pdf-export/export-and-save', {
                         method: 'POST',
                         headers: {
@@ -1436,7 +1437,11 @@ export default function PlanningPage() {
                         })
                       });
 
+                      console.log('📥 Status:', result.status);
+                      console.log('📥 OK?:', result.ok);
+
                       const data = await result.json();
+                      console.log('📦 Réponse:', data);
 
                       if (!result.ok) {
                         throw new Error(data.message || 'Export failed');

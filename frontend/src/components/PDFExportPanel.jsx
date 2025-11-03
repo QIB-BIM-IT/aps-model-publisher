@@ -22,8 +22,11 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
     setExportProgress('Exporting PDFs...');
 
     try {
+      console.log('🔐 Récupération token...');
       const userToken = await getUserToken();
+      console.log('✅ Token obtenu:', userToken ? 'OK' : 'VIDE');
 
+      console.log('🚀 Envoi requête...');
       const response = await fetch('/api/pdf-export/export-and-save', {
         method: 'POST',
         headers: {
@@ -37,7 +40,11 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
         })
       });
 
+      console.log('📥 Status:', response.status);
+      console.log('📥 OK?:', response.ok);
+
       const data = await response.json();
+      console.log('📦 Réponse:', data);
 
       if (!response.ok) {
         throw new Error(data.message || 'Export failed');
