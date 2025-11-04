@@ -1,3 +1,256 @@
+.pdf-export-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+}
+
+.pdf-export-header h3 {
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.pdf-export-header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+}
+
+.pdf-export-section {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pdf-export-section-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #1e293b;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pdf-export-checkbox-group,
+.pdf-export-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pdf-export-checkbox-group label,
+.pdf-export-radio-group label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.pdf-export-checkbox-group input,
+.pdf-export-radio-group input,
+.pdf-export-sheet-items input {
+  accent-color: #2563eb;
+  width: 16px;
+  height: 16px;
+}
+
+.pdf-export-custom-block {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pdf-export-custom-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pdf-export-custom-stats {
+  display: flex;
+  gap: 14px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.pdf-export-error {
+  background: rgba(248, 113, 113, 0.12);
+  color: #b91c1c;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.pdf-export-sheet-list {
+  border: 1px solid #dbe3f0;
+  border-radius: 12px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-export-sheet-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13px;
+  color: #334155;
+}
+
+.pdf-export-sheet-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.pdf-export-sheet-buttons button {
+  border: none;
+  background: none;
+  color: #2563eb;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pdf-export-sheet-buttons button:hover {
+  text-decoration: underline;
+}
+
+.pdf-export-sheet-items {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+}
+
+.pdf-export-sheet-items label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.pdf-export-sheet-items label:last-child {
+  border-bottom: none;
+}
+
+.pdf-export-sheet-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.pdf-export-sheet-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.pdf-export-empty {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.pdf-export-combined-input {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pdf-export-combined-input label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.pdf-export-combined-input input {
+  border: 1px solid #cbd5f5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  outline: none;
+  transition: border 0.2s ease;
+}
+
+.pdf-export-combined-input input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.pdf-export-helper {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.primary-btn {
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #0696d7, #0ea5e9);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.primary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.primary-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(6, 150, 215, 0.35);
+}
+
+.secondary-btn {
+  border: none;
+  background: #e2e8f0;
+  color: #0f172a;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.secondary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondary-btn:not(:disabled):hover {
+  background: #d4ddeb;
+}
+
+.pdf-export-progress {
+  font-size: 14px;
+  color: #475569;
+}
+
 .pdf-export-panel .spinner {
   display: inline-block;
   width: 14px;
