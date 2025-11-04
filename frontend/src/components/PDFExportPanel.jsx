@@ -3,7 +3,7 @@ import { toast } from 'react-toastify';
 import {
   getToken,
   getUserApsToken as getUserToken,
-  listAvailableSheets,
+  listSheets,
 } from '../services/api';
 import './PDFExportPanel.css';
 
@@ -72,24 +72,19 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
     setSheetLoadError(null);
 
     try {
-      const userToken = await getUserToken();
-      const data = await listAvailableSheets(selectedFile.urn, projectId, userToken);
+      const { sheets, views2D } = await listSheets(selectedFile.urn, projectId);
 
-      if (!data?.success) {
-        throw new Error(data?.message || 'Impossible de récupérer les sheets');
-      }
-
-      setAvailableSheets(data.sheets || []);
-      setAvailableViews(data.views2D || []);
+      setAvailableSheets(sheets);
+      setAvailableViews(views2D);
       setSelectedSheetIds((prev) => {
         if (!prev.length) {
           return [];
         }
-        const validIds = new Set((data.sheets || []).map((sheet) => sheet.id));
+        const validIds = new Set((sheets || []).map((sheet) => sheet.id));
         return prev.filter((id) => validIds.has(id));
       });
 
-      toast.success(`✅ ${data.sheets?.length || 0} feuille(s) chargée(s)`);
+      toast.success(`✅ ${sheets?.length || 0} feuille(s) chargée(s)`);
     } catch (error) {
       console.error('Load sheets error:', error);
       setSheetLoadError(error.message);
