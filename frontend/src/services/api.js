@@ -142,6 +142,9 @@ export async function listSheets(fileUrn, projectId) {
   return {
     sheets: Array.isArray(data?.sheets) ? data.sheets : [],
     views2D: Array.isArray(data?.views2D) ? data.views2D : [],
+    versionUrn: data?.versionUrn || null,
+    derivativeUrn: data?.derivativeUrn || null,
+    requestedUrn: data?.requestedUrn || fileUrn,
   };
 }
 

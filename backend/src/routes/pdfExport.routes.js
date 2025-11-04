@@ -78,6 +78,109 @@ function classifyPdf(name = '') {
   return type;
 }
 
+function ensureProjectId(projectId = '') {
+  if (!projectId) {
+    return projectId;
+  }
+  return projectId.startsWith('b.') ? projectId : `b.${projectId}`;
+}
+
+async function resolveModelUrns(fileUrn, projectId, accessToken) {
+  if (!fileUrn) {
+    throw new ValidationError('fileUrn requis');
+  }
+  if (!projectId) {
+    throw new ValidationError('projectId requis');
+  }
+  if (!accessToken) {
+    throw new ValidationError('Token APS requis pour la résolution des URNs');
+  }
+
+  const inputUrn = String(fileUrn);
+  const lowerUrn = inputUrn.toLowerCase();
+  const cleanProjectId = ensureProjectId(projectId);
+  const baseUrl = 'https://developer.api.autodesk.com/data/v1';
+
+  let versionUrn = null;
+  let derivativeUrn = null;
+
+  if (lowerUrn.includes('dm.version:')) {
+    versionUrn = inputUrn;
+  } else if (lowerUrn.includes('viewing:')) {
+    derivativeUrn = inputUrn;
+  }
+
+  if (!versionUrn) {
+    const itemUrl = `${baseUrl}/projects/${encodeURIComponent(cleanProjectId)}/items/${encodeURIComponent(inputUrn)}`;
+    let itemResponse;
+
+    try {
+      itemResponse = await axios.get(itemUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { include: 'tip' },
+      });
+    } catch (error) {
+      const status = error?.response?.status;
+      const detail = error?.response?.data?.errors?.[0]?.detail || error?.message;
+      logger.error(`[URNResolve] Item lookup failed (${status || 'n/a'}) pour ${inputUrn}: ${detail}`);
+      throw new Error(`Impossible de récupérer l'item ACC (${status || 'erreur'})`);
+    }
+
+    versionUrn = itemResponse.data?.data?.relationships?.tip?.data?.id;
+
+    if (!versionUrn && Array.isArray(itemResponse.data?.included)) {
+      const versionIncluded = itemResponse.data.included.find((inc) => inc?.type === 'versions' && inc?.id);
+      versionUrn = versionIncluded?.id || versionIncluded?.attributes?.urn || null;
+    }
+
+    if (!versionUrn) {
+      throw new Error("Impossible de déterminer l'URN de version (tip introuvable)");
+    }
+  }
+
+  if (!derivativeUrn) {
+    const versionUrl = `${baseUrl}/projects/${encodeURIComponent(cleanProjectId)}/versions/${encodeURIComponent(versionUrn)}`;
+    let versionResponse;
+
+    try {
+      versionResponse = await axios.get(versionUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { include: 'derivatives' },
+      });
+    } catch (error) {
+      const status = error?.response?.status;
+      const detail = error?.response?.data?.errors?.[0]?.detail || error?.message;
+      logger.error(`[URNResolve] Version lookup failed (${status || 'n/a'}) pour ${versionUrn}: ${detail}`);
+      throw new Error(`Impossible de récupérer la version ACC (${status || 'erreur'})`);
+    }
+
+    derivativeUrn = versionResponse.data?.data?.relationships?.derivatives?.data?.[0]?.id;
+
+    if (!derivativeUrn && Array.isArray(versionResponse.data?.included)) {
+      const derivativeIncluded = versionResponse.data.included.find(
+        (inc) => inc?.type === 'derivatives' && (inc?.id || inc?.attributes?.urn)
+      );
+      derivativeUrn = derivativeIncluded?.id || derivativeIncluded?.attributes?.urn || null;
+    }
+
+    if (!derivativeUrn && Array.isArray(versionResponse.data?.data?.relationships?.derivatives?.data)) {
+      const derivativeEntry = versionResponse.data.data.relationships.derivatives.data.find((entry) => entry?.meta?.urn);
+      derivativeUrn = derivativeEntry?.meta?.urn || null;
+    }
+
+    if (!derivativeUrn) {
+      throw new Error("Impossible de déterminer l'URN dérivé du fichier");
+    }
+  }
+
+  return {
+    inputUrn,
+    projectId: cleanProjectId,
+    versionUrn,
+    derivativeUrn,
+  };
+}
+
 /**
  * GET /api/pdf-export/download/:jobId/:fileName
  * Télécharge un PDF depuis le cache
@@ -140,10 +243,27 @@ router.post('/export', asyncHandler(async (req, res) => {
 
   logger.info(`[PDFExport] Export demandé par user ${req.userId} pour ${fileUrns.length} fichier(s)`);
 
-  // Lancer l'export
+  const userToken = await apsAuthService.ensureValidToken(req.userId);
+
+  const resolvedUrns = await Promise.all(
+    fileUrns.map(async (urn) => {
+      const resolved = await resolveModelUrns(urn, projectId, userToken);
+      if (resolved.versionUrn !== urn) {
+        logger.info(
+          `[PDFExport] URN ${urn.substring(0, 60)}... → version=${resolved.versionUrn.substring(0, 60)}...`
+        );
+      }
+      return resolved;
+    })
+  );
+
+  const versionUrns = resolvedUrns.map((entry) => entry.versionUrn);
+  logger.info(`[PDFExport] ${versionUrns.length} version(s) prêtes pour export PDF`);
+
+  // Lancer l'export avec les URNs de version résolus
   const result = await accExportService.exportRevitToPDFs(
     projectId,
-    fileUrns,
+    versionUrns,
     {
       userId: req.userId,
       uploadToACC,
@@ -153,7 +273,12 @@ router.post('/export', asyncHandler(async (req, res) => {
 
   res.json({
     success: true,
-    data: result
+    data: result,
+    resolvedUrns: resolvedUrns.map((entry) => ({
+      input: entry.inputUrn,
+      version: entry.versionUrn,
+      derivative: entry.derivativeUrn,
+    })),
   });
 }));
 
@@ -176,7 +301,15 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
   logger.info(`[ListSheets] Récupération sheets pour: ${fileUrn}`);
 
   try {
-    const urnBase64 = Buffer.from(fileUrn)
+    const { derivativeUrn, versionUrn } = await resolveModelUrns(fileUrn, projectId, userToken);
+
+    if (derivativeUrn !== fileUrn) {
+      logger.info(
+        `[ListSheets] URN résolu → version=${versionUrn || 'inconnue'} | derivative=${derivativeUrn.substring(0, 60)}...`
+      );
+    }
+
+    const urnBase64 = Buffer.from(derivativeUrn)
       .toString('base64')
       .replace(/=+$/g, '')
       .replace(/\+/g, '-')
@@ -243,7 +376,9 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
 
     res.json({
       success: true,
-      fileUrn,
+      requestedUrn: fileUrn,
+      versionUrn,
+      derivativeUrn,
       sheets: sheets.sort((a, b) => {
         if (a.number && b.number) {
           return a.number.localeCompare(b.number, undefined, { numeric: true });
@@ -356,6 +491,11 @@ router.post('/save-to-acc', asyncHandler(async (req, res) => {
       success: true,
       message: `${uploadResults.length} PDF(s) uploadé(s) sur ACC`,
       uploads: uploadResults,
+      resolvedUrns: {
+        input: fileUrn,
+        version: exportVersionUrn,
+        derivative: exportDerivativeUrn,
+      },
     });
   } catch (error) {
     logger.error(`[PDFUpload] Erreur: ${error.message}`);
@@ -415,8 +555,26 @@ router.post('/export-and-save', async (req, res) => {
     );
 
     logger.info('[ExportAndSave] 1/2 - Export des PDFs...');
+
+    const clientResolved = req.body?.resolvedUrns || {};
+    let exportVersionUrn = clientResolved.version;
+    let exportDerivativeUrn = clientResolved.derivative;
+
+    if (!exportVersionUrn || !exportDerivativeUrn) {
+      const resolved = await resolveModelUrns(fileUrn, projectId, userToken);
+      exportVersionUrn = resolved.versionUrn;
+      exportDerivativeUrn = resolved.derivativeUrn;
+      if (resolved.versionUrn !== fileUrn) {
+        logger.info(
+          `[ExportAndSave] URN converti → version=${resolved.versionUrn.substring(0, 60)}... | derivative=${resolved.derivativeUrn.substring(0, 60)}...`
+        );
+      }
+    } else {
+      logger.info('[ExportAndSave] URNs résolus fournis par le client utilisés pour l\'export');
+    }
+
     const jobId = await accExportService.exportPDFs(
-      [fileUrn],
+      [exportVersionUrn],
       projectId,
       userToken,
       { includeMarkups }
@@ -583,6 +741,12 @@ router.post('/export-and-save', async (req, res) => {
         exportMode,
       },
       unmatchedSheets: unmatchedSheets.length > 0 ? unmatchedSheets : undefined,
+      resolvedUrns: {
+        input: fileUrn,
+        version: exportVersionUrn,
+        derivative: exportDerivativeUrn,
+        providedByClient: Boolean(clientResolved.version && clientResolved.derivative),
+      },
     };
 
     logger.info(
