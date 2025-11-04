@@ -340,15 +340,12 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
     throw new ValidationError('fileUrn et projectId requis');
   }
 
-  const userToken = req.headers['x-user-token'];
-  if (!userToken) {
-    return res.status(401).json({ error: 'Missing user token' });
-  }
+  const accessToken = await apsAuthService.ensureValidToken(req.userId);
 
   logger.info(`[ListSheets] Récupération sheets pour: ${fileUrn}`);
 
   try {
-    const { derivativeUrn, versionUrn } = await resolveModelUrns(fileUrn, projectId, userToken);
+    const { derivativeUrn, versionUrn } = await resolveModelUrns(fileUrn, projectId, accessToken);
 
     if (derivativeUrn !== fileUrn) {
       logger.info(
@@ -363,8 +360,10 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
       .replace(/\//g, '_');
     const metadataUrl = `https://developer.api.autodesk.com/modelderivative/v2/designdata/${urnBase64}/metadata`;
 
+    logger.debug(`[ListSheets] Récupération metadata pour urn=${derivativeUrn}`);
+
     const metadataResponse = await axios.get(metadataUrl, {
-      headers: { Authorization: `Bearer ${userToken}` }
+      headers: { Authorization: `Bearer ${accessToken}` }
     });
 
     const guid = metadataResponse.data?.data?.metadata?.[0]?.guid;
@@ -373,8 +372,10 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
     }
 
     const propsUrl = `https://developer.api.autodesk.com/modelderivative/v2/designdata/${urnBase64}/metadata/${guid}/properties`;
+    logger.debug(`[ListSheets] Récupération properties (guid=${guid})`);
+
     const propsResponse = await axios.get(propsUrl, {
-      headers: { Authorization: `Bearer ${userToken}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
       params: { forceget: true }
     });
 
@@ -447,6 +448,14 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
     if (detailMessage) logParts.push(`details=${detailMessage}`);
 
     logger.error(logParts.join(' | '));
+
+    if (status === 401) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: "Authentification Autodesk expirée. Merci de te reconnecter.",
+      });
+    }
 
     res.status(status === 404 ? 404 : 500).json({
       success: false,
