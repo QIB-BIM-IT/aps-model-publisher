@@ -176,7 +176,11 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
   logger.info(`[ListSheets] Récupération sheets pour: ${fileUrn}`);
 
   try {
-    const urnBase64 = Buffer.from(fileUrn).toString('base64').replace(/=/g, '');
+    const urnBase64 = Buffer.from(fileUrn)
+      .toString('base64')
+      .replace(/=+$/g, '')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_');
     const metadataUrl = `https://developer.api.autodesk.com/modelderivative/v2/designdata/${urnBase64}/metadata`;
 
     const metadataResponse = await axios.get(metadataUrl, {
@@ -249,11 +253,23 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
       views2D: views2D.sort((a, b) => a.name.localeCompare(b.name)),
     });
   } catch (error) {
-    logger.error(`[ListSheets] Erreur: ${error.message}`);
-    res.status(500).json({
+    const status = error.response?.status;
+    const details = error.response?.data;
+    const detailMessage = typeof details === 'string'
+      ? details
+      : details?.message || details?.error || '';
+
+    const logParts = [`[ListSheets] Erreur`];
+    if (status) logParts.push(`status=${status}`);
+    logParts.push(`message=${error.message}`);
+    if (detailMessage) logParts.push(`details=${detailMessage}`);
+
+    logger.error(logParts.join(' | '));
+
+    res.status(status === 404 ? 404 : 500).json({
       success: false,
       error: 'Failed to list sheets',
-      message: error.message,
+      message: detailMessage || error.message,
     });
   }
 }));

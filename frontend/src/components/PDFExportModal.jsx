@@ -110,8 +110,10 @@ export function PDFExportModal({
         bottom: 0,
         background: 'rgba(0, 0, 0, 0.6)',
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'center',
+        overflowY: 'auto',
+        padding: '40px 16px',
         zIndex: 2000,
       }}
       onClick={onClose}
