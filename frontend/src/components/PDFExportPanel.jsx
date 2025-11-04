@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   getToken,
@@ -23,6 +23,11 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
   const [sheetLoadError, setSheetLoadError] = useState(null);
   const [exportMode, setExportMode] = useState('individual');
   const [combinedFileName, setCombinedFileName] = useState('Projet-Final.pdf');
+  const [resolvedUrns, setResolvedUrns] = useState(null);
+
+  useEffect(() => {
+    setResolvedUrns(null);
+  }, [selectedFile?.urn]);
 
   const totalSheets = availableSheets.length;
   const selectedCount = selectedSheetIds.length;
@@ -72,10 +77,21 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
     setSheetLoadError(null);
 
     try {
-      const { sheets, views2D } = await listSheets(selectedFile.urn, projectId);
+      const sheetUrn =
+        selectedFile?.derivativeUrn ||
+        resolvedUrns?.derivativeUrn ||
+        selectedFile?.versionUrn ||
+        resolvedUrns?.versionUrn ||
+        selectedFile.urn;
+
+      const { sheets, views2D, versionUrn, derivativeUrn, requestedUrn } = await listSheets(
+        sheetUrn,
+        projectId
+      );
 
       setAvailableSheets(sheets);
       setAvailableViews(views2D);
+      setResolvedUrns({ versionUrn, derivativeUrn, requestedUrn });
       setSelectedSheetIds((prev) => {
         if (!prev.length) {
           return [];
@@ -135,6 +151,13 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
         customSheets: selectionMode === 'custom' ? selectedSheets : [],
         exportMode,
         combinedFileName: exportMode === 'combined' ? combinedFileName.trim() : undefined,
+        resolvedUrns: resolvedUrns
+          ? {
+              requested: resolvedUrns.requestedUrn || selectedFile.urn,
+              version: resolvedUrns.versionUrn || null,
+              derivative: resolvedUrns.derivativeUrn || null,
+            }
+          : undefined,
       };
 
       const response = await fetch('/api/pdf-export/export-and-save', {
