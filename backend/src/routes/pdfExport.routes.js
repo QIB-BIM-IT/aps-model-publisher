@@ -169,7 +169,54 @@ async function resolveModelUrns(fileUrn, projectId, accessToken) {
     }
 
     if (!derivativeUrn) {
-      throw new Error("Impossible de déterminer l'URN dérivé du fichier");
+      logger.warn(`[URNResolve] Aucun dérivé direct pour ${versionUrn}, tentative via manifest`);
+      const encodedVersionUrn = Buffer.from(versionUrn)
+        .toString('base64')
+        .replace(/=+$/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+
+      try {
+        const manifestUrl = `https://developer.api.autodesk.com/modelderivative/v2/designdata/${encodedVersionUrn}/manifest`;
+        const manifestResponse = await axios.get(manifestUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          params: { forceget: true },
+        });
+
+        const queue = Array.isArray(manifestResponse.data?.derivatives)
+          ? [...manifestResponse.data.derivatives]
+          : [];
+
+        while (!derivativeUrn && queue.length) {
+          const current = queue.shift();
+          if (!current || typeof current !== 'object') {
+            continue;
+          }
+
+          if (typeof current.urn === 'string' && current.urn.startsWith('urn:')) {
+            derivativeUrn = current.urn;
+            break;
+          }
+
+          if (Array.isArray(current.children)) {
+            queue.push(...current.children);
+          }
+        }
+
+        if (!derivativeUrn) {
+          logger.warn(`[URNResolve] Manifest analysé mais aucun URN dérivé trouvé pour ${versionUrn}`);
+        }
+      } catch (manifestError) {
+        const status = manifestError?.response?.status;
+        logger.warn(
+          `[URNResolve] Impossible de récupérer le manifest pour ${versionUrn} (${status || 'n/a'}): ${manifestError.message}`
+        );
+      }
+    }
+
+    if (!derivativeUrn) {
+      logger.warn(`[URNResolve] Fallback vers l'URN de version pour ${versionUrn}`);
+      derivativeUrn = versionUrn;
     }
   }
 
