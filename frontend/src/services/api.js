@@ -104,22 +104,12 @@ export async function savePDFsToACC(data) {
   return result;
 }
 
-export async function listAvailableSheets(fileUrn, projectId, userToken) {
+export async function listAvailableSheets(fileUrn, projectId) {
   if (!fileUrn || !projectId) {
     throw new Error('fileUrn et projectId requis');
   }
 
-  const token = userToken || (await getUserApsToken());
-
-  const { data } = await api.post(
-    '/api/pdf-export/list-sheets',
-    { fileUrn, projectId },
-    {
-      headers: {
-        'x-user-token': token,
-      },
-    }
-  );
+  const { data } = await api.post('/api/pdf-export/list-sheets', { fileUrn, projectId });
 
   return data;
 }
