@@ -16,7 +16,7 @@ class ACCExportService {
   /**
    * Lance un export PDF et retourne l'identifiant du job
    */
-  async exportPDFs(fileUrns, projectId, accessToken) {
+  async exportPDFs(fileUrns, projectId, accessToken, exportOptions = {}) {
     if (!projectId) {
       throw new Error('projectId requis pour lancer un export ACC');
     }
@@ -27,7 +27,7 @@ class ACCExportService {
 
     logger.info(`[ACCExport] exportPDFs → ${fileUrns.length} fichier(s)`);
 
-    const job = await this.startExport(projectId, fileUrns, accessToken);
+    const job = await this.startExport(projectId, fileUrns, accessToken, exportOptions);
     if (!job?.id) {
       throw new Error('Job export invalide (pas d\'identifiant)');
     }
@@ -99,6 +99,7 @@ class ACCExportService {
         userId,
         uploadToACC = false,
         accFolderId = null,
+        includeMarkups = true,
       } = options;
 
       if (!projectId) {
@@ -116,7 +117,12 @@ class ACCExportService {
       logger.info(`[ACCExport] Token utilisateur obtenu`);
 
       // 2. Lancer l'export
-      const exportJob = await this.startExport(projectId, fileUrns, accessToken);
+      const exportJob = await this.startExport(
+        projectId,
+        fileUrns,
+        accessToken,
+        { includeMarkups }
+      );
       logger.info(`[ACCExport] Job lancé: ${exportJob.id}`);
 
       // 3. Attendre la completion (polling)
@@ -177,24 +183,30 @@ class ACCExportService {
   /**
    * Lance l'export PDF via l'API ACC
    */
-  async startExport(projectId, fileUrns, accessToken) {
+  async startExport(projectId, fileUrns, accessToken, exportOptions = {}) {
     const cleanProjectId = projectId.replace(/^b\./, '');
 
     logger.info(`[ACCExport] projectId nettoyé: ${cleanProjectId}`);
     logger.info(`[ACCExport] fileUrns: ${JSON.stringify(fileUrns)}`);
 
+    const { includeMarkups = true } = exportOptions;
+
     const url = `https://developer.api.autodesk.com/construction/files/v1/projects/${cleanProjectId}/exports`;
 
     const body = {
-      options: {
-        standardMarkups: {
-          includePublishedMarkups: true,
-          includeUnpublishedMarkups: false,
-          includeMarkupLinks: false,
-        },
-      },
+      options: {},
       fileVersions: fileUrns,
     };
+
+    body.options.standardMarkups = {
+      includePublishedMarkups: !!includeMarkups,
+      includeUnpublishedMarkups: false,
+      includeMarkupLinks: false,
+    };
+
+    if (Object.keys(body.options).length === 0) {
+      delete body.options;
+    }
 
     try {
       const response = await axios.post(url, body, {
