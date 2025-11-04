@@ -14,6 +14,7 @@ import api, {
   getToken,
   getUserApsToken,
 } from '../services/api';
+import { PDFExportModal } from '../components/PDFExportModal';
 
 // Helpers
 function nameOf(node, fall = '') {
@@ -208,6 +209,7 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
 
 function PDFExportSection({
   selectedArray,
+  selectedItems,
   onExport,
   isExporting,
   topFolders,
@@ -215,39 +217,44 @@ function PDFExportSection({
   childrenMap,
   onLoadChildren,
 }) {
-  const [showFolderModal, setShowFolderModal] = React.useState(false);
-  const [selectedFolder, setSelectedFolder] = React.useState(null);
+  const [showModal, setShowModal] = React.useState(false);
 
-  const [exportOptions, setExportOptions] = React.useState({
-    includeSheets: true,
-    includeViews2D: true,
-    includeMarkups: true,
-  });
+  const selectedValues = React.useMemo(
+    () => Object.values(selectedItems || {}),
+    [selectedItems]
+  );
 
-  React.useEffect(() => {
-    setSelectedFolder(null);
-  }, [selectedProject]);
+  const primaryItem = React.useMemo(() => {
+    return selectedValues.find((item) => item?.publishUrn || item?.id) || null;
+  }, [selectedValues]);
 
-  React.useEffect(() => {
-    if (selectedArray.length === 0) {
-      setShowFolderModal(false);
-    }
-  }, [selectedArray.length]);
+  const fileUrn = primaryItem?.publishUrn || primaryItem?.id || '';
+  const modelName =
+    primaryItem?.name ||
+    primaryItem?.displayName ||
+    primaryItem?.attributes?.displayName ||
+    (selectedArray[0] ? selectedArray[0].name : '');
 
-  const handleExport = () => {
-    if (!selectedFolder) {
-      alert('Sélectionne un dossier de destination');
-      return;
-    }
+  const canOpenModal =
+    selectedArray.length > 0 &&
+    !!selectedProject &&
+    !!fileUrn &&
+    Array.isArray(topFolders) &&
+    topFolders.length > 0;
 
-    const folderId = idOf(selectedFolder);
-    if (!folderId) {
-      alert('Dossier sélectionné invalide');
-      return;
-    }
+  const handleConfirm = ({ mode, merge, mergedFileName, ...rest }) => {
+    const selectionMode = mode === 'custom' ? 'custom' : 'filters';
+    const exportMode = merge ? 'combined' : 'individual';
 
-    onExport(folderId, exportOptions);
-    setShowFolderModal(false);
+    onExport({
+      ...rest,
+      selectionMode,
+      exportMode,
+      mergedFileName: merge ? mergedFileName : null,
+      fileUrn,
+      projectId: selectedProject,
+    });
+    setShowModal(false);
   };
 
   return (
@@ -275,355 +282,62 @@ function PDFExportSection({
           📄 Export PDF
         </h4>
 
-        <div style={{ marginBottom: 16 }}>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              marginBottom: 10,
-              cursor: 'pointer',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={exportOptions.includeSheets}
-              onChange={(e) =>
-                setExportOptions((prev) => ({
-                  ...prev,
-                  includeSheets: e.target.checked,
-                }))
-              }
-              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
-            />
-            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
-              ✓ Tous les sheets disponibles
-            </span>
-          </label>
-
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              marginBottom: 10,
-              cursor: 'pointer',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={exportOptions.includeViews2D}
-              onChange={(e) =>
-                setExportOptions((prev) => ({
-                  ...prev,
-                  includeViews2D: e.target.checked,
-                }))
-              }
-              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
-            />
-            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
-              ✓ Toutes les vues 2D
-            </span>
-          </label>
-
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={exportOptions.includeMarkups}
-              onChange={(e) =>
-                setExportOptions((prev) => ({
-                  ...prev,
-                  includeMarkups: e.target.checked,
-                }))
-              }
-              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
-            />
-            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
-              ✓ Inclure les markups et annotations
-            </span>
-          </label>
-        </div>
+        <p style={{ margin: '0 0 12px 0', fontSize: 13, color: '#475569' }}>
+          {selectedArray.length === 0
+            ? 'Sélectionne une maquette Revit dans la liste ci-dessus pour lancer un export PDF.'
+            : `Modèle courant : ${modelName || 'Sans nom'}`}
+        </p>
 
         <button
-          onClick={() => setShowFolderModal(true)}
-          disabled={
-            selectedArray.length === 0 || isExporting || !selectedProject || topFolders.length === 0
-          }
+          onClick={() => setShowModal(true)}
+          disabled={!canOpenModal || isExporting}
           style={{
             width: '100%',
             padding: '12px 16px',
             borderRadius: 10,
             border: 'none',
             background:
-              selectedArray.length === 0 || !selectedProject || topFolders.length === 0
+              !canOpenModal || isExporting
                 ? 'rgba(148, 163, 184, 0.3)'
                 : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
             color: '#fff',
             fontSize: 14,
             fontWeight: 600,
-            cursor:
-              selectedArray.length === 0 || !selectedProject || topFolders.length === 0
-                ? 'not-allowed'
-                : 'pointer',
+            cursor: !canOpenModal || isExporting ? 'not-allowed' : 'pointer',
             transition: 'all 0.2s',
-            opacity:
-              selectedArray.length === 0 || !selectedProject || topFolders.length === 0 ? 0.5 : 1,
+            opacity: !canOpenModal || isExporting ? 0.5 : 1,
           }}
         >
-          {isExporting ? '⏳ Export en cours...' : '📄 Exporter les PDFs maintenant'}
+          {isExporting ? '⏳ Export en cours...' : '📄 Configurer et exporter'}
         </button>
+
+        {!fileUrn && selectedArray.length > 0 && (
+          <p style={{ marginTop: 12, fontSize: 12, color: '#dc2626' }}>
+            Impossible de déterminer le fichier Revit sélectionné. Vérifie que la maquette possède un
+            URN valide.
+          </p>
+        )}
+
+        {Array.isArray(topFolders) && topFolders.length === 0 && selectedProject && (
+          <p style={{ marginTop: 12, fontSize: 12, color: '#dc2626' }}>
+            Aucun dossier ACC disponible pour ce projet. Charge les dossiers pour continuer.
+          </p>
+        )}
       </div>
 
-      {showFolderModal && (
-        <FolderSelectionModal
+      {showModal && (
+        <PDFExportModal
+          fileUrn={fileUrn}
+          projectId={selectedProject}
           topFolders={topFolders}
           childrenMap={childrenMap}
           onLoadChildren={onLoadChildren}
-          selectedFolder={selectedFolder}
-          onSelectFolder={setSelectedFolder}
-          onClose={() => setShowFolderModal(false)}
-          onConfirm={handleExport}
+          onClose={() => setShowModal(false)}
+          onConfirm={handleConfirm}
           isExporting={isExporting}
         />
       )}
     </>
-  );
-}
-
-function FolderSelectionModal({
-  topFolders,
-  childrenMap,
-  onLoadChildren,
-  selectedFolder,
-  onSelectFolder,
-  onClose,
-  onConfirm,
-  isExporting,
-}) {
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'rgba(0, 0, 0, 0.5)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 2000,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: '#fff',
-          borderRadius: 16,
-          padding: 28,
-          maxWidth: 500,
-          width: '90%',
-          maxHeight: '80vh',
-          overflowY: 'auto',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ margin: '0 0 16px 0', fontSize: 20, fontWeight: 700, color: '#0f172a' }}>
-          📁 Sélectionne la destination
-        </h3>
-        <p style={{ margin: '0 0 20px 0', fontSize: 14, color: '#64748b' }}>
-          Où veux-tu que les PDFs soient disponibles?
-        </p>
-
-        <div style={{ marginBottom: 20, maxHeight: 300, overflowY: 'auto' }}>
-          {topFolders.map((folder) => (
-            <FolderTreeNode
-              key={idOf(folder)}
-              folder={folder}
-              childrenMap={childrenMap}
-              onLoadChildren={onLoadChildren}
-              selectedFolder={selectedFolder}
-              onSelectFolder={onSelectFolder}
-            />
-          ))}
-        </div>
-
-        {selectedFolder && (
-          <div
-            style={{
-              padding: 12,
-              background: 'rgba(37, 99, 235, 0.08)',
-              borderRadius: 8,
-              marginBottom: 20,
-              border: '1px solid rgba(37, 99, 235, 0.2)',
-            }}
-          >
-            <p style={{ margin: 0, fontSize: 13, color: '#1f2937', fontWeight: 500 }}>
-              ✓ Destination sélectionnée:
-            </p>
-            <p style={{ margin: '4px 0 0 0', fontSize: 13, color: '#2563eb', fontWeight: 600 }}>
-              {nameOf(selectedFolder, 'Sans nom')}
-            </p>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 12 }}>
-          <button
-            onClick={onClose}
-            disabled={isExporting}
-            style={{
-              flex: 1,
-              padding: '10px 16px',
-              borderRadius: 10,
-              border: '1px solid #d1d5db',
-              background: '#fff',
-              color: '#475569',
-              fontWeight: 600,
-              cursor: isExporting ? 'not-allowed' : 'pointer',
-              opacity: isExporting ? 0.5 : 1,
-            }}
-          >
-            Annuler
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={!selectedFolder || isExporting}
-            style={{
-              flex: 1,
-              padding: '10px 16px',
-              borderRadius: 10,
-              border: 'none',
-              background:
-                !selectedFolder || isExporting
-                  ? 'rgba(148, 163, 184, 0.3)'
-                  : 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-              color: '#fff',
-              fontWeight: 600,
-              cursor: !selectedFolder || isExporting ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {isExporting ? '⏳ Export...' : '✓ Exporter'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FolderTreeNode({
-  folder,
-  childrenMap,
-  onLoadChildren,
-  selectedFolder,
-  onSelectFolder,
-}) {
-  const [expanded, setExpanded] = React.useState(false);
-  const id = idOf(folder);
-  const kids = childrenMap.get(id) || null;
-  const loading = kids === 'loading';
-
-  const folderNode = isFolder(folder);
-  const isSelected = selectedFolder ? idOf(selectedFolder) === id : false;
-
-  const displayName = nameOf(folder, 'Sans nom');
-
-  return (
-    <div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          alignItems: 'center',
-          padding: '8px 12px',
-          borderRadius: 8,
-          cursor: folderNode ? 'pointer' : 'default',
-          background: isSelected ? 'rgba(37, 99, 235, 0.12)' : 'transparent',
-          border: isSelected ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid transparent',
-          marginBottom: 4,
-          transition: 'all 0.2s',
-        }}
-        onMouseEnter={(e) => {
-          if (!isSelected && folderNode) e.currentTarget.style.background = 'rgba(148, 163, 184, 0.08)';
-        }}
-        onMouseLeave={(e) => {
-          if (!isSelected && folderNode) e.currentTarget.style.background = 'transparent';
-        }}
-      >
-        {folderNode ? (
-          <button
-            onClick={() => {
-              if (!kids) onLoadChildren(id);
-              setExpanded((e) => !e);
-            }}
-            style={{
-              cursor: 'pointer',
-              width: 24,
-              height: 24,
-              border: 'none',
-              background: 'rgba(148, 163, 184, 0.15)',
-              borderRadius: 6,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 14,
-              color: '#475569',
-              transition: 'all 0.2s',
-            }}
-          >
-            {expanded ? '▾' : '▸'}
-          </button>
-        ) : (
-          <span style={{ width: 24 }} />
-        )}
-
-        <button
-          onClick={() => folderNode && onSelectFolder(folder)}
-          disabled={!folderNode}
-          style={{
-            flex: 1,
-            textAlign: 'left',
-            border: 'none',
-            background: 'transparent',
-            cursor: folderNode ? 'pointer' : 'not-allowed',
-            fontSize: 14,
-            color: isSelected ? '#1d4ed8' : '#1f2937',
-            fontWeight: isSelected ? 600 : 400,
-            padding: 0,
-          }}
-        >
-          {folderNode ? '📁 ' : '📄 '}
-          {displayName}
-        </button>
-
-        {isSelected && <span style={{ fontSize: 12, color: '#2563eb', fontWeight: 600 }}>✓</span>}
-      </div>
-
-      {expanded && folderNode && (
-        <div style={{ marginLeft: 12, marginTop: 4 }}>
-          {loading && <div style={{ color: '#9ca3af', fontSize: 13, padding: 8 }}>Chargement…</div>}
-          {!loading && Array.isArray(kids) && kids.length === 0 && (
-            <div style={{ color: '#d1d5db', fontSize: 12, padding: 8 }}>(vide)</div>
-          )}
-          {!loading &&
-            Array.isArray(kids) &&
-            kids.map((child) => (
-              <FolderTreeNode
-                key={idOf(child)}
-                folder={child}
-                childrenMap={childrenMap}
-                onLoadChildren={onLoadChildren}
-                selectedFolder={selectedFolder}
-                onSelectFolder={onSelectFolder}
-              />
-            ))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -1390,7 +1104,8 @@ export default function PlanningPage() {
               {exportPDFsEnabled && (
                 <PDFExportSection
                   selectedArray={selectedArray}
-                  onExport={async (folderId, options) => {
+                  selectedItems={selectedItems}
+                  onExport={async (exportConfig) => {
                     if (!selectedProject || selectedArray.length === 0) {
                       setToast('⚠️ Sélectionne au moins une maquette');
                       setTimeout(() => setToast(''), 3000);
@@ -1400,8 +1115,22 @@ export default function PlanningPage() {
                     setExportingPDFs(true);
 
                     try {
+                      const {
+                        folderId,
+                        options: exportOptions = {},
+                        selectionMode = 'filters',
+                        customSheets = [],
+                        exportMode = 'individual',
+                        mergedFileName,
+                        fileUrn,
+                      } = exportConfig || {};
+
+                      if (!folderId) {
+                        throw new Error('Dossier de destination manquant');
+                      }
+
                       const selectedValues = Object.values(selectedItems);
-                      const lineageUrns = Array.from(
+                      const fallbackUrns = Array.from(
                         new Set(
                           selectedValues
                             .map((item) => item?.publishUrn || item?.id || null)
@@ -1409,7 +1138,9 @@ export default function PlanningPage() {
                         )
                       );
 
-                      if (lineageUrns.length === 0) {
+                      const targetUrn = fileUrn || fallbackUrns[0] || null;
+
+                      if (!targetUrn) {
                         throw new Error('Aucun lineage URN disponible');
                       }
 
@@ -1424,6 +1155,24 @@ export default function PlanningPage() {
                       if (!jwtToken) {
                         throw new Error('Session expirée, veuillez vous reconnecter');
                       }
+                      const payload = {
+                        fileUrn: targetUrn,
+                        projectId: selectedProject,
+                        folderId,
+                        filters: {
+                          includeSheets: exportOptions.includeSheets !== false,
+                          includeViews2D: exportOptions.includeViews2D !== false,
+                          includeMarkups: exportOptions.includeMarkups !== false,
+                        },
+                        selectionMode,
+                        customSheets: selectionMode === 'custom' ? customSheets : [],
+                        exportMode,
+                      };
+
+                      if (exportMode === 'combined' && mergedFileName) {
+                        payload.combinedFileName = mergedFileName;
+                      }
+
                       const result = await fetch('/api/pdf-export/export-and-save', {
                         method: 'POST',
                         headers: {
@@ -1431,16 +1180,7 @@ export default function PlanningPage() {
                           'x-user-token': userToken,
                           Authorization: `Bearer ${jwtToken}`,
                         },
-                        body: JSON.stringify({
-                          fileUrn: lineageUrns[0],
-                          projectId: selectedProject,
-                          folderId: folderId,
-                          options: {
-                            includeSheets: options.includeSheets,
-                            includeViews2D: options.includeViews2D,
-                            includeMarkups: options.includeMarkups,
-                          }
-                        })
+                        body: JSON.stringify(payload),
                       });
 
                       console.log('📥 Status:', result.status);

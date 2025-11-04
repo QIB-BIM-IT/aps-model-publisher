@@ -109,17 +109,40 @@ export async function listAvailableSheets(fileUrn, projectId, userToken) {
     throw new Error('fileUrn et projectId requis');
   }
 
-  const config = userToken
-    ? { headers: { 'x-user-token': userToken } }
-    : {};
+  const token = userToken || (await getUserApsToken());
 
   const { data } = await api.post(
     '/api/pdf-export/list-sheets',
     { fileUrn, projectId },
-    config
+    {
+      headers: {
+        'x-user-token': token,
+      },
+    }
   );
 
   return data;
+}
+
+/**
+ * Liste les sheets et vues 2D d'un fichier Revit
+ * @param {string} fileUrn - URN du fichier
+ * @param {string} projectId - ID du projet
+ * @returns {Promise<{sheets: Array, views2D: Array}>}
+ */
+export async function listSheets(fileUrn, projectId) {
+  const data = await listAvailableSheets(fileUrn, projectId);
+
+  if (data?.success === false) {
+    const error = new Error(data?.message || 'Failed to list sheets');
+    error.response = data;
+    throw error;
+  }
+
+  return {
+    sheets: Array.isArray(data?.sheets) ? data.sheets : [],
+    views2D: Array.isArray(data?.views2D) ? data.views2D : [],
+  };
 }
 
 export async function getUserApsToken() {
