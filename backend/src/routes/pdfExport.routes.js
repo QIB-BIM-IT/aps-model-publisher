@@ -360,9 +360,10 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
     throw new ValidationError('fileUrn et projectId requis');
   }
 
-  const accessToken = await apsAuthService.ensureValidToken(req.userId);
+  let accessToken = await apsAuthService.ensureValidToken(req.userId);
+  let using2Legged = false;
 
-  // Inspecter les scopes du token pour diagnostiquer les problèmes de droits
+  // Inspecter les scopes du token utilisateur pour diagnostiquer les problèmes de droits
   try {
     const tokenParts = String(accessToken || '').split('.');
     if (tokenParts.length === 3) {
@@ -395,8 +396,8 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
 
   logger.info(`[ListSheets] Récupération sheets pour: ${fileUrn}`);
 
-  try {
-    const { derivativeUrn, versionUrn } = await resolveModelUrns(fileUrn, projectId, accessToken);
+  const fetchSheetsWithToken = async (token) => {
+    const { derivativeUrn, versionUrn } = await resolveModelUrns(fileUrn, projectId, token);
 
     if (derivativeUrn !== fileUrn) {
       logger.info(
@@ -414,7 +415,7 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
     logger.info(`[ListSheets] Appel metadata avec l'URN dérivé nettoyé: ${derivativeUrn}`);
 
     const metadataResponse = await axios.get(metadataUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` }
+      headers: { Authorization: `Bearer ${token}` }
     });
 
     const guid = metadataResponse.data?.data?.metadata?.[0]?.guid;
@@ -426,7 +427,7 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
     logger.debug(`[ListSheets] Récupération properties (guid=${guid})`);
 
     const propsResponse = await axios.get(propsUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${token}` },
       params: { forceget: true }
     });
 
@@ -473,9 +474,7 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
 
     logger.info(`[ListSheets] Trouvé ${sheets.length} sheets et ${views2D.length} vues 2D`);
 
-    res.json({
-      success: true,
-      requestedUrn: fileUrn,
+    return {
       versionUrn,
       derivativeUrn,
       sheets: sheets.sort((a, b) => {
@@ -485,35 +484,69 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
         return a.name.localeCompare(b.name);
       }),
       views2D: views2D.sort((a, b) => a.name.localeCompare(b.name)),
-    });
+    };
+  };
+
+  let result;
+  let finalError = null;
+
+  try {
+    result = await fetchSheetsWithToken(accessToken);
   } catch (error) {
-    const status = error.response?.status;
-    const details = error.response?.data;
-    const detailMessage = typeof details === 'string'
-      ? details
-      : details?.message || details?.error || '';
-
-    const logParts = [`[ListSheets] Erreur`];
-    if (status) logParts.push(`status=${status}`);
-    logParts.push(`message=${error.message}`);
-    if (detailMessage) logParts.push(`details=${detailMessage}`);
-
-    logger.error(logParts.join(' | '));
-
-    if (status === 401) {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized',
-        message: "Authentification Autodesk expirée. Merci de te reconnecter.",
-      });
+    if (error.response?.status === 401) {
+      logger.warn('[ListSheets] 401 avec token utilisateur → tentative avec token 2-legged');
+      try {
+        // Token applicatif (2-legged) qui ne dépend pas des permissions utilisateur
+        const appToken = await apsAuthService.getTwoLeggedToken(['viewables:read', 'data:read']);
+        accessToken = appToken.access_token;
+        using2Legged = true;
+        result = await fetchSheetsWithToken(accessToken);
+      } catch (fallbackError) {
+        finalError = fallbackError;
+      }
+    } else {
+      finalError = error;
     }
+  }
 
-    res.status(status === 404 ? 404 : 500).json({
-      success: false,
-      error: 'Failed to list sheets',
-      message: detailMessage || error.message,
+  if (!finalError && result) {
+    return res.json({
+      success: true,
+      requestedUrn: fileUrn,
+      usedAppToken: using2Legged,
+      ...result,
     });
   }
+
+  const status = finalError?.response?.status;
+  const details = finalError?.response?.data;
+  const detailMessage = typeof details === 'string'
+    ? details
+    : details?.message || details?.error || '';
+
+  const logParts = [`[ListSheets] Erreur`];
+  if (status) logParts.push(`status=${status}`);
+  logParts.push(`message=${finalError?.message}`);
+  if (detailMessage) logParts.push(`details=${detailMessage}`);
+
+  logger.error(logParts.join(' | '));
+
+  if (status === 401) {
+    const message = using2Legged
+      ? "Le token application APS n'a pas accès au fichier (401). Vérifie les scopes côté app."
+      : 'Authentification Autodesk expirée. Merci de te reconnecter.';
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized',
+      message,
+    });
+  }
+
+  res.status(status === 404 ? 404 : 500).json({
+    success: false,
+    error: 'Failed to list sheets',
+    message: detailMessage || finalError?.message,
+  });
 }));
 
 /**
