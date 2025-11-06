@@ -405,14 +405,18 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
       );
     }
 
-    const urnBase64 = Buffer.from(derivativeUrn)
+    if (!versionUrn) {
+      throw new Error('Impossible de résoudre un URN de version pour le modèle');
+    }
+
+    const urnBase64 = Buffer.from(versionUrn)
       .toString('base64')
       .replace(/=+$/g, '')
       .replace(/\+/g, '-')
       .replace(/\//g, '_');
     const metadataUrl = `https://developer.api.autodesk.com/modelderivative/v2/designdata/${urnBase64}/metadata`;
 
-    logger.info(`[ListSheets] Appel metadata avec l'URN dérivé nettoyé: ${derivativeUrn}`);
+    logger.info(`[ListSheets] Appel metadata avec l'URN de version nettoyé: ${versionUrn}`);
 
     const metadataResponse = await axios.get(metadataUrl, {
       headers: { Authorization: `Bearer ${token}` }
