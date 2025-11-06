@@ -85,6 +85,19 @@ function ensureProjectId(projectId = '') {
   return projectId.startsWith('b.') ? projectId : `b.${projectId}`;
 }
 
+function sanitizeDerivativeUrn(urn = '') {
+  if (typeof urn !== 'string') {
+    return urn;
+  }
+
+  const trimmed = urn.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return trimmed.replace(/\/output\/.*$/i, '');
+}
+
 async function resolveModelUrns(fileUrn, projectId, accessToken) {
   if (!fileUrn) {
     throw new ValidationError('fileUrn requis');
@@ -220,11 +233,18 @@ async function resolveModelUrns(fileUrn, projectId, accessToken) {
     }
   }
 
+  const sanitizedDerivativeUrn = sanitizeDerivativeUrn(derivativeUrn);
+  if (sanitizedDerivativeUrn !== derivativeUrn) {
+    logger.warn(
+      `[URNResolve] URN dérivé nettoyé: ${derivativeUrn.substring(0, 80)}... → ${sanitizedDerivativeUrn.substring(0, 80)}...`
+    );
+  }
+
   return {
     inputUrn,
     projectId: cleanProjectId,
     versionUrn,
-    derivativeUrn,
+    derivativeUrn: sanitizedDerivativeUrn,
   };
 }
 
@@ -391,7 +411,7 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
       .replace(/\//g, '_');
     const metadataUrl = `https://developer.api.autodesk.com/modelderivative/v2/designdata/${urnBase64}/metadata`;
 
-    logger.debug(`[ListSheets] Récupération metadata pour urn=${derivativeUrn}`);
+    logger.info(`[ListSheets] Appel metadata avec l'URN dérivé nettoyé: ${derivativeUrn}`);
 
     const metadataResponse = await axios.get(metadataUrl, {
       headers: { Authorization: `Bearer ${accessToken}` }
