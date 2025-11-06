@@ -342,6 +342,37 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
 
   const accessToken = await apsAuthService.ensureValidToken(req.userId);
 
+  // Inspecter les scopes du token pour diagnostiquer les problèmes de droits
+  try {
+    const tokenParts = String(accessToken || '').split('.');
+    if (tokenParts.length === 3) {
+      let payloadSegment = tokenParts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (payloadSegment.length % 4 !== 0) {
+        payloadSegment += '=';
+      }
+      const payload = JSON.parse(Buffer.from(payloadSegment, 'base64').toString('utf8'));
+      const scopes = Array.isArray(payload.scope)
+        ? payload.scope
+        : String(payload.scope || '')
+            .split(' ')
+            .map((scope) => scope.trim())
+            .filter(Boolean);
+
+      logger.debug(`[ListSheets] Token scopes: ${JSON.stringify(scopes.length ? scopes : 'NO_SCOPE')}`);
+
+      if (!scopes.includes('viewables:read')) {
+        logger.error(`[ListSheets] ⚠️ SCOPE MANQUANT: viewables:read n'est pas dans le token!`);
+        return res.status(403).json({
+          success: false,
+          error: 'Missing scope',
+          message: 'Le scope viewables:read est requis pour lister les sheets. Reconnecte-toi.',
+        });
+      }
+    }
+  } catch (e) {
+    logger.warn(`[ListSheets] Impossible de décoder le token: ${e.message}`);
+  }
+
   logger.info(`[ListSheets] Récupération sheets pour: ${fileUrn}`);
 
   try {
