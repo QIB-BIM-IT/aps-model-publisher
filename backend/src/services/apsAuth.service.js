@@ -49,6 +49,7 @@ class APSAuthService {
       client_id: apsConfig.credentials.client_id,
       client_secret: apsConfig.credentials.client_secret,
       refresh_token: refreshToken,
+      scope: apsConfig.credentials.scopes.join(' '),
     };
     try {
       const { data } = await axios.post(
@@ -56,6 +57,7 @@ class APSAuthService {
         qs.stringify(body),
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
       );
+      logger.info(`[APSAuth] Token refreshed - scopes: ${data.scope || 'NONE'}`);
       return data;
     } catch (err) {
       const msg = this._extractError(err);

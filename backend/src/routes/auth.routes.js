@@ -67,6 +67,8 @@ router.get('/callback', async (req, res) => {
       scopes: apsConfig.credentials.scopes,
     });
 
+    logger.info(`[Auth] Initial token - scopes: ${tokens.scope || 'NONE'}`);
+
     const profile = await apsAuthService.getUserProfile(tokens.access_token);
     const user = await apsAuthService.createOrUpdateUser(profile, tokens);
 
