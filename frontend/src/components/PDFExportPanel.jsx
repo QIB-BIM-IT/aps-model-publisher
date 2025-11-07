@@ -3,13 +3,17 @@ import { toast } from 'react-toastify';
 import {
   getToken,
   getUserApsToken as getUserToken,
-  listSheets,
+  exportWithCache,
 } from '../services/api';
 import './PDFExportPanel.css';
 
 export function PDFExportPanel({ selectedFile, projectId, folderId }) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState('');
+  const [cacheKey, setCacheKey] = useState(null);
+  const [sheetsLoaded, setSheetsLoaded] = useState(false);
+  const [loadingSheets, setLoadingSheets] = useState(false);
+  const [sheetLoadError, setSheetLoadError] = useState(null);
   const [filters, setFilters] = useState({
     includeSheets: true,
     includeViews2D: true,
@@ -18,30 +22,37 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
   const [selectionMode, setSelectionMode] = useState('filters');
   const [availableSheets, setAvailableSheets] = useState([]);
   const [availableViews, setAvailableViews] = useState([]);
-  const [selectedSheetIds, setSelectedSheetIds] = useState([]);
-  const [loadingSheets, setLoadingSheets] = useState(false);
-  const [sheetLoadError, setSheetLoadError] = useState(null);
+  const [availableMarkups, setAvailableMarkups] = useState([]);
+  const [selectedSheetNames, setSelectedSheetNames] = useState([]);
   const [exportMode, setExportMode] = useState('individual');
   const [combinedFileName, setCombinedFileName] = useState('Projet-Final.pdf');
   const [resolvedUrns, setResolvedUrns] = useState(null);
 
   useEffect(() => {
     setResolvedUrns(null);
+    setCacheKey(null);
+    setSheetsLoaded(false);
+    setAvailableSheets([]);
+    setAvailableViews([]);
+    setAvailableMarkups([]);
+    setSelectedSheetNames([]);
+    setSheetLoadError(null);
+    setExportProgress('');
   }, [selectedFile?.urn]);
 
   const totalSheets = availableSheets.length;
-  const selectedCount = selectedSheetIds.length;
+  const selectedCount = selectedSheetNames.length;
 
   const selectedSheets = useMemo(
-    () => availableSheets.filter((sheet) => selectedSheetIds.includes(sheet.id)),
-    [availableSheets, selectedSheetIds]
+    () => availableSheets.filter((sheet) => selectedSheetNames.includes(sheet.name)),
+    [availableSheets, selectedSheetNames]
   );
 
   const canExport =
     !isExporting &&
     !!selectedFile &&
     !!folderId &&
-    (selectionMode !== 'custom' || selectedCount > 0);
+    (selectionMode !== 'custom' || (sheetsLoaded && selectedCount > 0));
 
   const toggleFilter = (key) => {
     setFilters((prev) => ({
@@ -50,11 +61,11 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
     }));
   };
 
-  const handleSheetToggle = (sheetId) => {
-    setSelectedSheetIds((prev) =>
-      prev.includes(sheetId)
-        ? prev.filter((id) => id !== sheetId)
-        : [...prev, sheetId]
+  const handleSheetToggle = (sheetName) => {
+    setSelectedSheetNames((prev) =>
+      prev.includes(sheetName)
+        ? prev.filter((name) => name !== sheetName)
+        : [...prev, sheetName]
     );
   };
 
@@ -62,10 +73,10 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
     if (availableSheets.length === 0) {
       return;
     }
-    setSelectedSheetIds(availableSheets.map((sheet) => sheet.id));
+    setSelectedSheetNames(availableSheets.map((sheet) => sheet.name));
   };
 
-  const handleClearSheets = () => setSelectedSheetIds([]);
+  const handleClearSheets = () => setSelectedSheetNames([]);
 
   const handleLoadSheets = async () => {
     if (!selectedFile) {
@@ -75,36 +86,43 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
 
     setLoadingSheets(true);
     setSheetLoadError(null);
+    setSheetsLoaded(false);
 
     try {
-      const sheetUrn =
-        selectedFile?.derivativeUrn ||
-        resolvedUrns?.derivativeUrn ||
-        selectedFile?.versionUrn ||
-        resolvedUrns?.versionUrn ||
-        selectedFile.urn;
+      setExportProgress('Export en cours pour obtenir la liste des sheets (2-5 min)...');
 
-      const { sheets, views2D, versionUrn, derivativeUrn, requestedUrn } = await listSheets(
-        sheetUrn,
+      const result = await exportWithCache(
+        selectedFile.urn,
         projectId
       );
 
-      setAvailableSheets(sheets);
-      setAvailableViews(views2D);
-      setResolvedUrns({ versionUrn, derivativeUrn, requestedUrn });
-      setSelectedSheetIds((prev) => {
-        if (!prev.length) {
-          return [];
-        }
-        const validIds = new Set((sheets || []).map((sheet) => sheet.id));
-        return prev.filter((id) => validIds.has(id));
-      });
+      const normalizedSheets = (result.sheets || []).map((sheet, index) => ({
+        ...sheet,
+        id: sheet.id || sheet.guid || sheet.objectId || sheet.name || `sheet-${index}`,
+      }));
 
-      toast.success(`✅ ${sheets?.length || 0} feuille(s) chargée(s)`);
+      setCacheKey(result.cacheKey || null);
+      setAvailableSheets(normalizedSheets);
+      setAvailableViews(result.views2D || []);
+      setAvailableMarkups(result.markups || []);
+      setResolvedUrns(result.resolvedUrns || null);
+
+      const allSheetNames = normalizedSheets.map((sheet) => sheet.name);
+      setSelectedSheetNames(allSheetNames);
+
+      setSheetsLoaded(true);
+
+      const totalPdfs = result.stats?.total || 0;
+      const sheetsCount = result.stats?.sheets || normalizedSheets.length || 0;
+      const markupsCount = result.stats?.markups || (result.markups?.length ?? 0);
+      toast.success(`✅ ${sheetsCount} feuille(s) chargée(s) (${totalPdfs} PDFs total, ${markupsCount} markup(s))`);
+
+      setExportProgress('');
     } catch (error) {
       console.error('Load sheets error:', error);
       setSheetLoadError(error.message);
       toast.error(`Impossible de charger les sheets: ${error.message}`);
+      setExportProgress('');
     } finally {
       setLoadingSheets(false);
     }
@@ -283,6 +301,8 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
               <div className="pdf-export-custom-stats">
                 <span>{totalSheets} sheet(s) disponibles</span>
                 <span>{availableViews.length} vue(s) 2D détectées</span>
+                <span>{availableMarkups.length} markup(s)</span>
+                {cacheKey && <span>Cache prêt ✅</span>}
               </div>
             </div>
 
@@ -309,12 +329,13 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
                 <div className="pdf-export-sheet-items">
                   {availableSheets.map((sheet) => {
                     const labelNumber = sheet.number ? `${sheet.number} - ` : '';
+                    const sheetKey = sheet.id || sheet.name;
                     return (
-                      <label key={sheet.id}>
+                      <label key={sheetKey}>
                         <input
                           type="checkbox"
-                          checked={selectedSheetIds.includes(sheet.id)}
-                          onChange={() => handleSheetToggle(sheet.id)}
+                          checked={selectedSheetNames.includes(sheet.name)}
+                          onChange={() => handleSheetToggle(sheet.name)}
                         />
                         <div>
                           <div className="pdf-export-sheet-name">
