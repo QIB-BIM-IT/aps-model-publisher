@@ -14,12 +14,7 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
   const [sheetsLoaded, setSheetsLoaded] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [sheetLoadError, setSheetLoadError] = useState(null);
-  const [filters, setFilters] = useState({
-    includeSheets: true,
-    includeViews2D: true,
-    includeMarkups: true,
-  });
-  const [selectionMode, setSelectionMode] = useState('filters');
+  const [selectionMode, setSelectionMode] = useState('auto');
   const [availableSheets, setAvailableSheets] = useState([]);
   const [availableViews, setAvailableViews] = useState([]);
   const [availableMarkups, setAvailableMarkups] = useState([]);
@@ -38,6 +33,7 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
     setSelectedSheetNames([]);
     setSheetLoadError(null);
     setExportProgress('');
+    setSelectionMode('auto');
   }, [selectedFile?.urn]);
 
   const totalSheets = availableSheets.length;
@@ -48,13 +44,6 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
     !!selectedFile &&
     !!folderId &&
     selectedCount > 0;
-
-  const toggleFilter = (key) => {
-    setFilters((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
-  };
 
   const handleSheetToggle = (sheetName) => {
     setSelectedSheetNames((prev) =>
@@ -201,53 +190,129 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
 
   return (
     <div className="pdf-export-panel">
+      {/* ========== HEADER ========== */}
       <div className="pdf-export-header">
-        <h3>📄 Export PDF hybride</h3>
-        <p>Choisis comment extraire tes feuilles Revit et leur format de sortie.</p>
+        <h3>📄 Export PDF vers ACC</h3>
+        <p>Exporte tes feuilles Revit directement sur Autodesk Construction Cloud</p>
       </div>
 
+      {/* ========== SECTION 1: MODÈLE SÉLECTIONNÉ + BOUTON CHARGER ========== */}
       <div className="pdf-export-section">
-        <div className="pdf-export-section-title">Section 1 · Filtres globaux</div>
-        <div className="pdf-export-checkbox-group">
-          <label>
-            <input
-              type="checkbox"
-              checked={filters.includeSheets}
-              onChange={() => toggleFilter('includeSheets')}
-            />
-            <span>Toutes les sheets disponibles</span>
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={filters.includeViews2D}
-              onChange={() => toggleFilter('includeViews2D')}
-            />
-            <span>Toutes les vues 2D</span>
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={filters.includeMarkups}
-              onChange={() => toggleFilter('includeMarkups')}
-            />
-            <span>Markups et annotations</span>
-          </label>
+        <div className="pdf-export-section-title">Étape 1 · Charger les sheets disponibles</div>
+
+        {/* Info modèle sélectionné */}
+        <div
+          style={{
+            padding: '12px 16px',
+            background: 'rgba(239, 246, 255, 0.5)',
+            borderRadius: 8,
+            marginBottom: 16,
+            border: '1px solid rgba(37, 99, 235, 0.2)',
+          }}
+        >
+          <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>
+            Modèle sélectionné:
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#1f2937' }}>
+            {selectedFile?.name || selectedFile?.displayName || 'Aucun fichier sélectionné'}
+          </div>
         </div>
+
+        {/* Bouton charger OU Badge succès */}
+        {!sheetsLoaded ? (
+          <>
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={handleLoadSheets}
+              disabled={loadingSheets || !selectedFile}
+              style={{ width: '100%' }}
+            >
+              {loadingSheets ? (
+                <>
+                  <span className="spinner" aria-hidden="true"></span>
+                  {exportProgress || 'Chargement en cours...'}
+                </>
+              ) : (
+                <>
+                  <span role="img" aria-label="load">
+                    📋
+                  </span>
+                  Charger les sheets disponibles
+                </>
+              )}
+            </button>
+
+            {!selectedFile && (
+              <div className="pdf-export-helper" style={{ marginTop: 8, color: '#94a3b8' }}>
+                ⚠️ Sélectionne d'abord un fichier Revit (.rvt) dans la liste ci-dessus
+              </div>
+            )}
+
+            {loadingSheets && (
+              <div
+                className="pdf-export-progress"
+                style={{ marginTop: 12, fontSize: 13, color: '#64748b' }}
+              >
+                ⏳ Export en cours (2-5 minutes)... Le ZIP est téléchargé et analysé pour obtenir la
+                liste des sheets.
+              </div>
+            )}
+          </>
+        ) : (
+          <div
+            style={{
+              padding: '12px 16px',
+              background: 'rgba(34, 197, 94, 0.1)',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+              borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}
+          >
+            <span style={{ fontSize: 24 }}>✅</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#059669' }}>
+                {totalSheets} feuille(s) chargée(s)
+              </div>
+              <div style={{ fontSize: 12, color: '#047857' }}>
+                {availableViews.length} vue(s) 2D disponible(s)
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleLoadSheets}
+              className="secondary-btn"
+              style={{ fontSize: 12, padding: '6px 12px' }}
+            >
+              🔄 Recharger
+            </button>
+          </div>
+        )}
+
+        {/* Erreur de chargement */}
+        {sheetLoadError && (
+          <div className="pdf-export-error" style={{ marginTop: 12 }}>
+            ⚠️ {sheetLoadError}
+          </div>
+        )}
       </div>
 
+      {/* ========== SUITE DANS PARTIE 2 ========== */}
+
       <div className="pdf-export-section">
-        <div className="pdf-export-section-title">Section 2 · Sélection custom</div>
+        <div className="pdf-export-section-title">Étape 2 · Sélection des sheets</div>
         <div className="pdf-export-radio-group">
           <label>
             <input
               type="radio"
               name="selectionMode"
-              value="filters"
-              checked={selectionMode === 'filters'}
-              onChange={() => setSelectionMode('filters')}
+              value="auto"
+              checked={selectionMode === 'auto'}
+              onChange={() => setSelectionMode('auto')}
             />
-            <span>Utiliser les filtres globaux ci-dessus</span>
+            <span>Sélection automatique (toutes les sheets)</span>
           </label>
           <label>
             <input
@@ -257,21 +322,13 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
               checked={selectionMode === 'custom'}
               onChange={() => setSelectionMode('custom')}
             />
-            <span>Sélectionner des sheets spécifiques</span>
+            <span>Choisir manuellement les sheets à exporter</span>
           </label>
         </div>
 
         {selectionMode === 'custom' && (
           <div className="pdf-export-custom-block">
             <div className="pdf-export-custom-actions">
-              <button
-                type="button"
-                className="secondary-btn"
-                onClick={handleLoadSheets}
-                disabled={loadingSheets || !selectedFile}
-              >
-                {loadingSheets ? 'Chargement...' : 'Charger les sheets'}
-              </button>
               <div className="pdf-export-custom-stats">
                 <span>{totalSheets} sheet(s) disponibles</span>
                 <span>{availableViews.length} vue(s) 2D détectées</span>
@@ -333,7 +390,7 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
       </div>
 
       <div className="pdf-export-section">
-        <div className="pdf-export-section-title">Section 3 · Format de sortie</div>
+        <div className="pdf-export-section-title">Étape 3 · Format de sortie</div>
         <div className="pdf-export-radio-group">
           <label>
             <input
