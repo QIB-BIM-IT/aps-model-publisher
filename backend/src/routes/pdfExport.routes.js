@@ -666,6 +666,166 @@ router.post('/list-sheets', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * POST /api/pdf-export/export-from-cache
+ * Utilise les PDFs déjà mis en cache pour les uploader sur ACC
+ */
+router.post('/export-from-cache', asyncHandler(async (req, res) => {
+  const {
+    cacheKey,
+    projectId,
+    folderId,
+    selectedSheetNames = [],
+    exportMode = 'individual',
+    combinedFileName,
+  } = req.body;
+
+  if (!cacheKey || !projectId || !folderId) {
+    throw new ValidationError('cacheKey, projectId et folderId requis');
+  }
+
+  if (!Array.isArray(selectedSheetNames) || selectedSheetNames.length === 0) {
+    throw new ValidationError('Aucune sheet sélectionnée');
+  }
+
+  if (exportMode === 'combined' && !combinedFileName) {
+    throw new ValidationError('combinedFileName requis pour le mode combiné');
+  }
+
+  logger.info(`[ExportFromCache] Démarrage: cacheKey=${cacheKey}, mode=${exportMode}`);
+
+  try {
+    const pdfCache = global.pdfCache || {};
+    const cachedEntry = pdfCache[cacheKey];
+    const cachedPdfs = Array.isArray(cachedEntry) ? cachedEntry : cachedEntry?.pdfs;
+    const cacheTimestamp = Array.isArray(cachedEntry) ? null : cachedEntry?.timestamp;
+
+    if (!cachedPdfs || cachedPdfs.length === 0) {
+      throw new Error('Cache expiré ou introuvable. Recharge les sheets.');
+    }
+
+    if (cacheTimestamp) {
+      const cacheAge = Date.now() - cacheTimestamp;
+      if (cacheAge > PDF_CACHE_TTL_MS) {
+        delete pdfCache[cacheKey];
+        global.pdfCache = pdfCache;
+        throw new Error('Cache expiré (> 1h). Recharge les sheets.');
+      }
+      logger.info(
+        `[ExportFromCache] Cache trouvé: ${cachedPdfs.length} PDFs, age=${Math.round(cacheAge / 1000)}s`
+      );
+    } else {
+      logger.info(`[ExportFromCache] Cache trouvé: ${cachedPdfs.length} PDFs (ancien format)`);
+    }
+
+    const selectedNames = new Set(selectedSheetNames);
+    const selectedPdfs = cachedPdfs.filter((pdf) => selectedNames.has(pdf.name));
+
+    if (selectedPdfs.length === 0) {
+      throw new Error('Aucun PDF trouvé correspondant à la sélection');
+    }
+
+    logger.info(`[ExportFromCache] ${selectedPdfs.length} PDF(s) sélectionné(s)`);
+
+    const userToken = await apsAuthService.ensureValidToken(req.userId);
+
+    const uploadResults = [];
+    const uploadErrors = [];
+
+    if (exportMode === 'combined') {
+      const sanitizedName = pdfUploadService.ensurePdfExtension(
+        pdfUploadService.sanitizeFileName(String(combinedFileName || '').trim())
+      );
+
+      try {
+        logger.info(`[ExportFromCache] Fusion de ${selectedPdfs.length} PDFs...`);
+        const mergedBuffer = await pdfUploadService.mergePDFs(
+          selectedPdfs.map((pdf) => pdf.buffer),
+          sanitizedName
+        );
+
+        logger.info(`[ExportFromCache] Upload du PDF fusionné: ${sanitizedName}`);
+        const result = await pdfUploadService.uploadPDFToACC(
+          { buffer: mergedBuffer, filename: sanitizedName },
+          projectId,
+          folderId,
+          userToken
+        );
+
+        uploadResults.push({
+          filename: sanitizedName,
+          success: true,
+          itemId: result.itemId,
+          versionId: result.versionId,
+          mergedCount: selectedPdfs.length,
+        });
+
+        logger.info('[ExportFromCache] ✅ PDF fusionné uploadé');
+      } catch (error) {
+        logger.error(`[ExportFromCache] Erreur fusion/upload: ${error.message}`);
+        uploadErrors.push({
+          filename: sanitizedName,
+          error: error.message,
+        });
+      }
+    } else {
+      for (const pdf of selectedPdfs) {
+        const sanitizedName = pdfUploadService.ensurePdfExtension(
+          pdfUploadService.sanitizeFileName((pdf.name || '').trim())
+        );
+
+        try {
+          logger.info(`[ExportFromCache] Upload: ${sanitizedName}`);
+          const result = await pdfUploadService.uploadPDFToACC(
+            { buffer: pdf.buffer, filename: sanitizedName },
+            projectId,
+            folderId,
+            userToken
+          );
+
+          uploadResults.push({
+            filename: sanitizedName,
+            success: true,
+            itemId: result.itemId,
+            versionId: result.versionId,
+          });
+
+          logger.info(`[ExportFromCache] ✅ ${sanitizedName} uploadé`);
+        } catch (error) {
+          logger.error(`[ExportFromCache] Erreur upload ${sanitizedName}: ${error.message}`);
+          uploadErrors.push({
+            filename: sanitizedName,
+            error: error.message,
+          });
+        }
+      }
+    }
+
+    const responsePayload = {
+      success: uploadResults.length > 0 && uploadErrors.length === 0,
+      uploaded: uploadResults.length,
+      failed: uploadErrors.length,
+      results: uploadResults,
+      errors: uploadErrors.length > 0 ? uploadErrors : undefined,
+      cacheUsed: true,
+      exportMode,
+    };
+
+    logger.info(
+      `[ExportFromCache] ✅ Terminé: uploaded=${uploadResults.length}, failed=${uploadErrors.length}`
+    );
+
+    res.json(responsePayload);
+  } catch (error) {
+    logger.error(`[ExportFromCache] ❌ Erreur: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      error: 'Export from cache failed',
+      message: error.message,
+    });
+  }
+}));
+
+/**
  * POST /api/pdf-export/save-to-acc
  * Merge + Upload des PDFs sur ACC
  */
