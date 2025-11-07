@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import {
   getToken,
@@ -43,16 +43,11 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
   const totalSheets = availableSheets.length;
   const selectedCount = selectedSheetNames.length;
 
-  const selectedSheets = useMemo(
-    () => availableSheets.filter((sheet) => selectedSheetNames.includes(sheet.name)),
-    [availableSheets, selectedSheetNames]
-  );
-
   const canExport =
     !isExporting &&
     !!selectedFile &&
     !!folderId &&
-    (selectionMode !== 'custom' || (sheetsLoaded && selectedCount > 0));
+    selectedCount > 0;
 
   const toggleFilter = (key) => {
     setFilters((prev) => ({
@@ -129,18 +124,8 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
   };
 
   const handleExportToACC = async () => {
-    if (!selectedFile) {
-      toast.error('Sélectionne un fichier en premier');
-      return;
-    }
-
-    if (!folderId) {
-      toast.error('Choisis un dossier de destination');
-      return;
-    }
-
-    if (selectionMode === 'custom' && selectedCount === 0) {
-      toast.error('Choisis au moins une feuille pour un export personnalisé');
+    if (!selectedFile || !folderId || selectedCount === 0) {
+      toast.error('Sélectionne au moins une feuille et un dossier de destination');
       return;
     }
 
@@ -149,8 +134,13 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
       return;
     }
 
+    if (!cacheKey) {
+      toast.error('Cache expiré, recharge les sheets');
+      return;
+    }
+
     setIsExporting(true);
-    setExportProgress('Export ACC en cours...');
+    setExportProgress('Upload vers ACC en cours...');
 
     try {
       const userToken = await getUserToken();
@@ -161,24 +151,15 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
       }
 
       const payload = {
-        fileUrn: selectedFile.urn,
+        cacheKey,
         projectId,
         folderId,
-        filters,
-        selectionMode,
-        customSheets: selectionMode === 'custom' ? selectedSheets : [],
+        selectedSheetNames,
         exportMode,
         combinedFileName: exportMode === 'combined' ? combinedFileName.trim() : undefined,
-        resolvedUrns: resolvedUrns
-          ? {
-              requested: resolvedUrns.requestedUrn || selectedFile.urn,
-              version: resolvedUrns.versionUrn || null,
-              derivative: resolvedUrns.derivativeUrn || null,
-            }
-          : undefined,
       };
 
-      const response = await fetch('/api/pdf-export/export-and-save', {
+      const response = await fetch('/api/pdf-export/export-from-cache', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -208,13 +189,6 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
             toast.error(`Échec upload: ${err.filename}`, { autoClose: 4000 });
           }
         });
-      }
-
-      if (Array.isArray(data.unmatchedSheets) && data.unmatchedSheets.length > 0) {
-        toast.warn(
-          `⚠️ ${data.unmatchedSheets.length} feuille(s) n'ont pas été trouvées dans les PDFs générés`,
-          { autoClose: 7000 }
-        );
       }
     } catch (error) {
       console.error('Export error:', error);
