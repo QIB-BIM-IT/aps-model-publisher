@@ -10,6 +10,8 @@ const apsAuthService = require('../services/apsAuth.service');
 const pdfUploadService = require('../services/pdfUpload.service');
 const logger = require('../config/logger');
 
+const PDF_CACHE_TTL_MS = 60 * 60 * 1000; // 1 heure
+
 router.use(authenticateToken);
 
 function sanitizeString(value = '') {
@@ -249,6 +251,115 @@ async function resolveModelUrns(fileUrn, projectId, accessToken) {
 }
 
 /**
+ * POST /api/pdf-export/export-with-cache
+ * Lance un export complet, classe les PDFs et met le résultat en cache
+ */
+router.post('/export-with-cache', asyncHandler(async (req, res) => {
+  const { fileUrn, projectId } = req.body;
+
+  if (!fileUrn || !projectId) {
+    throw new ValidationError('fileUrn et projectId requis');
+  }
+
+  logger.info(`[ExportWithCache] Démarrage pour: ${fileUrn}`);
+
+  try {
+    const userToken = await apsAuthService.ensureValidToken(req.userId);
+
+    const { versionUrn, derivativeUrn } = await resolveModelUrns(
+      fileUrn,
+      projectId,
+      userToken,
+    );
+
+    logger.info(
+      `[ExportWithCache] URNs résolus: version=${versionUrn.substring(0, 60)}...`
+    );
+
+    const jobId = await accExportService.exportPDFs(
+      [versionUrn],
+      projectId,
+      userToken,
+      { includeMarkups: true },
+    );
+
+    logger.info(`[ExportWithCache] Job lancé: ${jobId}`);
+
+    const jobResult = await accExportService.waitForJobCompletion(jobId, userToken);
+
+    if (jobResult.status !== 'successful' && jobResult.status !== 'partialSuccess') {
+      throw new Error(`Export échoué: ${jobResult.status}`);
+    }
+
+    if (!jobResult.signedUrl) {
+      throw new Error('Export terminé mais aucune URL de téléchargement');
+    }
+
+    logger.info('[ExportWithCache] ✅ Export terminé, téléchargement du ZIP...');
+
+    const zipBuffer = await accExportService.downloadZip(jobResult.signedUrl);
+    logger.info(`[ExportWithCache] ZIP téléchargé: ${zipBuffer.length} bytes`);
+
+    const extractedPdfs = await accExportService.extractPDFsFromZip(zipBuffer);
+    logger.info(`[ExportWithCache] ${extractedPdfs.length} PDF(s) trouvés dans le ZIP`);
+
+    const classifiedPdfs = extractedPdfs.map((pdf) => ({
+      name: pdf.name || pdf.filename,
+      size: pdf.size || pdf.buffer.length,
+      type: classifyPdf(pdf.name || pdf.filename),
+      buffer: pdf.buffer,
+    }));
+
+    const cacheKey = `export_${jobId}_${Date.now()}`;
+    const pdfCache = global.pdfCache || {};
+    pdfCache[cacheKey] = {
+      pdfs: classifiedPdfs,
+      timestamp: Date.now(),
+      fileUrn,
+      projectId,
+      versionUrn,
+      derivativeUrn,
+      jobId,
+    };
+    global.pdfCache = pdfCache;
+
+    logger.info(`[ExportWithCache] ✅ Mis en cache: ${cacheKey}`);
+
+    const sheets = classifiedPdfs.filter((p) => p.type === 'sheet');
+    const views2D = classifiedPdfs.filter((p) => p.type === 'view2d');
+    const markups = classifiedPdfs.filter((p) => p.type === 'markup');
+    const totalSize = classifiedPdfs.reduce((sum, p) => sum + (p.size || 0), 0);
+
+    res.json({
+      success: true,
+      cacheKey,
+      stats: {
+        total: classifiedPdfs.length,
+        sheets: sheets.length,
+        views2D: views2D.length,
+        markups: markups.length,
+        totalSize,
+      },
+      sheets: sheets.map(({ name, size, type }) => ({ name, size, type })),
+      views2D: views2D.map(({ name, size, type }) => ({ name, size, type })),
+      markups: markups.map(({ name, size, type }) => ({ name, size, type })),
+      resolvedUrns: {
+        input: fileUrn,
+        version: versionUrn,
+        derivative: derivativeUrn,
+      },
+    });
+  } catch (error) {
+    logger.error(`[ExportWithCache] ❌ Erreur: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      error: 'Export with cache failed',
+      message: error.message,
+    });
+  }
+}));
+
+/**
  * GET /api/pdf-export/download/:jobId/:fileName
  * Télécharge un PDF depuis le cache
  */
@@ -259,7 +370,8 @@ router.get('/download/:jobId/:fileName', asyncHandler(async (req, res) => {
 
   // Récupérer du cache
   const pdfCache = global.pdfCache || {};
-  const pdfs = pdfCache[jobId];
+  const cacheEntry = pdfCache[jobId];
+  const pdfs = Array.isArray(cacheEntry) ? cacheEntry : cacheEntry?.pdfs;
 
   if (!pdfs || !Array.isArray(pdfs)) {
     logger.warn(`[PDFExport] Cache expiré ou vide pour jobId=${jobId}`);
@@ -582,7 +694,8 @@ router.post('/save-to-acc', asyncHandler(async (req, res) => {
 
   // Récupérer PDFs du cache
   const pdfCache = global.pdfCache || {};
-  const pdfs = pdfCache[jobId];
+  const cacheEntry = pdfCache[jobId];
+  const pdfs = Array.isArray(cacheEntry) ? cacheEntry : cacheEntry?.pdfs;
 
   if (!pdfs) {
     throw new ValidationError('PDFs cache expiré');
@@ -942,10 +1055,23 @@ router.get('/test', asyncHandler(async (req, res) => {
  */
 setInterval(() => {
   const pdfCache = global.pdfCache || {};
+  const now = Date.now();
+  let removed = 0;
 
-  // Implémenter avec timestamps si besoin de TTL stricte
-  // Pour l'instant, on garde tout en mémoire
-  logger.debug(`[PDFExport] Cache cleanup: ${Object.keys(pdfCache).length} jobs en cache`);
-}, 60 * 60 * 1000); // Toutes les heures
+  for (const key of Object.keys(pdfCache)) {
+    const entry = pdfCache[key];
+    const timestamp = entry?.timestamp;
+
+    if (timestamp && now - timestamp > PDF_CACHE_TTL_MS) {
+      delete pdfCache[key];
+      removed += 1;
+    }
+  }
+
+  global.pdfCache = pdfCache;
+  logger.debug(
+    `[PDFExport] Cache cleanup: ${Object.keys(pdfCache).length} jobs en cache (removed=${removed})`
+  );
+}, PDF_CACHE_TTL_MS); // Toutes les heures
 
 module.exports = router;
