@@ -104,6 +104,51 @@ export async function savePDFsToACC(data) {
   return result;
 }
 
+/**
+ * Export PDF avec mise en cache
+ * Lance l'export complet, parse le ZIP, et retourne la liste des sheets disponibles
+ * Les PDFs restent en cache côté serveur pour un export ultérieur rapide
+ *
+ * @param {string} fileUrn - URN du fichier Revit
+ * @param {string} projectId - ID du projet
+ * @returns {Promise<{
+ *   cacheKey: string,
+ *   sheets: Array<{name: string, size: number, type: string}>,
+ *   views2D: Array<{name: string, size: number, type: string}>,
+ *   markups: Array<{name: string, size: number, type: string}>,
+ *   stats: {total: number, sheets: number, views2D: number, markups: number, totalSize: number},
+ *   resolvedUrns: {input: string, version: string, derivative: string}
+ * }>}
+ */
+export async function exportWithCache(fileUrn, projectId) {
+  if (!fileUrn || !projectId) {
+    throw new Error('fileUrn et projectId requis');
+  }
+
+  try {
+    const { data } = await api.post('/api/pdf-export/export-with-cache', {
+      fileUrn,
+      projectId,
+    });
+
+    if (!data.success) {
+      throw new Error(data.message || 'Export with cache failed');
+    }
+
+    return {
+      cacheKey: data.cacheKey,
+      sheets: data.sheets || [],
+      views2D: data.views2D || [],
+      markups: data.markups || [],
+      stats: data.stats || {},
+      resolvedUrns: data.resolvedUrns || {},
+    };
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || 'Erreur lors de l\'export avec cache';
+    throw new Error(message);
+  }
+}
+
 export async function listAvailableSheets(fileUrn, projectId) {
   if (!fileUrn || !projectId) {
     throw new Error('fileUrn et projectId requis');
