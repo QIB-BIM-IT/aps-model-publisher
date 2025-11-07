@@ -14,7 +14,6 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
   const [sheetsLoaded, setSheetsLoaded] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [sheetLoadError, setSheetLoadError] = useState(null);
-  const [selectionMode, setSelectionMode] = useState('auto');
   const [availableSheets, setAvailableSheets] = useState([]);
   const [availableViews, setAvailableViews] = useState([]);
   const [availableMarkups, setAvailableMarkups] = useState([]);
@@ -33,7 +32,6 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
     setSelectedSheetNames([]);
     setSheetLoadError(null);
     setExportProgress('');
-    setSelectionMode('auto');
   }, [selectedFile?.urn]);
 
   const totalSheets = availableSheets.length;
@@ -299,156 +297,135 @@ export function PDFExportPanel({ selectedFile, projectId, folderId }) {
         )}
       </div>
 
-      {/* ========== SUITE DANS PARTIE 2 ========== */}
+      {/* ========== SECTION 2: LISTE DES SHEETS (Apparaît après chargement) ========== */}
+      {sheetsLoaded && totalSheets > 0 && (
+        <div className="pdf-export-section">
+          <div className="pdf-export-section-title">
+            Étape 2 · Sélectionne les feuilles à exporter
+          </div>
 
-      <div className="pdf-export-section">
-        <div className="pdf-export-section-title">Étape 2 · Sélection des sheets</div>
-        <div className="pdf-export-radio-group">
-          <label>
-            <input
-              type="radio"
-              name="selectionMode"
-              value="auto"
-              checked={selectionMode === 'auto'}
-              onChange={() => setSelectionMode('auto')}
-            />
-            <span>Sélection automatique (toutes les sheets)</span>
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="selectionMode"
-              value="custom"
-              checked={selectionMode === 'custom'}
-              onChange={() => setSelectionMode('custom')}
-            />
-            <span>Choisir manuellement les sheets à exporter</span>
-          </label>
-        </div>
-
-        {selectionMode === 'custom' && (
-          <div className="pdf-export-custom-block">
-            <div className="pdf-export-custom-actions">
-              <div className="pdf-export-custom-stats">
-                <span>{totalSheets} sheet(s) disponibles</span>
-                <span>{availableViews.length} vue(s) 2D détectées</span>
-                <span>{availableMarkups.length} markup(s)</span>
-                {cacheKey && <span>Cache prêt ✅</span>}
+          <div className="pdf-export-sheet-list">
+            {/* Actions: Tout sélectionner / Désélectionner */}
+            <div className="pdf-export-sheet-actions">
+              <span style={{ fontSize: 13, fontWeight: 500 }}>
+                {selectedCount}/{totalSheets} feuille(s) sélectionnée(s)
+              </span>
+              <div className="pdf-export-sheet-buttons">
+                <button type="button" onClick={handleSelectAllSheets}>
+                  Tout sélectionner
+                </button>
+                <button type="button" onClick={handleClearSheets}>
+                  Tout désélectionner
+                </button>
               </div>
             </div>
 
-            {sheetLoadError && (
-              <div className="pdf-export-error">⚠️ {sheetLoadError}</div>
-            )}
-
-            {totalSheets > 0 ? (
-              <div className="pdf-export-sheet-list">
-                <div className="pdf-export-sheet-actions">
-                  <span>
-                    {selectedCount}/{totalSheets} sheet(s) sélectionnée(s)
-                  </span>
-                  <div className="pdf-export-sheet-buttons">
-                    <button type="button" onClick={handleSelectAllSheets}>
-                      Tout sélectionner
-                    </button>
-                    <button type="button" onClick={handleClearSheets}>
-                      Tout désélectionner
-                    </button>
+            {/* Liste scrollable avec checkboxes */}
+            <div className="pdf-export-sheet-items">
+              {availableSheets.map((sheet) => (
+                <label key={sheet.name}>
+                  <input
+                    type="checkbox"
+                    checked={selectedSheetNames.includes(sheet.name)}
+                    onChange={() => handleSheetToggle(sheet.name)}
+                  />
+                  <div>
+                    <div className="pdf-export-sheet-name">
+                      {sheet.name}
+                    </div>
+                    <div className="pdf-export-sheet-meta">
+                      {(sheet.size / 1024).toFixed(1)} KB
+                    </div>
                   </div>
-                </div>
-
-                <div className="pdf-export-sheet-items">
-                  {availableSheets.map((sheet) => {
-                    const labelNumber = sheet.number ? `${sheet.number} - ` : '';
-                    const sheetKey = sheet.id || sheet.name;
-                    return (
-                      <label key={sheetKey}>
-                        <input
-                          type="checkbox"
-                          checked={selectedSheetNames.includes(sheet.name)}
-                          onChange={() => handleSheetToggle(sheet.name)}
-                        />
-                        <div>
-                          <div className="pdf-export-sheet-name">
-                            {labelNumber}
-                            {sheet.name}
-                          </div>
-                          {sheet.category && (
-                            <div className="pdf-export-sheet-meta">{sheet.category}</div>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <p className="pdf-export-empty">Aucune feuille chargée pour le moment.</p>
-            )}
+                </label>
+              ))}
+            </div>
           </div>
-        )}
-      </div>
-
-      <div className="pdf-export-section">
-        <div className="pdf-export-section-title">Étape 3 · Format de sortie</div>
-        <div className="pdf-export-radio-group">
-          <label>
-            <input
-              type="radio"
-              name="exportMode"
-              value="individual"
-              checked={exportMode === 'individual'}
-              onChange={() => setExportMode('individual')}
-            />
-            <span>Export individuel (1 PDF par sheet)</span>
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="exportMode"
-              value="combined"
-              checked={exportMode === 'combined'}
-              onChange={() => setExportMode('combined')}
-            />
-            <span>Combiner en un seul PDF</span>
-          </label>
         </div>
+      )}
 
-        {exportMode === 'combined' && (
-          <div className="pdf-export-combined-input">
-            <label htmlFor="combinedFileName">Nom du fichier combiné</label>
-            <input
-              id="combinedFileName"
-              type="text"
-              value={combinedFileName}
-              onChange={(event) => setCombinedFileName(event.target.value)}
-              placeholder="Projet-Final.pdf"
-            />
-            <span className="pdf-export-helper">L'extension .pdf sera ajoutée si nécessaire</span>
+      {/* ========== SECTION 3: OPTIONS D'EXPORT (Apparaît si des sheets sont sélectionnées) ========== */}
+      {sheetsLoaded && selectedCount > 0 && (
+        <div className="pdf-export-section">
+          <div className="pdf-export-section-title">
+            Étape 3 · Format de sortie
           </div>
-        )}
-      </div>
 
-      <button
-        onClick={handleExportToACC}
-        disabled={!canExport}
-        className="primary-btn"
-      >
-        {isExporting ? (
-          <>
-            <span className="spinner" aria-hidden="true"></span>
-            {exportProgress || 'Traitement en cours...'}
-          </>
-        ) : (
-          <>
-            <span role="img" aria-label="export">📤</span>
-            Exporter vers ACC
-          </>
-        )}
-      </button>
+          <div className="pdf-export-radio-group">
+            <label>
+              <input
+                type="radio"
+                name="exportMode"
+                value="individual"
+                checked={exportMode === 'individual'}
+                onChange={() => setExportMode('individual')}
+              />
+              <span>📄 Export individuel (1 PDF par feuille)</span>
+            </label>
 
-      {isExporting && (
-        <div className="pdf-export-progress">{exportProgress}</div>
+            <label>
+              <input
+                type="radio"
+                name="exportMode"
+                value="combined"
+                checked={exportMode === 'combined'}
+                onChange={() => setExportMode('combined')}
+              />
+              <span>🔗 Combiner en un seul PDF</span>
+            </label>
+          </div>
+
+          {/* Nom du fichier combiné */}
+          {exportMode === 'combined' && (
+            <div className="pdf-export-combined-input">
+              <label htmlFor="combinedFileName">Nom du fichier combiné</label>
+              <input
+                id="combinedFileName"
+                type="text"
+                value={combinedFileName}
+                onChange={(event) => setCombinedFileName(event.target.value)}
+                placeholder="Projet-Final.pdf"
+              />
+              <span className="pdf-export-helper">
+                L'extension .pdf sera ajoutée si nécessaire
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========== BOUTON FINAL: EXPORTER VERS ACC ========== */}
+      {sheetsLoaded && selectedCount > 0 && (
+        <button
+          onClick={handleExportToACC}
+          disabled={!canExport}
+          className="primary-btn"
+          style={{ width: '100%' }}
+        >
+          {isExporting ? (
+            <>
+              <span className="spinner" aria-hidden="true"></span>
+              {exportProgress || 'Upload en cours...'}
+            </>
+          ) : (
+            <>
+              <span role="img" aria-label="export">📤</span>
+              Exporter vers ACC
+            </>
+          )}
+        </button>
+      )}
+
+      {/* Message d'aide si aucune sheet chargée */}
+      {!sheetsLoaded && !loadingSheets && (
+        <div style={{
+          padding: 20,
+          textAlign: 'center',
+          color: '#94a3b8',
+          fontSize: 14
+        }}>
+          💡 Commence par charger les sheets disponibles pour continuer
+        </div>
       )}
     </div>
   );
