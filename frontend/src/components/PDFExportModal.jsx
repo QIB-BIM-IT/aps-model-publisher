@@ -100,6 +100,29 @@ export function PDFExportModal({
     });
   };
 
+  const handlePrimaryAction = () => {
+    if (loadingSheets || isExporting) return;
+
+    if (selectionMode === 'custom' && !hasSheetsLoaded) {
+      handleLoadSheets();
+      return;
+    }
+
+    handleExport();
+  };
+
+  const primaryButtonLabel = useMemo(() => {
+    if (loadingSheets) return '⏳ Chargement...';
+    if (selectionMode === 'custom' && !hasSheetsLoaded) return '📋 Charger les sheets';
+    return isExporting ? '⏳ Export en cours...' : '📄 Exporter vers ACC';
+  }, [loadingSheets, selectionMode, hasSheetsLoaded, isExporting]);
+
+  const isLoadMode = selectionMode === 'custom' && !hasSheetsLoaded;
+  const isPrimaryDisabled =
+    loadingSheets ||
+    isExporting ||
+    (isLoadMode ? !fileUrn : !selectedFolder || (selectionMode === 'custom' && selectedSheetCount === 0));
+
   return (
     <div
       style={{
@@ -232,23 +255,9 @@ export function PDFExportModal({
           {selectionMode === 'custom' && (
             <div style={{ marginLeft: 24 }}>
               {!hasSheetsLoaded ? (
-                <button
-                  onClick={handleLoadSheets}
-                  disabled={loadingSheets || !fileUrn}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: 8,
-                    border: '1px solid #2563eb',
-                    background: '#fff',
-                    color: '#2563eb',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: loadingSheets || !fileUrn ? 'not-allowed' : 'pointer',
-                    opacity: !fileUrn ? 0.6 : 1,
-                  }}
-                >
-                  {loadingSheets ? '⏳ Chargement...' : '📋 Charger les sheets'}
-                </button>
+                <p style={{ fontSize: 13, color: '#64748b', marginBottom: 0 }}>
+                  Utilise le bouton principal pour charger les sheets disponibles.
+                </p>
               ) : (
                 <div>
                   <div style={{ marginBottom: 8, fontSize: 13, color: '#64748b' }}>
@@ -441,34 +450,24 @@ export function PDFExportModal({
             Annuler
           </button>
           <button
-            onClick={handleExport}
-            disabled={
-              !selectedFolder ||
-              isExporting ||
-              (selectionMode === 'custom' && (selectedSheetCount === 0 || !hasSheetsLoaded))
-            }
+            onClick={handlePrimaryAction}
+            disabled={isPrimaryDisabled}
             style={{
               flex: 1,
               padding: '12px 16px',
               borderRadius: 10,
               border: 'none',
               background:
-                !selectedFolder ||
-                isExporting ||
-                (selectionMode === 'custom' && (selectedSheetCount === 0 || !hasSheetsLoaded))
+                isPrimaryDisabled
                   ? 'rgba(148, 163, 184, 0.3)'
                   : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
               color: '#fff',
               fontWeight: 600,
               cursor:
-                !selectedFolder ||
-                isExporting ||
-                (selectionMode === 'custom' && (selectedSheetCount === 0 || !hasSheetsLoaded))
-                  ? 'not-allowed'
-                  : 'pointer',
+                isPrimaryDisabled ? 'not-allowed' : 'pointer',
             }}
           >
-            {isExporting ? '⏳ Export en cours...' : '📄 Exporter vers ACC'}
+            {primaryButtonLabel}
           </button>
         </div>
       </div>
