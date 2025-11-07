@@ -104,6 +104,48 @@ export async function savePDFsToACC(data) {
   return result;
 }
 
+export async function listAvailableSheets(fileUrn, projectId) {
+  if (!fileUrn || !projectId) {
+    throw new Error('fileUrn et projectId requis');
+  }
+
+  const { data } = await api.post('/api/pdf-export/list-sheets', { fileUrn, projectId });
+
+  return data;
+}
+
+/**
+ * Liste les sheets et vues 2D d'un fichier Revit
+ * @param {string} fileUrn - URN du fichier
+ * @param {string} projectId - ID du projet
+ * @returns {Promise<{sheets: Array, views2D: Array}>}
+ */
+export async function listSheets(fileUrn, projectId) {
+  const data = await listAvailableSheets(fileUrn, projectId);
+
+  if (data?.success === false) {
+    const error = new Error(data?.message || 'Failed to list sheets');
+    error.response = data;
+    throw error;
+  }
+
+  return {
+    sheets: Array.isArray(data?.sheets) ? data.sheets : [],
+    views2D: Array.isArray(data?.views2D) ? data.views2D : [],
+    versionUrn: data?.versionUrn || null,
+    derivativeUrn: data?.derivativeUrn || null,
+    requestedUrn: data?.requestedUrn || fileUrn,
+  };
+}
+
+export async function getUserApsToken() {
+  const { data } = await api.get('/api/aps/user-token');
+  if (data?.success && data?.token) {
+    return data.token;
+  }
+  throw new Error(data?.message || 'Unable to retrieve APS user token');
+}
+
 /**
  * Export PDF avec mise en cache
  * Lance l'export complet, parse le ZIP, et retourne la liste des sheets disponibles
@@ -147,48 +189,6 @@ export async function exportWithCache(fileUrn, projectId) {
     const message = error?.response?.data?.message || error?.message || 'Erreur lors de l\'export avec cache';
     throw new Error(message);
   }
-}
-
-export async function listAvailableSheets(fileUrn, projectId) {
-  if (!fileUrn || !projectId) {
-    throw new Error('fileUrn et projectId requis');
-  }
-
-  const { data } = await api.post('/api/pdf-export/list-sheets', { fileUrn, projectId });
-
-  return data;
-}
-
-/**
- * Liste les sheets et vues 2D d'un fichier Revit
- * @param {string} fileUrn - URN du fichier
- * @param {string} projectId - ID du projet
- * @returns {Promise<{sheets: Array, views2D: Array}>}
- */
-export async function listSheets(fileUrn, projectId) {
-  const data = await listAvailableSheets(fileUrn, projectId);
-
-  if (data?.success === false) {
-    const error = new Error(data?.message || 'Failed to list sheets');
-    error.response = data;
-    throw error;
-  }
-
-  return {
-    sheets: Array.isArray(data?.sheets) ? data.sheets : [],
-    views2D: Array.isArray(data?.views2D) ? data.views2D : [],
-    versionUrn: data?.versionUrn || null,
-    derivativeUrn: data?.derivativeUrn || null,
-    requestedUrn: data?.requestedUrn || fileUrn,
-  };
-}
-
-export async function getUserApsToken() {
-  const { data } = await api.get('/api/aps/user-token');
-  if (data?.success && data?.token) {
-    return data.token;
-  }
-  throw new Error(data?.message || 'Unable to retrieve APS user token');
 }
 
 export default api;
