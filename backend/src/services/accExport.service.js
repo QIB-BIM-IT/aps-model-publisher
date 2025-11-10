@@ -49,41 +49,43 @@ class ACCExportService {
       throw new Error(`Job inconnu: ${jobId}`);
     }
 
+    const cleanProjectId = projectId.replace(/^b\./, '');
     const startTime = Date.now();
-    const pollInterval = 5000;
+    const pollInterval = 5000; // 5 secondes
 
-    logger.info(`[ACCExport] Attente job ${jobId} (export-and-save)...`);
+    logger.info(`[ACCExport] Attente completion du job ${jobId}...`);
 
     while (Date.now() - startTime < maxWaitMs) {
-      const status = await this.checkStatus(projectId, jobId, accessToken);
+      const status = await this.checkStatus(cleanProjectId, jobId, accessToken);
 
-      const state = status?.status;
-      if (state === 'successful' || state === 'partialSuccess') {
-        const result = status?.result || {};
-        const signedUrl = result?.signedUrl || result?.output?.signedUrl;
+      logger.debug(`[ACCExport] Status: ${status.status}`);
 
+      if (status.status === 'successful') {
+        logger.info('[ACCExport] ✅ Job terminé avec succès');
         this.jobProjectMap.delete(jobId);
-
-        return {
-          status: state,
-          signedUrl,
-          result,
-        };
+        return status.result;
       }
 
-      if (state === 'failed') {
+      if (status.status === 'failed') {
         this.jobProjectMap.delete(jobId);
-        const errorMsg = status?.error || status?.result?.error || 'Erreur inconnue';
-        throw new Error(`Export échoué: ${errorMsg}`);
+        const errorMsg = status.error || status.result?.error || 'Erreur inconnue';
+        logger.error(`[ACCExport] ❌ Job échoué: ${errorMsg}`);
+        throw new Error(`Export PDF échoué: ${errorMsg}`);
       }
 
-      if (['processing', 'inProgress', 'pending'].includes(state)) {
+      if (status.status === 'partialSuccess') {
+        logger.warn('[ACCExport] ⚠️ Job partiellement réussi');
+        this.jobProjectMap.delete(jobId);
+        return status.result;
+      }
+
+      if (['processing', 'inProgress', 'pending'].includes(status.status)) {
         await this.sleep(pollInterval);
         continue;
       }
 
-      logger.warn(`[ACCExport] Status inattendu (${state}) pour job ${jobId}`);
-      await this.sleep(pollInterval);
+      logger.error(`[ACCExport] Status inconnu: ${status.status}`);
+      throw new Error(`Status export inconnu: ${status.status}`);
     }
 
     this.jobProjectMap.delete(jobId);

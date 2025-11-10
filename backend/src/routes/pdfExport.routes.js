@@ -287,17 +287,21 @@ router.post('/export-with-cache', asyncHandler(async (req, res) => {
 
     const jobResult = await accExportService.waitForJobCompletion(jobId, userToken);
 
-    if (jobResult.status !== 'successful' && jobResult.status !== 'partialSuccess') {
-      throw new Error(`Export échoué: ${jobResult.status}`);
+    const jobStatus = jobResult?.status;
+    if (jobStatus && jobStatus !== 'successful' && jobStatus !== 'partialSuccess') {
+      throw new Error(`Export échoué: ${jobStatus}`);
     }
 
-    if (!jobResult.signedUrl) {
+    const signedUrl = jobResult?.signedUrl || jobResult?.output?.signedUrl;
+
+    if (!signedUrl) {
+      logger.error('[ExportWithCache] jobResult structure:', JSON.stringify(jobResult, null, 2));
       throw new Error('Export terminé mais aucune URL de téléchargement');
     }
 
     logger.info('[ExportWithCache] ✅ Export terminé, téléchargement du ZIP...');
 
-    const zipBuffer = await accExportService.downloadZip(jobResult.signedUrl);
+    const zipBuffer = await accExportService.downloadZip(signedUrl);
     logger.info(`[ExportWithCache] ZIP téléchargé: ${zipBuffer.length} bytes`);
 
     const extractedPdfs = await accExportService.extractPDFsFromZip(zipBuffer);
@@ -999,15 +1003,19 @@ router.post('/export-and-save', async (req, res) => {
 
     const jobResult = await accExportService.waitForJobCompletion(jobId, userToken);
 
-    if (jobResult.status !== 'successful' && jobResult.status !== 'partialSuccess') {
-      throw new Error(`Export échoué: ${jobResult.status}`);
+    const jobStatus = jobResult?.status;
+    if (jobStatus && jobStatus !== 'successful' && jobStatus !== 'partialSuccess') {
+      throw new Error(`Export échoué: ${jobStatus}`);
     }
 
-    if (!jobResult.signedUrl) {
+    const signedUrl = jobResult?.signedUrl || jobResult?.output?.signedUrl;
+
+    if (!signedUrl) {
+      logger.error('[ExportAndSave] jobResult structure:', JSON.stringify(jobResult, null, 2));
       throw new Error('Export terminé mais aucune URL de téléchargement trouvée');
     }
 
-    const zipBuffer = await accExportService.downloadZip(jobResult.signedUrl);
+    const zipBuffer = await accExportService.downloadZip(signedUrl);
     const extractedPdfs = await accExportService.extractPDFsFromZip(zipBuffer);
 
     logger.info(`[ExportAndSave] ✅ ${extractedPdfs.length} PDF(s) extraits`);
