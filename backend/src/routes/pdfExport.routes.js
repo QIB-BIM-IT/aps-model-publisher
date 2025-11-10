@@ -721,7 +721,19 @@ router.post('/export-from-cache', asyncHandler(async (req, res) => {
       logger.info(`[ExportFromCache] Cache trouvé: ${cachedPdfs.length} PDFs (ancien format)`);
     }
 
-    const selectedNames = new Set(selectedSheetNames);
+    const selectedNames = new Set(
+      selectedSheetNames
+        .map((name) => {
+          if (typeof name === 'string') {
+            return name.trim();
+          }
+          if (name && typeof name === 'object') {
+            return String(name.name || '').trim();
+          }
+          return '';
+        })
+        .filter((value) => value.length > 0)
+    );
     const selectedPdfs = cachedPdfs.filter((pdf) => selectedNames.has(pdf.name));
 
     if (selectedPdfs.length === 0) {
