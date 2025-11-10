@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { exportWithCache } from '../services/api.js';
+import { exportWithCache } from '../services/api';
 
 function getSheetKey(sheet) {
   if (!sheet) return '';
