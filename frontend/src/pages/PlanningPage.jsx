@@ -1155,6 +1155,9 @@ export default function PlanningPage() {
                       if (!jwtToken) {
                         throw new Error('Session expirée, veuillez vous reconnecter');
                       }
+
+                      // ✅ CORRECTION: customSheets doit être un array d'objets avec au minimum { id, name }
+                      // Les sheets viennent déjà du cache avec la bonne structure
                       const payload = {
                         fileUrn: targetUrn,
                         projectId: selectedProject,
@@ -1165,18 +1168,15 @@ export default function PlanningPage() {
                           includeMarkups: exportOptions.includeMarkups !== false,
                         },
                         selectionMode,
-                        customSheets:
-                          selectionMode === 'custom'
-                            ? customSheets
-                                .map((sheet) => (sheet && typeof sheet === 'object' ? sheet.name : sheet))
-                                .filter((name) => typeof name === 'string' && name.trim().length > 0)
-                            : [],
+                        customSheets: selectionMode === 'custom' ? customSheets : [],
                         exportMode,
                       };
 
                       if (exportMode === 'combined' && mergedFileName) {
                         payload.combinedFileName = mergedFileName;
                       }
+
+                      console.log('📦 Payload:', JSON.stringify(payload, null, 2));
 
                       const result = await fetch('/api/pdf-export/export-and-save', {
                         method: 'POST',

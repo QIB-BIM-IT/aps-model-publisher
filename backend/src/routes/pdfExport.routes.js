@@ -28,39 +28,6 @@ function stripPdfName(name = '') {
   return sanitizeString(name.replace(/\.pdf$/i, '').replace(/^feuilles?[-_\s]+/i, ''));
 }
 
-function matchesSheet(pdfName, sheet) {
-  const normalizedPdf = stripPdfName(pdfName);
-  if (!sheet) {
-    return false;
-  }
-
-  const candidates = new Set();
-  if (sheet.number) {
-    candidates.add(sanitizeString(sheet.number));
-    candidates.add(sanitizeString(sheet.number.replace(/[^a-z0-9]/gi, '')));
-  }
-  if (sheet.name) {
-    candidates.add(sanitizeString(sheet.name));
-  }
-  if (sheet.number && sheet.name) {
-    candidates.add(sanitizeString(`${sheet.number} ${sheet.name}`));
-  }
-  if (sheet.id) {
-    candidates.add(sanitizeString(sheet.id.toString()));
-  }
-
-  for (const candidate of candidates) {
-    if (!candidate) {
-      continue;
-    }
-    if (normalizedPdf.includes(candidate)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 function classifyPdf(name = '') {
   const normalized = stripPdfName(name);
   const original = name.toLowerCase();
@@ -1066,26 +1033,69 @@ router.post('/export-and-save', async (req, res) => {
       const notMatched = [];
 
       filteredPdfs.forEach((pdf) => {
-        const match = customSheets.find((sheet) => matchesSheet(pdf.originalName, sheet));
+        const pdfNameCleaned = stripPdfName(pdf.originalName);
+
+        const match = customSheets.find((sheet) => {
+          if (!sheet) {
+            return false;
+          }
+
+          const sheetName = sheet.name || '';
+          const sheetNameStripped = stripPdfName(sheetName);
+
+          if (pdf.originalName === sheetName) {
+            return true;
+          }
+
+          if (pdfNameCleaned === sheetNameStripped) {
+            return true;
+          }
+
+          if (sheet.number) {
+            const numberCleaned = sanitizeString(sheet.number);
+            if (numberCleaned && pdfNameCleaned.includes(numberCleaned)) {
+              return true;
+            }
+          }
+
+          return false;
+        });
+
         if (match) {
           matched.push({ ...pdf, matchedSheet: match });
         }
       });
 
-      const matchedIds = new Set(matched.map((pdf) => pdf.matchedSheet?.id));
+      if (matched.length === 0) {
+        logger.warn(`[ExportAndSave] ⚠️ Aucun PDF n'a correspondu aux sheets sélectionnés`);
+        logger.warn(`[ExportAndSave] PDFs disponibles:`, filteredPdfs.map((p) => p.originalName));
+        logger.warn(`[ExportAndSave] Sheets demandés:`, customSheets.map((s) => s?.name));
+
+        return res.status(400).json({
+          error: 'No matching PDFs',
+          message: `Aucun PDF trouvé correspondant aux sheets sélectionnés. PDFs: ${filteredPdfs
+            .map((p) => p.originalName)
+            .join(', ')}`,
+          availablePdfs: filteredPdfs.map((p) => p.originalName),
+          requestedSheets: customSheets.map((s) => s?.name),
+        });
+      }
+
+      const matchedIds = new Set(
+        matched
+          .map((pdf) => pdf.matchedSheet?.id)
+          .filter((id) => typeof id === 'string' || typeof id === 'number')
+      );
+
       customSheets.forEach((sheet) => {
-        if (!matchedIds.has(sheet.id)) {
+        if (sheet?.id) {
+          if (!matchedIds.has(sheet.id)) {
+            notMatched.push(sheet);
+          }
+        } else if (!matched.some((pdf) => pdf.matchedSheet === sheet)) {
           notMatched.push(sheet);
         }
       });
-
-      if (matched.length === 0) {
-        return res.status(400).json({
-          error: 'No matching PDFs',
-          message: 'Impossible de trouver des PDFs correspondant aux sheets sélectionnées',
-          unmatchedSheets: notMatched,
-        });
-      }
 
       selectedPdfs = matched;
       unmatchedSheets = notMatched;
