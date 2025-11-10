@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { listSheets } from '../services/api';
+import { exportWithCache } from '../services/api';
 
 function getSheetKey(sheet) {
   if (!sheet) return '';
@@ -30,8 +30,11 @@ export function PDFExportModal({
   // Sélection custom
   const [selectionMode, setSelectionMode] = useState('all'); // 'all' ou 'custom'
   const [availableSheets, setAvailableSheets] = useState([]);
+  const [availableViews2D, setAvailableViews2D] = useState([]);
+  const [availableMarkups, setAvailableMarkups] = useState([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [selectedSheetKeys, setSelectedSheetKeys] = useState([]);
+  const [cacheKey, setCacheKey] = useState(null);
   const selectedSheetCount = selectedSheetKeys.length;
 
   // Format de sortie
@@ -57,8 +60,13 @@ export function PDFExportModal({
 
     setLoadingSheets(true);
     try {
-      const { sheets } = await listSheets(fileUrn, projectId);
+      const result = await exportWithCache(fileUrn, projectId);
+
+      const sheets = Array.isArray(result?.sheets) ? result.sheets : [];
       setAvailableSheets(sheets);
+      setAvailableViews2D(Array.isArray(result?.views2D) ? result.views2D : []);
+      setAvailableMarkups(Array.isArray(result?.markups) ? result.markups : []);
+      setCacheKey(result?.cacheKey || null);
       // Tout sélectionner par défaut
       const keys = sheets.map((s) => getSheetKey(s)).filter(Boolean);
       setSelectedSheetKeys(keys);
@@ -92,6 +100,10 @@ export function PDFExportModal({
       customSheets: selectionMode === 'custom' ? selectedSheets : [],
       merge,
       mergedFileName: merge ? mergedFileName.trim() : null,
+      cacheKey,
+      availableSheets,
+      availableViews2D,
+      availableMarkups,
       options: {
         includeSheets,
         includeViews2D,
