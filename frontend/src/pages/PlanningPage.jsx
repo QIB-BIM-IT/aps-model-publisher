@@ -1165,7 +1165,12 @@ export default function PlanningPage() {
                           includeMarkups: exportOptions.includeMarkups !== false,
                         },
                         selectionMode,
-                        customSheets: selectionMode === 'custom' ? customSheets : [],
+                        customSheets:
+                          selectionMode === 'custom'
+                            ? customSheets
+                                .map((sheet) => (sheet && typeof sheet === 'object' ? sheet.name : sheet))
+                                .filter((name) => typeof name === 'string' && name.trim().length > 0)
+                            : [],
                         exportMode,
                       };
 

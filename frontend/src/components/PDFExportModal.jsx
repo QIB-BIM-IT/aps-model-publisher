@@ -284,7 +284,26 @@ export function PDFExportModal({
                       background: '#fff',
                     }}
                   >
-                    {availableSheets.map((sheet) => {
+                    {availableSheets
+                      .slice()
+                      .sort((a, b) => {
+                        const numberA = a?.number || '';
+                        const numberB = b?.number || '';
+
+                        if (numberA && numberB) {
+                          const comparison = numberA.localeCompare(numberB, undefined, { numeric: true });
+                          if (comparison !== 0) {
+                            return comparison;
+                          }
+                        } else if (numberA) {
+                          return -1;
+                        } else if (numberB) {
+                          return 1;
+                        }
+
+                        return (a?.name || '').localeCompare(b?.name || '');
+                      })
+                      .map((sheet) => {
                       const key = getSheetKey(sheet);
                       const isChecked = selectedSheetKeys.includes(key);
 
