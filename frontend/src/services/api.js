@@ -70,6 +70,35 @@ export async function runPublishJobNow(id) {
   }
 }
 
+// ----- PDF Export Jobs -----
+export async function createPDFExportJob(payload) {
+  const { data } = await api.post('/api/pdf-export/jobs', payload);
+  return data?.data;
+}
+export async function getPDFExportJobs(params = {}) {
+  const { data } = await api.get('/api/pdf-export/jobs', { params });
+  return data?.data || [];
+}
+export async function patchPDFExportJob(id, patch) {
+  const { data } = await api.patch(`/api/pdf-export/jobs/${encodeURIComponent(id)}`, patch);
+  return data?.data;
+}
+export async function deletePDFExportJob(id) {
+  const { data } = await api.delete(`/api/pdf-export/jobs/${encodeURIComponent(id)}`);
+  return data?.success === true;
+}
+export async function runPDFExportJobNow(id) {
+  try {
+    const { data } = await api.post(`/api/pdf-export/jobs/${encodeURIComponent(id)}/run`);
+    return data?.data || null;
+  } catch (err) {
+    const message = err?.response?.data?.message || err?.message || 'Erreur lancement du job';
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
+}
+
 // ----- Runs -----
 export async function getRuns(params = {}) {
   const { data } = await api.get('/api/publish/runs', { params });
@@ -77,6 +106,14 @@ export async function getRuns(params = {}) {
 }
 export async function getJobRuns(jobId, params = {}) {
   const { data } = await api.get(`/api/publish/jobs/${encodeURIComponent(jobId)}/runs`, { params });
+  return data?.data || [];
+}
+export async function getPDFExportRuns(params = {}) {
+  const { data } = await api.get('/api/pdf-export/runs', { params });
+  return data?.data || [];
+}
+export async function getPDFExportJobRuns(jobId, params = {}) {
+  const { data } = await api.get(`/api/pdf-export/jobs/${encodeURIComponent(jobId)}/runs`, { params });
   return data?.data || [];
 }
 
