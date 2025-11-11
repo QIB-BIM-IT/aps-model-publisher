@@ -33,6 +33,7 @@ export function PDFExportModal({
   const [availableViews2D, setAvailableViews2D] = useState([]);
   const [availableMarkups, setAvailableMarkups] = useState([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const [selectedSheetKeys, setSelectedSheetKeys] = useState([]);
   const [cacheKey, setCacheKey] = useState(null);
   const selectedSheetCount = selectedSheetKeys.length;
@@ -43,8 +44,7 @@ export function PDFExportModal({
 
   // Dossier destination
   const [selectedFolder, setSelectedFolder] = useState(null);
-
-  const hasSheetsLoaded = availableSheets.length > 0;
+  const [hasSheetsLoaded, setHasSheetsLoaded] = useState(false);
 
   const selectedSheets = useMemo(() => {
     if (selectionMode !== 'custom') return [];
@@ -59,10 +59,26 @@ export function PDFExportModal({
     }
 
     setLoadingSheets(true);
+    setLoadingProgress(0);
+
+    let progressInterval;
+
     try {
+      progressInterval = setInterval(() => {
+        setLoadingProgress((prev) => {
+          if (prev >= 90) return 90;
+          return prev + Math.random() * 25;
+        });
+      }, 800);
+
       const result = await exportWithCache(fileUrn, projectId);
 
-      const sheets = Array.isArray(result?.sheets) ? result.sheets : [];
+      const sheets = Array.isArray(result?.sheets)
+        ? result.sheets.map((s) => ({
+            ...s,
+            name: typeof s?.name === 'string' ? s.name.replace(/^Feuilles\s*[-_]?\s*/i, '') : s?.name,
+          }))
+        : [];
       setAvailableSheets(sheets);
       setAvailableViews2D(Array.isArray(result?.views2D) ? result.views2D : []);
       setAvailableMarkups(Array.isArray(result?.markups) ? result.markups : []);
@@ -70,10 +86,22 @@ export function PDFExportModal({
       // Tout sélectionner par défaut
       const keys = sheets.map((s) => getSheetKey(s)).filter(Boolean);
       setSelectedSheetKeys(keys);
+      setHasSheetsLoaded(true);
+
+      setLoadingProgress(100);
+
+      setTimeout(() => {
+        setLoadingProgress(0);
+      }, 800);
     } catch (error) {
       console.error('Erreur chargement sheets:', error);
       alert(error?.message || 'Impossible de charger les sheets');
+      setHasSheetsLoaded(false);
+      setLoadingProgress(0);
     } finally {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
       setLoadingSheets(false);
     }
   };
@@ -115,25 +143,19 @@ export function PDFExportModal({
   const handlePrimaryAction = () => {
     if (loadingSheets || isExporting) return;
 
-    if (selectionMode === 'custom' && !hasSheetsLoaded) {
-      handleLoadSheets();
-      return;
-    }
-
     handleExport();
   };
 
   const primaryButtonLabel = useMemo(() => {
     if (loadingSheets) return '⏳ Chargement...';
-    if (selectionMode === 'custom' && !hasSheetsLoaded) return '📋 Charger les sheets';
     return isExporting ? '⏳ Export en cours...' : '📄 Exporter vers ACC';
-  }, [loadingSheets, selectionMode, hasSheetsLoaded, isExporting]);
+  }, [loadingSheets, isExporting]);
 
-  const isLoadMode = selectionMode === 'custom' && !hasSheetsLoaded;
   const isPrimaryDisabled =
     loadingSheets ||
     isExporting ||
-    (isLoadMode ? !fileUrn : !selectedFolder || (selectionMode === 'custom' && selectedSheetCount === 0));
+    !selectedFolder ||
+    (selectionMode === 'custom' && selectedSheetCount === 0);
 
   return (
     <div
@@ -256,7 +278,12 @@ export function PDFExportModal({
               type="radio"
               name="selectionMode"
               checked={selectionMode === 'custom'}
-              onChange={() => setSelectionMode('custom')}
+              onChange={() => {
+                setSelectionMode('custom');
+                if (!hasSheetsLoaded && !loadingSheets) {
+                  handleLoadSheets();
+                }
+              }}
               style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
             />
             <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
@@ -266,9 +293,37 @@ export function PDFExportModal({
 
           {selectionMode === 'custom' && (
             <div style={{ marginLeft: 24 }}>
-              {!hasSheetsLoaded ? (
+              {!hasSheetsLoaded && loadingSheets ? (
+                <div>
+                  <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
+                    ⏳ Chargement des sheets disponibles (2-5 minutes)...
+                  </p>
+                  <div
+                    style={{
+                      width: '100%',
+                      height: 6,
+                      borderRadius: 3,
+                      background: 'rgba(148, 163, 184, 0.2)',
+                      overflow: 'hidden',
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #10b981 0%, #059669 100%)',
+                        width: `${loadingProgress}%`,
+                        transition: 'width 0.3s ease-out',
+                      }}
+                    />
+                  </div>
+                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 0 }}>
+                    {Math.round(loadingProgress)}% complété
+                  </p>
+                </div>
+              ) : !hasSheetsLoaded ? (
                 <p style={{ fontSize: 13, color: '#64748b', marginBottom: 0 }}>
-                  Utilise le bouton principal pour charger les sheets disponibles.
+                  ⏳ Sélectionne cette option pour charger les sheets...
                 </p>
               ) : (
                 <div>
