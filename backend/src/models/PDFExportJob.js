@@ -23,6 +23,9 @@ PDFExportJob.init(
     // Références
     userId: { type: DataTypes.UUID, allowNull: false },
 
+    // 🆕 Nom de la tâche
+    name: { type: DataTypes.STRING, allowNull: false, defaultValue: 'Tâche sans nom' },
+
     // Cible ACC
     projectId: { type: DataTypes.STRING, allowNull: false },
     projectName: { type: DataTypes.STRING, allowNull: true },
