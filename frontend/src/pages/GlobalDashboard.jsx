@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getPublishJobs, getRuns } from '../services/api';
+import { getPublishJobs, getPDFExportJobs, getRuns, getPDFExportRuns } from '../services/api';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Composant Card
@@ -67,33 +67,40 @@ function KPICard({ icon, label, value, color = '#2563eb' }) {
 
 export default function GlobalDashboard() {
   const navigate = useNavigate();
-  const [allJobs, setAllJobs] = React.useState([]);
-  const [allRuns, setAllRuns] = React.useState([]);
+  const [publishJobs, setPublishJobs] = React.useState([]);
+  const [pdfJobs, setPdfJobs] = React.useState([]);
+  const [publishRuns, setPublishRuns] = React.useState([]);
+  const [pdfRuns, setPdfRuns] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
 
-  function handleJobClick(job) {
+  function handleJobClick(job, jobType) {
     if (!job) return;
     navigate('/planning', {
       state: {
-        preSelectHub: job.hubId,
+        preSelectHub: jobType === 'publish' ? job.hubId : null,
         preSelectProject: job.projectId,
         highlightJobId: job.id,
+        preSelectJobType: jobType,
       },
     });
   }
 
-  // Charger tous les jobs (tous projets confondus)
   async function loadAllData() {
     setLoading(true);
     setError('');
     try {
-      // Sans filtres pour obtenir TOUS les jobs
-      const jobs = await getPublishJobs({});
-      const runs = await getRuns({ limit: 100 });
+      const [pjobs, pdfjobs, pruns, pdfruns] = await Promise.all([
+        getPublishJobs({}),
+        getPDFExportJobs({}),
+        getRuns({ limit: 100 }),
+        getPDFExportRuns({ limit: 100 }),
+      ]);
       
-      setAllJobs(jobs);
-      setAllRuns(runs);
+      setPublishJobs(pjobs);
+      setPdfJobs(pdfjobs);
+      setPublishRuns(pruns);
+      setPdfRuns(pdfruns);
     } catch (e) {
       setError(e?.message || 'Erreur chargement des données');
     } finally {
@@ -103,25 +110,23 @@ export default function GlobalDashboard() {
 
   React.useEffect(() => {
     loadAllData();
-    
-    // Rafraîchir toutes les 30 secondes
     const interval = setInterval(loadAllData, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  // ========== CALCULS POUR LES GRAPHIQUES ==========
-
-  // KPIs
+  // ========== CALCULS ==========
+  const allJobs = [...publishJobs, ...pdfJobs];
+  const allRuns = [...publishRuns, ...pdfRuns];
+  
   const totalJobs = allJobs.length;
   const activeJobs = allJobs.filter(j => j.scheduleEnabled).length;
-  const totalModels = allJobs.reduce((sum, j) => sum + (Array.isArray(j.models) ? j.models.length : 0), 0);
+  const totalModels = publishJobs.reduce((sum, j) => sum + (Array.isArray(j.models) ? j.models.length : 0), 0);
   const recentRuns = allRuns.filter(r => {
     const createdAt = new Date(r.createdAt);
     const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
     return createdAt > last24h;
   }).length;
 
-  // Graphique: Publications par heure
   const hourlyData = React.useMemo(() => {
     const hours = {};
     allJobs.forEach(job => {
@@ -136,7 +141,6 @@ export default function GlobalDashboard() {
     }));
   }, [allJobs]);
 
-  // Graphique: Répartition par projet
   const projectData = React.useMemo(() => {
     const projects = {};
     allJobs.forEach(job => {
@@ -147,10 +151,9 @@ export default function GlobalDashboard() {
     return Object.entries(projects)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
-      .slice(0, 6); // Top 6
+      .slice(0, 6);
   }, [allJobs]);
 
-  // Graphique: Status des dernières exécutions
   const statusData = React.useMemo(() => {
     const recent = allRuns.slice(0, 50);
     const statuses = {
@@ -172,7 +175,6 @@ export default function GlobalDashboard() {
     ].filter(d => d.value > 0);
   }, [allRuns]);
 
-  // Prochaines exécutions (next 5)
   const upcomingJobs = React.useMemo(() => {
     const now = new Date();
 
@@ -183,7 +185,6 @@ export default function GlobalDashboard() {
         const minute = cronParts[0] || '0';
         const hour = cronParts[1] || '2';
 
-        // Vérifier si c'est un cron quotidien simple (ex: "0 2 * * *")
         const isDaily =
           !minute.includes('*') &&
           !minute.includes('/') &&
@@ -194,7 +195,6 @@ export default function GlobalDashboard() {
         let timeUntil;
 
         if (isDaily) {
-          // Cron quotidien: calculer la prochaine occurrence
           const next = new Date();
           next.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
 
@@ -203,9 +203,8 @@ export default function GlobalDashboard() {
           }
 
           nextExecution = next;
-          timeUntil = Math.round((next - now) / (1000 * 60 * 60)); // heures
+          timeUntil = Math.round((next - now) / (1000 * 60 * 60));
         } else {
-          // Cron complexe (*/15, */2, etc.): afficher "Variable"
           nextExecution = null;
           timeUntil = null;
         }
@@ -218,12 +217,9 @@ export default function GlobalDashboard() {
         };
       })
       .sort((a, b) => {
-        // Mettre les crons complexes à la fin
         if (a.isComplexCron && !b.isComplexCron) return 1;
         if (!a.isComplexCron && b.isComplexCron) return -1;
         if (a.isComplexCron && b.isComplexCron) return 0;
-
-        // Trier par prochaine exécution
         return a.nextExecution - b.nextExecution;
       })
       .slice(0, 5);
@@ -272,7 +268,7 @@ export default function GlobalDashboard() {
               📊 Vue d'ensemble
             </h1>
             <p style={{ color: '#94a3b8', fontSize: 15, margin: 0 }}>
-              Toutes les planifications de publications ACC
+              Toutes les tâches planifiées (Publish & PDF Export)
             </p>
           </div>
 
@@ -293,7 +289,7 @@ export default function GlobalDashboard() {
             onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
             onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
           >
-            ➕ Planifier une publication
+            ➕ Planifier une tâche
           </button>
         </div>
 
@@ -317,16 +313,15 @@ export default function GlobalDashboard() {
           gap: 20,
           marginBottom: 32
         }}>
-          <KPICard icon="📅" label="Jobs planifiés" value={totalJobs} color="#2563eb" />
-          <KPICard icon="✅" label="Jobs actifs" value={activeJobs} color="#10b981" />
-          <KPICard icon="📦" label="Maquettes totales" value={totalModels} color="#8b5cf6" />
-          <KPICard icon="🚀" label="Runs (24h)" value={recentRuns} color="#f59e0b" />
+          <KPICard icon="📅" label="Tâches planifiées" value={totalJobs} color="#2563eb" />
+          <KPICard icon="✅" label="Tâches actives" value={activeJobs} color="#10b981" />
+          <KPICard icon="📦" label="Maquettes (Publish)" value={totalModels} color="#8b5cf6" />
+          <KPICard icon="🚀" label="Exécutions (24h)" value={recentRuns} color="#f59e0b" />
         </div>
 
         {/* Graphiques */}
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24, marginBottom: 24 }}>
-          {/* Graphique en barres: Publications par heure */}
-          <Card title="📊 Répartition des publications par heure">
+          <Card title="📊 Répartition des tâches par heure">
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={hourlyData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -345,8 +340,7 @@ export default function GlobalDashboard() {
             </ResponsiveContainer>
           </Card>
 
-          {/* Graphique circulaire: Status */}
-          <Card title="📈 Status des dernières exécutions">
+          <Card title="📈 Status des exécutions">
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
@@ -388,15 +382,17 @@ export default function GlobalDashboard() {
                 const cronParts = job.cronExpression?.split(' ') || [];
                 const hour = cronParts[1]?.padStart(2, '0') || '02';
                 const minute = cronParts[0]?.padStart(2, '0') || '00';
+                const isPublish = publishJobs.some(j => j.id === job.id);
+                const jobType = isPublish ? 'publish' : 'pdf-export';
 
                 return (
                   <button
                     key={job.id}
                     type="button"
-                    onClick={() => handleJobClick(job)}
+                    onClick={() => handleJobClick(job, jobType)}
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: '120px 1fr 150px 100px',
+                      gridTemplateColumns: '120px 1fr 150px 100px 80px',
                       alignItems: 'center',
                       padding: '14px 16px',
                       background: 'rgba(239, 246, 255, 0.5)',
@@ -423,15 +419,15 @@ export default function GlobalDashboard() {
                     </div>
                     <div>
                       <div style={{ fontSize: 14, fontWeight: 500, color: '#1f2937', marginBottom: 2 }}>
-                        {job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`}
+                        {job.name || job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`}
                       </div>
                       <div style={{ fontSize: 12, color: '#6b7280' }}>
-                        👤 {job.userName || 'Inconnu'} • 🏢 {job.hubName || `Hub ${job.hubId?.slice(0, 8) || '?'}`} • {Array.isArray(job.models) ? job.models.length : 0} maquettes • {job.timezone}
+                        {job.projectName || `Projet ${job.projectId?.slice(0, 8)}`} • {job.timezone}
                       </div>
                     </div>
                     <div style={{ fontSize: 13, color: '#64748b', textAlign: 'right' }}>
                       {job.isComplexCron ? (
-                        <span style={{ fontStyle: 'italic' }}>Fréquence variable</span>
+                        <span style={{ fontStyle: 'italic' }}>Variable</span>
                       ) : (
                         `Dans ${job.timeUntil}h`
                       )}
@@ -448,6 +444,18 @@ export default function GlobalDashboard() {
                         {job.status || 'idle'}
                       </span>
                     </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <span style={{
+                        padding: '3px 8px',
+                        borderRadius: 4,
+                        fontSize: 10,
+                        fontWeight: 600,
+                        background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                        color: isPublish ? '#1d4ed8' : '#059669'
+                      }}>
+                        {isPublish ? '🚀' : '📄'}
+                      </span>
+                    </div>
                   </button>
                 );
               })}
@@ -456,21 +464,20 @@ export default function GlobalDashboard() {
         </Card>
 
         {/* Tableau récapitulatif */}
-        <Card title="📋 Tous les jobs planifiés">
+        <Card title="📋 Toutes les tâches planifiées">
           {allJobs.length === 0 ? (
             <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>
-              Aucun job planifié. Cliquez sur "Planifier une publication" pour commencer!
+              Aucune tâche planifiée. Cliquez sur "Planifier une tâche" pour commencer!
             </p>
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid rgba(148, 163, 184, 0.2)', background: 'rgba(248, 250, 252, 0.5)' }}>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Utilisateur</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Hub</th>
+                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Nom</th>
+                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Type</th>
                     <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Projet</th>
-                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Maquettes</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Heure</th>
+                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Heure</th>
                     <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Timezone</th>
                     <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Status</th>
                   </tr>
@@ -480,11 +487,11 @@ export default function GlobalDashboard() {
                     const cronParts = job.cronExpression?.split(' ') || [];
                     const hour = cronParts[1]?.padStart(2, '0') || '02';
                     const minute = cronParts[0]?.padStart(2, '0') || '00';
+                    const isPublish = publishJobs.some(j => j.id === job.id);
 
                     return (
                       <tr
                         key={job.id}
-                        onClick={() => handleJobClick(job)}
                         style={{
                           background: index % 2 === 0 ? 'rgba(248, 250, 252, 0.3)' : 'transparent',
                           borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
@@ -496,20 +503,27 @@ export default function GlobalDashboard() {
                         onMouseLeave={(e) => {
                           e.currentTarget.style.background = index % 2 === 0 ? 'rgba(248, 250, 252, 0.3)' : 'transparent';
                         }}
+                        onClick={() => handleJobClick(job, isPublish ? 'publish' : 'pdf-export')}
                       >
-                        <td style={{ padding: '12px 16px', fontSize: 13, color: '#64748b', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
-                          👤 {job.userName || 'Inconnu'}
-                        </td>
-                        <td style={{ padding: '12px 16px', fontSize: 13, color: '#64748b', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
-                          {job.hubName || `Hub ${job.hubId?.slice(0, 8) || '?'}`}
-                        </td>
                         <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 500, borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                          {job.name || 'Sans nom'}
+                        </td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                          <span style={{
+                            padding: '3px 8px',
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                            color: isPublish ? '#1d4ed8' : '#059669'
+                          }}>
+                            {isPublish ? '🚀 Publish' : '📄 PDF'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 16px', fontSize: 13, borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
                           {job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`}
                         </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: 14, fontWeight: 600, color: '#2563eb', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
-                          {Array.isArray(job.models) ? job.models.length : 0}
-                        </td>
-                        <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 500, fontFamily: 'monospace', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                        <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: 14, fontWeight: 500, fontFamily: 'monospace', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
                           🕐 {hour}:{minute}
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: 13, color: '#64748b', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
