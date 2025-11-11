@@ -24,6 +24,9 @@ PublishJob.init(
     // Références
     userId: { type: DataTypes.UUID, allowNull: false },
 
+    // 🆕 Nom de la tâche
+    name: { type: DataTypes.STRING, allowNull: false, defaultValue: 'Tâche sans nom' },
+
     // Cible ACC
     hubId: { type: DataTypes.STRING, allowNull: false },
     hubName: { type: DataTypes.STRING, allowNull: true },
