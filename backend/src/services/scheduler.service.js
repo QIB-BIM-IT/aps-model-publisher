@@ -1,13 +1,14 @@
 // src/services/scheduler.service.js
-// Planifie et exécute les jobs, avec protections :
-// - pas d’exécutions concurrentes pour un même job
+// Planifie et exécute les jobs (Publish + PDF Export), avec protections :
+// - pas d'exécutions concurrentes pour un même job
 // - "crash safety" : marque les runs "running" comme "failed" au démarrage
 // - logs explicites
 
 const cron = require('node-cron');
 const logger = require('../config/logger');
-const { PublishJob, PublishRun } = require('../models');
+const { PublishJob, PublishRun, PDFExportJob, PDFExportRun } = require('../models');
 const apsPublishService = require('./apsPublish.service');
+const pdfExportSchedulerService = require('./pdfExportScheduler.service');
 
 // Map<jobId, CronTask>
 const TASKS = new Map();
@@ -17,7 +18,9 @@ const RUNNING = new Set();
 function unscheduleJob(jobId) {
   const t = TASKS.get(String(jobId));
   if (t) {
-    try { t.stop(); } catch {}
+    try {
+      t.stop();
+    } catch {}
     TASKS.delete(String(jobId));
     logger.info(`[Scheduler] Job ${jobId} déplanifié`);
   }
@@ -30,7 +33,9 @@ function scheduleJob(job) {
   try {
     const task = cron.schedule(
       job.cronExpression,
-      async () => { await runJob(job.id); },
+      async () => {
+        await runJob(job.id, job);
+      },
       { scheduled: true, timezone: job.timezone || 'UTC' }
     );
     TASKS.set(String(job.id), task);
@@ -40,11 +45,24 @@ function scheduleJob(job) {
   }
 }
 
-async function runJob(jobId, options = {}) {
+/**
+ * Détermine le type de job (publish ou pdf-export)
+ */
+function getJobType(job) {
+  if (job.constructor.name === 'PDFExportJob') return 'pdf-export';
+  if (job.constructor.name === 'PublishJob') return 'publish';
+  // Fallback: vérifier les champs
+  if (job.fileUrn && job.selectionMode) return 'pdf-export';
+  if (job.models && Array.isArray(job.models)) return 'publish';
+  return null;
+}
+
+async function runJob(jobId, jobInstance = null, options = {}) {
   const key = String(jobId);
   const skipBegin = options.skipBegin === true;
-  let job = options.job || null;
+  let job = jobInstance || options.job || null;
   let run = options.run || null;
+  let jobType = null;
 
   if (!skipBegin) {
     if (RUNNING.has(key)) {
@@ -54,19 +72,41 @@ async function runJob(jobId, options = {}) {
 
     RUNNING.add(key);
     try {
-      job = await PublishJob.findByPk(jobId);
+      // Chercher d'abord comme PDFExportJob
+      job = await PDFExportJob.findByPk(jobId);
+      if (!job) {
+        // Sinon comme PublishJob
+        job = await PublishJob.findByPk(jobId);
+      }
+
       if (!job) {
         logger.warn(`[Scheduler] Job ${jobId} introuvable`);
+        RUNNING.delete(key);
         return null;
       }
+
+      jobType = getJobType(job);
+      if (!jobType) {
+        logger.error(`[Scheduler] Impossible de déterminer le type du job ${jobId}`);
+        RUNNING.delete(key);
+        return null;
+      }
+
+      logger.info(`[Scheduler] Exécution job ${jobId} (type=${jobType})`);
 
       job.status = 'running';
       job.lastRun = new Date();
       await job.save();
 
-      run = await apsPublishService.startRun(job);
+      // Créer le run selon le type
+      if (jobType === 'pdf-export') {
+        run = await pdfExportSchedulerService.startRun(job);
+      } else {
+        run = await apsPublishService.startRun(job);
+      }
     } catch (e) {
       RUNNING.delete(key);
+      logger.error(`[Scheduler] Erreur initialisation job ${jobId}: ${e.message}`);
       throw e;
     }
   } else {
@@ -74,28 +114,41 @@ async function runJob(jobId, options = {}) {
       logger.error(`[Scheduler] runJob skipBegin sans job/run pour ${jobId}`);
       return null;
     }
+    jobType = getJobType(job);
     if (!RUNNING.has(key)) {
       RUNNING.add(key);
     }
   }
 
   try {
-    const { results, durationMs } = await apsPublishService.executeRun(run);
+    let summary = null;
 
-    const finishedRun = await apsPublishService.finishRun(run, {
-      status: 'success',
-      results,
-      durationMs,
-    });
+    // Exécuter selon le type
+    if (jobType === 'pdf-export') {
+      summary = await pdfExportSchedulerService.executeRun(run);
+    } else {
+      summary = await apsPublishService.executeRun(run);
+    }
+
+    // Finaliser selon le type
+    let finishedRun = null;
+    if (jobType === 'pdf-export') {
+      finishedRun = await pdfExportSchedulerService.finishRun(run, summary);
+    } else {
+      finishedRun = await apsPublishService.finishRun(run, {
+        status: 'success',
+        results: summary.results,
+        durationMs: summary.durationMs,
+      });
+    }
 
     job.status = 'idle';
     job.statistics = {
       ...(job.statistics || {}),
       last: {
         at: new Date(),
-        durationMs,
-        items: results.length,
-        ok: finishedRun.status === 'success',
+        durationMs: summary.durationMs,
+        ok: finishedRun.status === 'success' || finishedRun.status === 'partial',
       },
     };
     job.history = [
@@ -103,26 +156,31 @@ async function runJob(jobId, options = {}) {
       {
         at: new Date(),
         status: finishedRun.status || 'done',
-        durationMs,
-        results,
+        durationMs: summary.durationMs,
       },
     ];
     await job.save();
 
     logger.info(
-      `[Scheduler] Job ${job.id} exécuté (status=${finishedRun.status}, items=${(job.models || []).length})`
+      `[Scheduler] Job ${job.id} exécuté (type=${jobType}, status=${finishedRun.status})`
     );
     return run;
   } catch (e) {
     logger.error(`[Scheduler] Echec job ${jobId}: ${e.message}`);
     try {
       if (run) {
-        await apsPublishService.finishRun(run, {
+        const finishOptions = {
           status: 'failed',
           results: run?.results || [],
           durationMs: run?.startedAt ? Date.now() - new Date(run.startedAt).getTime() : undefined,
           message: e.message,
-        });
+        };
+
+        if (jobType === 'pdf-export') {
+          await pdfExportSchedulerService.finishRun(run, finishOptions);
+        } else {
+          await apsPublishService.finishRun(run, finishOptions);
+        }
       }
     } catch {}
 
@@ -151,7 +209,16 @@ async function runJobNow(jobId, options = {}) {
     return { run: null, alreadyRunning: true };
   }
 
-  const job = options.job || (await PublishJob.findByPk(jobId));
+  let job = options.job || null;
+  if (!job) {
+    // Chercher comme PDFExportJob d'abord
+    job = await PDFExportJob.findByPk(jobId);
+    if (!job) {
+      // Sinon comme PublishJob
+      job = await PublishJob.findByPk(jobId);
+    }
+  }
+
   if (!job) {
     logger.warn(`[Scheduler] Job ${jobId} introuvable`);
     return { run: null, alreadyRunning: false };
@@ -163,43 +230,86 @@ async function runJobNow(jobId, options = {}) {
     job.lastRun = new Date();
     await job.save();
 
-    const run = await apsPublishService.startRun(job);
+    const jobType = getJobType(job);
+    let run = null;
 
-    runJob(jobId, { job, run, skipBegin: true }).catch((e) =>
+    if (jobType === 'pdf-export') {
+      run = await pdfExportSchedulerService.startRun(job);
+    } else {
+      run = await apsPublishService.startRun(job);
+    }
+
+    runJob(jobId, job, { run, skipBegin: true }).catch((e) =>
       logger.error(`[Scheduler] runJobNow error: ${e.message}`)
     );
 
     return { run, alreadyRunning: false };
   } catch (e) {
     RUNNING.delete(key);
+    logger.error(`[Scheduler] runJobNow error: ${e.message}`);
     throw e;
   }
 }
 
 async function init() {
-  // Crash safety: tout run resté "running" est marqué "failed (crash)" au démarrage
+  // Crash safety pour PublishRun
   try {
-    const hanging = await PublishRun.findAll({ where: { status: 'running' } });
-    for (const r of hanging) {
+    const hangingPublish = await PublishRun.findAll({ where: { status: 'running' } });
+    for (const r of hangingPublish) {
       r.status = 'failed';
       r.message = 'Process restart while running';
       r.endedAt = new Date();
       await r.save();
     }
-    if (hanging.length) {
-      logger.warn(`[Scheduler] ${hanging.length} run(s) marqués failed (crash) au démarrage`);
+    if (hangingPublish.length) {
+      logger.warn(
+        `[Scheduler] ${hangingPublish.length} PublishRun(s) marqués failed (crash) au démarrage`
+      );
     }
   } catch (e) {
-    logger.error(`[Scheduler] Crash-safety update error: ${e.message}`);
+    logger.error(`[Scheduler] Crash-safety PublishRun error: ${e.message}`);
   }
 
-  // Au boot: planifie tous les jobs actifs
-  const jobs = await PublishJob.findAll({
-    where: { scheduleEnabled: true },
-    order: [['createdAt', 'ASC']],
-  });
-  for (const j of jobs) scheduleJob(j);
-  logger.info(`[Scheduler] ${jobs.length} job(s) planifié(s) au démarrage`);
+  // Crash safety pour PDFExportRun
+  try {
+    const hangingPDF = await PDFExportRun.findAll({ where: { status: 'running' } });
+    for (const r of hangingPDF) {
+      r.status = 'failed';
+      r.message = 'Process restart while running';
+      r.endedAt = new Date();
+      await r.save();
+    }
+    if (hangingPDF.length) {
+      logger.warn(
+        `[Scheduler] ${hangingPDF.length} PDFExportRun(s) marqués failed (crash) au démarrage`
+      );
+    }
+  } catch (e) {
+    logger.error(`[Scheduler] Crash-safety PDFExportRun error: ${e.message}`);
+  }
+
+  // Au boot: planifie tous les jobs actifs (Publish + PDF Export)
+  try {
+    const publishJobs = await PublishJob.findAll({
+      where: { scheduleEnabled: true },
+      order: [['createdAt', 'ASC']],
+    });
+    for (const j of publishJobs) scheduleJob(j);
+    logger.info(`[Scheduler] ${publishJobs.length} PublishJob(s) planifié(s) au démarrage`);
+  } catch (e) {
+    logger.error(`[Scheduler] Erreur init PublishJobs: ${e.message}`);
+  }
+
+  try {
+    const pdfJobs = await PDFExportJob.findAll({
+      where: { scheduleEnabled: true },
+      order: [['createdAt', 'ASC']],
+    });
+    for (const j of pdfJobs) scheduleJob(j);
+    logger.info(`[Scheduler] ${pdfJobs.length} PDFExportJob(s) planifié(s) au démarrage`);
+  } catch (e) {
+    logger.error(`[Scheduler] Erreur init PDFExportJobs: ${e.message}`);
+  }
 }
 
 module.exports = {
