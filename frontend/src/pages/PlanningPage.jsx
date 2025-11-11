@@ -13,6 +13,12 @@ import api, {
   getRuns,
   getToken,
   getUserApsToken,
+  createPDFExportJob,
+  getPDFExportJobs,
+  deletePDFExportJob,
+  patchPDFExportJob,
+  runPDFExportJobNow,
+  getPDFExportRuns,
 } from '../services/api';
 import { PDFExportModal } from '../components/PDFExportModal';
 
@@ -69,6 +75,21 @@ function RevitIcon() {
       R
     </span>
   );
+}
+
+function mergeRuns(publishList = [], pdfList = []) {
+  const normalizedPublish = Array.isArray(publishList)
+    ? publishList.map((run) => ({ ...run, jobType: run.jobType || 'publish' }))
+    : [];
+  const normalizedPdf = Array.isArray(pdfList)
+    ? pdfList.map((run) => ({ ...run, jobType: 'pdf-export' }))
+    : [];
+
+  return [...normalizedPublish, ...normalizedPdf].sort((a, b) => {
+    const dateA = new Date(a.createdAt || a.startedAt || 0).getTime();
+    const dateB = new Date(b.createdAt || b.startedAt || 0).getTime();
+    return dateB - dateA;
+  });
 }
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => {
@@ -432,11 +453,16 @@ export default function PlanningPage() {
   const [childrenMap, setChildrenMap] = React.useState(new Map());
   const [selectedItems, setSelectedItems] = React.useState({});
   const [exportingPDFs, setExportingPDFs] = React.useState(false);
+  const [jobType, setJobType] = React.useState(null);
+  const [jobName, setJobName] = React.useState('');
+  const [pdfExportJobs, setPdfExportJobs] = React.useState([]);
 
   const [jobs, setJobs] = React.useState([]);
   const [loadingJobs, setLoadingJobs] = React.useState(false);
 
   const [runs, setRuns] = React.useState([]);
+  const publishRunsRef = React.useRef([]);
+  const pdfRunsRef = React.useRef([]);
   const [loadingRuns, setLoadingRuns] = React.useState(false);
 
   const [autoRefreshActive, setAutoRefreshActive] = React.useState(false);
@@ -501,8 +527,13 @@ export default function PlanningPage() {
     setTopFolders([]);
     setChildrenMap(new Map());
     setSelectedItems({});
+    setJobType(null);
+    setJobName('');
+    setPdfExportJobs([]);
     setJobs([]);
     setRuns([]);
+    publishRunsRef.current = [];
+    pdfRunsRef.current = [];
   }, []);
 
   async function loadProjects(hubId) {
@@ -541,16 +572,24 @@ export default function PlanningPage() {
   async function loadTopFolders(hubId, projectId) {
     if (!hubId || !projectId) {
       setTopFolders([]);
+      setPdfExportJobs([]);
+      setRuns([]);
+      publishRunsRef.current = [];
+      pdfRunsRef.current = [];
+      setJobType(null);
+      setJobName('');
       return;
     }
     setLoadingTop(true);
     setError('');
     setChildrenMap(new Map());
     setSelectedItems({});
+    setJobType(null);
+    setJobName('');
     try {
       const data = await fetchTopFolders(hubId, projectId);
       setTopFolders(data);
-      await Promise.all([refreshJobs(), refreshRuns()]);
+      await Promise.all([refreshJobs(), refreshRuns(), refreshPdfJobs(), refreshPdfRuns()]);
     } catch (e) {
       setError(e?.message || 'Erreur dossiers');
     } finally {
@@ -575,6 +614,10 @@ export default function PlanningPage() {
       if (nxt[itemId]) {
         delete nxt[itemId];
       } else {
+        if (jobType === 'pdf-export' && Object.keys(nxt).length > 0) {
+          const firstKey = Object.keys(nxt)[0];
+          delete nxt[firstKey];
+        }
         nxt[itemId] = {
           ...nodeData,
           publishUrn: itemId,
@@ -591,9 +634,26 @@ export default function PlanningPage() {
       if (!silent) setLoadingJobs(true);
       try {
         const list = await getPublishJobs({ hubId: selectedHub, projectId: selectedProject });
-        setJobs(list);
+        setJobs(Array.isArray(list) ? list : []);
       } catch (e) {
         setError(e?.message || 'Erreur jobs');
+      } finally {
+        if (!silent) setLoadingJobs(false);
+      }
+    },
+    [selectedHub, selectedProject]
+  );
+
+  const refreshPdfJobs = React.useCallback(
+    async ({ silent = false } = {}) => {
+      if (!selectedHub || !selectedProject) return;
+
+      if (!silent) setLoadingJobs(true);
+      try {
+        const list = await getPDFExportJobs({ projectId: selectedProject });
+        setPdfExportJobs(Array.isArray(list) ? list : []);
+      } catch (e) {
+        setError(e?.message || 'Erreur PDF jobs');
       } finally {
         if (!silent) setLoadingJobs(false);
       }
@@ -608,7 +668,8 @@ export default function PlanningPage() {
       if (!silent) setLoadingRuns(true);
       try {
         const list = await getRuns({ hubId: selectedHub, projectId: selectedProject, limit: 50 });
-        setRuns(list);
+        publishRunsRef.current = Array.isArray(list) ? list : [];
+        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current));
       } catch (e) {
         setError(e?.message || 'Erreur historique');
       } finally {
@@ -616,6 +677,24 @@ export default function PlanningPage() {
       }
     },
     [selectedHub, selectedProject]
+  );
+
+  const refreshPdfRuns = React.useCallback(
+    async ({ silent = false } = {}) => {
+      if (!selectedProject) return;
+
+      if (!silent) setLoadingRuns(true);
+      try {
+        const list = await getPDFExportRuns({ projectId: selectedProject, limit: 50 });
+        pdfRunsRef.current = Array.isArray(list) ? list : [];
+        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current));
+      } catch (e) {
+        setError(e?.message || 'Erreur PDF runs');
+      } finally {
+        if (!silent) setLoadingRuns(false);
+      }
+    },
+    [selectedProject]
   );
 
   const triggerAutoRefreshWindow = React.useCallback(
@@ -632,10 +711,78 @@ export default function PlanningPage() {
     []
   );
 
-  async function handlePlanifier() {
+  async function handleCreatePDFExportJob() {
+    const selectedArray = Object.values(selectedItems);
+
+    if (selectedArray.length === 0) {
+      setToast('⚠️ Sélectionne 1 maquette');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    if (!selectedProject) {
+      setToast('⚠️ Sélectionne un projet');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    if (!Array.isArray(topFolders) || topFolders.length === 0) {
+      setToast('⚠️ Charge les dossiers ACC');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    if (!jobName.trim()) {
+      setToast('⚠️ Donne un nom à la tâche');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    const fileUrn = selectedArray[0]?.publishUrn || selectedArray[0]?.id;
+    const fileName = selectedArray[0]?.name;
+
+    try {
+      await createPDFExportJob({
+        name: jobName.trim(),
+        projectId: selectedProject,
+        folderId: topFolders[0]?.id || '',
+        folderName: topFolders[0]?.attributes?.displayName || '',
+        fileUrn,
+        fileName,
+        scheduleEnabled: true,
+        cronExpression,
+        timezone,
+        selectionMode: 'all',
+        includeSheets: true,
+        includeViews2D: true,
+        includeMarkups: true,
+        exportMode: 'individual',
+        notifyOnFailure: true,
+      });
+
+      setToast('✅ Tâche PDF créée!');
+      setTimeout(() => setToast(''), 3000);
+      setJobName('');
+      setJobType(null);
+      setSelectedItems({});
+      triggerAutoRefreshWindow();
+      await Promise.all([refreshPdfJobs({ silent: true }), refreshPdfRuns({ silent: true })]);
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  async function handleCreatePublishJob() {
     const items = Object.values(selectedItems).map((item) => item.publishUrn);
     if (!selectedHub || !selectedProject || items.length === 0) {
-      setToast('⚠️ Sélectionne au moins une maquette RVT.');
+      setToast('⚠️ Sélectionne au moins une maquette');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    if (!jobName.trim()) {
+      setToast('⚠️ Donne un nom à la tâche');
       setTimeout(() => setToast(''), 3000);
       return;
     }
@@ -644,15 +791,10 @@ export default function PlanningPage() {
     const projectObj = projects.find((p) => idOf(p) === selectedProject);
     const hubName = nameOf(hubObj, '');
     const projectName = nameOf(projectObj, '');
-    console.log('📦 Données envoyées:', {
-      hubId: selectedHub,
-      hubName,
-      projectId: selectedProject,
-      projectName,
-      items: items.length,
-    });
+
     try {
       await createPublishJob({
+        name: jobName.trim(),
         hubId: selectedHub,
         hubName,
         projectId: selectedProject,
@@ -663,8 +805,10 @@ export default function PlanningPage() {
         timezone,
         notifyOnFailure: true,
       });
-      setToast('✅ Job créé avec succès!');
+      setToast('✅ Tâche Publish créée!');
       setTimeout(() => setToast(''), 3000);
+      setJobName('');
+      setJobType(null);
       setSelectedItems({});
       triggerAutoRefreshWindow();
       await Promise.all([
@@ -709,6 +853,46 @@ export default function PlanningPage() {
       refreshJobs({ silent: true }),
       refreshRuns({ silent: true }),
     ]);
+  }
+
+  async function handleTogglePdfJob(job) {
+    try {
+      await patchPDFExportJob(job.id, { scheduleEnabled: !job.scheduleEnabled });
+      await refreshPdfJobs({ silent: true });
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur maj PDF'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  async function handleRunPdfJob(job) {
+    try {
+      await runPDFExportJobNow(job.id);
+      setToast('🚀 Export PDF lancé!');
+      setTimeout(() => setToast(''), 3000);
+      triggerAutoRefreshWindow();
+      await Promise.all([
+        refreshPdfRuns({ silent: true }),
+        refreshPdfJobs({ silent: true }),
+      ]);
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur lancement PDF'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  async function handleDeletePdfJob(job) {
+    if (!window.confirm('Supprimer cette tâche PDF?')) return;
+    try {
+      await deletePDFExportJob(job.id);
+      await Promise.all([
+        refreshPdfJobs({ silent: true }),
+        refreshPdfRuns({ silent: true }),
+      ]);
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur suppression PDF'));
+      setTimeout(() => setToast(''), 3000);
+    }
   }
 
   React.useEffect(() => {
@@ -756,10 +940,25 @@ export default function PlanningPage() {
       setTopFolders([]);
       setChildrenMap(new Map());
       setSelectedItems({});
+      setJobType(null);
+      setJobName('');
       setJobs([]);
       setRuns([]);
+      setPdfExportJobs([]);
+      publishRunsRef.current = [];
+      pdfRunsRef.current = [];
     }
   }, [selectedHub, selectedProject]);
+
+  React.useEffect(() => {
+    if (jobType !== 'pdf-export') return;
+    setSelectedItems((prev) => {
+      const keys = Object.keys(prev);
+      if (keys.length <= 1) return prev;
+      const firstKey = keys[0];
+      return firstKey ? { [firstKey]: prev[firstKey] } : {};
+    });
+  }, [jobType]);
 
   React.useEffect(() => {
     return () => {
@@ -781,8 +980,9 @@ export default function PlanningPage() {
     if (!selectedProject) return false;
     const hasRunningRuns = runs.some((r) => r.status === 'running' || r.status === 'queued');
     const hasRunningJobs = jobs.some((j) => j.status === 'running');
-    return hasRunningRuns || hasRunningJobs || autoRefreshActive;
-  }, [selectedProject, runs, jobs, autoRefreshActive]);
+    const hasRunningPdfJobs = pdfExportJobs.some((j) => j.status === 'running');
+    return hasRunningRuns || hasRunningJobs || hasRunningPdfJobs || autoRefreshActive;
+  }, [selectedProject, runs, jobs, pdfExportJobs, autoRefreshActive]);
 
   React.useEffect(() => {
     if (!shouldAutoRefresh) return undefined;
@@ -790,12 +990,14 @@ export default function PlanningPage() {
     const tick = () => {
       void refreshRuns({ silent: true });
       void refreshJobs({ silent: true });
+      void refreshPdfRuns({ silent: true });
+      void refreshPdfJobs({ silent: true });
     };
 
     tick();
     const interval = setInterval(tick, 3000);
     return () => clearInterval(interval);
-  }, [shouldAutoRefresh, refreshRuns, refreshJobs]);
+  }, [shouldAutoRefresh, refreshRuns, refreshJobs, refreshPdfRuns, refreshPdfJobs]);
 
   React.useEffect(() => {
     if (!highlightJobId || jobs.length === 0) return;
@@ -1287,119 +1489,175 @@ export default function PlanningPage() {
                     Fuseau détecté : <strong>{DEFAULT_TIMEZONE}</strong>
                   </span>
                 </div>
+              </div>
 
-                <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                  <Button onClick={handlePlanifier} style={{ padding: '12px 24px' }}>
-                    🚀 Planifier
-                  </Button>
+              {jobType !== null && (
+                <div
+                  style={{
+                    padding: 16,
+                    background: 'rgba(239, 246, 255, 0.5)',
+                    borderRadius: 10,
+                    border: '1px solid rgba(37, 99, 235, 0.2)',
+                    marginBottom: 16,
+                  }}
+                >
+                  <label
+                    style={{
+                      display: 'block',
+                      marginBottom: 8,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#475569',
+                    }}
+                  >
+                    📝 Nom de la tâche
+                  </label>
+                  <input
+                    type="text"
+                    value={jobName}
+                    onChange={(e) => setJobName(e.target.value)}
+                    placeholder={
+                      jobType === 'publish'
+                        ? 'Ex: Publish Revit - Quotidien'
+                        : 'Ex: Export PDF - Architecte'
+                    }
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(148, 163, 184, 0.3)',
+                      background: 'rgba(248, 250, 252, 0.9)',
+                      fontSize: 14,
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                  />
                 </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 12 }}>
+                {jobType === null ? (
+                  <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+                    <Button
+                      onClick={() => {
+                        setJobType('publish');
+                        setJobName('');
+                      }}
+                      style={{
+                        padding: '12px 24px',
+                        flex: 1,
+                        background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                      }}
+                    >
+                      🚀 Créer tâche Publish
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setJobType('pdf-export');
+                        setJobName('');
+                      }}
+                      style={{
+                        padding: '12px 24px',
+                        flex: 1,
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      }}
+                    >
+                      📄 Créer tâche PDF
+                    </Button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+                    <Button
+                      onClick={() => {
+                        setJobType(null);
+                        setJobName('');
+                      }}
+                      variant="secondary"
+                      style={{ padding: '12px 24px', flex: 1 }}
+                    >
+                      ← Retour
+                    </Button>
+                    <Button
+                      onClick={jobType === 'publish' ? handleCreatePublishJob : handleCreatePDFExportJob}
+                      style={{ padding: '12px 24px', flex: 1 }}
+                    >
+                      ✅ Créer
+                    </Button>
+                  </div>
+                )}
               </div>
             </>
           )}
         </Card>
 
         {/* Jobs */}
-        <Card title="⚙️ Mes jobs" style={{ marginBottom: 24 }}>
+        <Card id="jobs-section" title="⚙️ Tâches du projet" style={{ marginBottom: 24 }}>
           {!selectedProject ? (
             <p style={{ color: '#9ca3af' }}>Sélectionne un projet</p>
-          ) : loadingJobs ? (
-            <p style={{ color: '#6b7280' }}>Chargement...</p>
-          ) : jobs.length === 0 ? (
-            <p style={{ color: '#9ca3af' }}>Aucun job</p>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid rgba(148, 163, 184, 0.2)' }}>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                      ID
-                    </th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                      Hub
-                    </th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                      Projet
-                    </th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                      Heure
-                    </th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                      Timezone
-                    </th>
-                    <th style={{ textAlign: 'center', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                      Maquettes
-                    </th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                      Status
-                    </th>
-                    <th style={{ textAlign: 'left', padding: '12px 8px', fontSize: 13, fontWeight: 600, color: '#475569' }}>
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobs.map((j) => {
-                    const cronParts = typeof j.cronExpression === 'string' ? j.cronExpression.trim().split(/\s+/) : [];
-                    const minutePart = cronParts[0];
-                    const hourPart = cronParts[1];
-                    const isSimpleTime = /^\d+$/.test(hourPart || '') && /^\d+$/.test(minutePart || '');
-                    const displayTime = isSimpleTime
-                      ? `${hourPart.padStart(2, '0')}:${minutePart.padStart(2, '0')}`
-                      : 'Planification personnalisée';
-                    const displayHub = j.hubName || `Hub ${j.hubId?.slice(0, 8) || '?'}`;
-                    const displayProject = j.projectName || `Projet ${j.projectId?.slice(0, 8) || '?'}`;
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+              {/* Colonne Publish */}
+              <div>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+                  🚀 Tâches Publish ({jobs.length})
+                </h4>
+                {loadingJobs ? (
+                  <p style={{ color: '#6b7280', fontSize: 13 }}>Chargement...</p>
+                ) : jobs.length === 0 ? (
+                  <p style={{ color: '#9ca3af', fontSize: 13 }}>Aucune tâche Publish</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {jobs.map((j) => {
+                      const cronParts = typeof j.cronExpression === 'string' ? j.cronExpression.trim().split(/\s+/) : [];
+                      const minutePart = cronParts[0];
+                      const hourPart = cronParts[1];
+                      const isSimpleTime = /^\d+$/.test(hourPart || '') && /^\d+$/.test(minutePart || '');
+                      const displayTime = isSimpleTime
+                        ? `${hourPart.padStart(2, '0')}:${minutePart.padStart(2, '0')}`
+                        : 'Planification personnalisée';
+                      const statusLabel = !j.scheduleEnabled ? 'Pausé' : j.status || 'idle';
+                      const badgeStyles = !j.scheduleEnabled
+                        ? { background: 'rgba(156, 163, 175, 0.2)', color: '#475569' }
+                        : j.status === 'running'
+                        ? { background: 'rgba(251, 191, 36, 0.2)', color: '#92400e' }
+                        : { background: 'rgba(34, 197, 94, 0.18)', color: '#15803d' };
 
-                    return (
-                      <tr key={j.id} style={{ borderBottom: '1px solid rgba(148, 163, 184, 0.1)' }}>
-                        <td style={{ padding: '10px 8px', fontSize: 13, fontFamily: 'monospace', color: '#6b7280' }}>
-                          {String(j.id).slice(0, 8)}
-                        </td>
-
-                        <td style={{ padding: '10px 8px', fontSize: 13, color: '#475569' }}>
-                          🏢 {displayHub}
-                        </td>
-
-                        <td style={{ padding: '10px 8px', fontSize: 14, fontWeight: 500 }}>
-                          📁 {displayProject}
-                        </td>
-
-                        <td style={{ padding: '10px 8px', fontSize: 14, fontWeight: 500, fontFamily: 'monospace' }}>
-                          🕐 {displayTime}
-                        </td>
-
-                        <td style={{ padding: '10px 8px', fontSize: 13, color: '#475569' }}>
-                          {j.timezone || 'UTC'}
-                        </td>
-
-                        <td style={{ padding: '10px 8px', textAlign: 'center', fontSize: 14, fontWeight: 600, color: '#2563eb' }}>
-                          {Array.isArray(j.models) ? j.models.length : 0}
-                        </td>
-
-                        <td style={{ padding: '10px 8px' }}>
-                          <span
-                            style={{
-                              padding: '4px 10px',
-                              borderRadius: 6,
-                              fontSize: 12,
-                              fontWeight: 600,
-                              background: !j.scheduleEnabled
-                                ? 'rgba(156, 163, 175, 0.15)'
-                                : j.status === 'running'
-                                ? 'rgba(251, 146, 60, 0.15)'
-                                : 'rgba(34, 197, 94, 0.15)',
-                              color: !j.scheduleEnabled
-                                ? '#6b7280'
-                                : j.status === 'running'
-                                ? '#ea580c'
-                                : '#16a34a',
-                            }}
-                          >
-                            {!j.scheduleEnabled ? 'Pausé' : j.status || 'idle'}
-                          </span>
-                        </td>
-
-                        <td style={{ padding: '10px 8px' }}>
-                          <div style={{ display: 'flex', gap: 6 }}>
+                      return (
+                        <div
+                          key={j.id}
+                          id={`job-${j.id}`}
+                          style={{
+                            padding: '10px 12px',
+                            background: 'rgba(59, 130, 246, 0.08)',
+                            borderRadius: 8,
+                            border: '1px solid rgba(37, 99, 235, 0.2)',
+                            fontSize: 13,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, color: '#1f2937' }}>{j.name || 'Sans nom'}</div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            {Array.isArray(j.models) ? j.models.length : 0} maquettes • 🕐 {displayTime} • {j.timezone || 'UTC'}
+                          </div>
+                          <div>
+                            <span
+                              style={{
+                                padding: '4px 10px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                ...badgeStyles,
+                              }}
+                            >
+                              {statusLabel}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                             <Button
                               variant="secondary"
                               onClick={() => handleToggleActive(j)}
@@ -1413,22 +1671,112 @@ export default function PlanningPage() {
                               disabled={j.status === 'running'}
                               style={{ padding: '6px 12px', fontSize: 12 }}
                             >
-                              🚀
+                              🚀 Lancer
                             </Button>
                             <Button
                               variant="danger"
                               onClick={() => handleDelete(j)}
                               style={{ padding: '6px 12px', fontSize: 12 }}
                             >
-                              🗑️
+                              🗑️ Supprimer
                             </Button>
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Colonne PDF */}
+              <div>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+                  📄 Tâches PDF ({pdfExportJobs.length})
+                </h4>
+                {loadingJobs ? (
+                  <p style={{ color: '#6b7280', fontSize: 13 }}>Chargement...</p>
+                ) : pdfExportJobs.length === 0 ? (
+                  <p style={{ color: '#9ca3af', fontSize: 13 }}>Aucune tâche PDF</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {pdfExportJobs.map((j) => {
+                      const cronParts = typeof j.cronExpression === 'string' ? j.cronExpression.trim().split(/\s+/) : [];
+                      const minutePart = cronParts[0];
+                      const hourPart = cronParts[1];
+                      const isSimpleTime = /^\d+$/.test(hourPart || '') && /^\d+$/.test(minutePart || '');
+                      const displayTime = isSimpleTime
+                        ? `${hourPart.padStart(2, '0')}:${minutePart.padStart(2, '0')}`
+                        : 'Planification personnalisée';
+                      const statusLabel = !j.scheduleEnabled ? 'Pausé' : j.status || 'idle';
+                      const badgeStyles = !j.scheduleEnabled
+                        ? { background: 'rgba(148, 163, 184, 0.2)', color: '#475569' }
+                        : j.status === 'running'
+                        ? { background: 'rgba(52, 211, 153, 0.2)', color: '#047857' }
+                        : { background: 'rgba(16, 185, 129, 0.18)', color: '#047857' };
+
+                      return (
+                        <div
+                          key={j.id}
+                          style={{
+                            padding: '10px 12px',
+                            background: 'rgba(16, 185, 129, 0.08)',
+                            borderRadius: 8,
+                            border: '1px solid rgba(16, 185, 129, 0.2)',
+                            fontSize: 13,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, color: '#1f2937' }}>{j.name || 'Sans nom'}</div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            {j.fileName || j.fileUrn?.slice(0, 8)} • 🕐 {displayTime} • {j.timezone || 'UTC'}
+                          </div>
+                          <div>
+                            <span
+                              style={{
+                                padding: '4px 10px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                ...badgeStyles,
+                              }}
+                            >
+                              {statusLabel}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <Button
+                              variant="secondary"
+                              onClick={() => handleTogglePdfJob(j)}
+                              style={{ padding: '6px 12px', fontSize: 12 }}
+                            >
+                              {j.scheduleEnabled ? '⏸️ Pause' : '▶️ Activer'}
+                            </Button>
+                            <Button
+                              onClick={() => handleRunPdfJob(j)}
+                              disabled={j.status === 'running'}
+                              style={{ padding: '6px 12px', fontSize: 12 }}
+                            >
+                              🚀 Lancer
+                            </Button>
+                            <Button
+                              variant="danger"
+                              onClick={() => handleDeletePdfJob(j)}
+                              style={{ padding: '6px 12px', fontSize: 12 }}
+                            >
+                              🗑️ Supprimer
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </Card>
@@ -1565,6 +1913,7 @@ export default function PlanningPage() {
                     const okCount = r.stats?.okCount ?? 0;
                     const failCount = r.stats?.failCount ?? 0;
                     const totalFiles = Array.isArray(r.items) ? r.items.length : 0;
+                    const jobIdShort = r.jobId ? String(r.jobId).slice(0, 8) : String(r.id).slice(0, 8);
 
                     let durationText = '-';
                     if (r.stats?.durationMs) {
@@ -1613,12 +1962,16 @@ export default function PlanningPage() {
                           style={{
                             padding: '12px',
                             fontSize: 12,
-                            fontFamily: 'monospace',
-                            color: '#6b7280',
                             borderRight: '1px solid rgba(148, 163, 184, 0.1)',
                           }}
                         >
-                          {String(r.jobId).slice(0, 8)}
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#1f2937' }}>
+                            {r.jobName || r.name || `Job ${jobIdShort}`}
+                          </div>
+                          <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <span>{r.jobType === 'pdf-export' ? '📄 PDF' : '🚀 Publish'}</span>
+                            <span style={{ fontFamily: 'monospace' }}>{jobIdShort}</span>
+                          </div>
                         </td>
                         <td
                           style={{
