@@ -53,6 +53,7 @@ app.use('/api/aps', apsRoutes);
 app.use('/api/publish', publishRoutes);
 app.use('/api/publish', publishDirectRoutes);
 app.use('/api/pdf-export', pdfExportRoutes);
+app.use('/api/pdf-export', require('./routes/pdf-export-jobs.routes'));
 
 // -------- 404 handler (doit être AVANT le error handler)
 app.use((req, res, next) => {
