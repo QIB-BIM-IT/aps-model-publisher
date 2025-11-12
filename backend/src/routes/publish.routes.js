@@ -143,6 +143,7 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
 
   const job = await PublishJob.create({
     userId: user.id,
+    name: payload.name,
     hubId: payload.hubId,
     hubName: payload.hubName,
     projectId: payload.projectId,
@@ -212,6 +213,7 @@ router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
   const err = validateJobPayload(merged);
   if (err) throw new ValidationError(err);
 
+  job.name = merged.name;
   job.hubId = merged.hubId;
   job.hubName = merged.hubName;
   job.projectId = merged.projectId;
