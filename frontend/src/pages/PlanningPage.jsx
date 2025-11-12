@@ -11,8 +11,6 @@ import api, {
   deletePublishJob,
   runPublishJobNow,
   getRuns,
-  getToken,
-  getUserApsToken,
   createPDFExportJob,
   getPDFExportJobs,
   deletePDFExportJob,
@@ -20,7 +18,6 @@ import api, {
   runPDFExportJobNow,
   getPDFExportRuns,
 } from '../services/api';
-import { PDFExportModal } from '../components/PDFExportModal';
 
 // Helpers
 function nameOf(node, fall = '') {
@@ -228,140 +225,6 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
   );
 }
 
-function PDFExportSection({
-  selectedArray,
-  selectedItems,
-  onExport,
-  isExporting,
-  topFolders,
-  selectedProject,
-  childrenMap,
-  onLoadChildren,
-}) {
-  const [showModal, setShowModal] = React.useState(false);
-
-  const selectedValues = React.useMemo(
-    () => Object.values(selectedItems || {}),
-    [selectedItems]
-  );
-
-  const primaryItem = React.useMemo(() => {
-    return selectedValues.find((item) => item?.publishUrn || item?.id) || null;
-  }, [selectedValues]);
-
-  const fileUrn = primaryItem?.publishUrn || primaryItem?.id || '';
-  const modelName =
-    primaryItem?.name ||
-    primaryItem?.displayName ||
-    primaryItem?.attributes?.displayName ||
-    (selectedArray[0] ? selectedArray[0].name : '');
-
-  const canOpenModal =
-    selectedArray.length > 0 &&
-    !!selectedProject &&
-    !!fileUrn &&
-    Array.isArray(topFolders) &&
-    topFolders.length > 0;
-
-  const handleConfirm = ({ mode, merge, mergedFileName, ...rest }) => {
-    const selectionMode = mode === 'custom' ? 'custom' : 'filters';
-    const exportMode = merge ? 'combined' : 'individual';
-
-    onExport({
-      ...rest,
-      selectionMode,
-      exportMode,
-      mergedFileName: merge ? mergedFileName : null,
-      fileUrn,
-      projectId: selectedProject,
-    });
-    setShowModal(false);
-  };
-
-  return (
-    <>
-      <div
-        style={{
-          marginBottom: 20,
-          padding: 16,
-          background: 'rgba(239, 246, 255, 0.5)',
-          borderRadius: 10,
-          border: '1px solid rgba(37, 99, 235, 0.2)',
-        }}
-      >
-        <h4
-          style={{
-            margin: '0 0 12px 0',
-            fontSize: 14,
-            fontWeight: 600,
-            color: '#1f2937',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          📄 Export PDF
-        </h4>
-
-        <p style={{ margin: '0 0 12px 0', fontSize: 13, color: '#475569' }}>
-          {selectedArray.length === 0
-            ? 'Sélectionne une maquette Revit dans la liste ci-dessus pour lancer un export PDF.'
-            : `Modèle courant : ${modelName || 'Sans nom'}`}
-        </p>
-
-        <button
-          onClick={() => setShowModal(true)}
-          disabled={!canOpenModal || isExporting}
-          style={{
-            width: '100%',
-            padding: '12px 16px',
-            borderRadius: 10,
-            border: 'none',
-            background:
-              !canOpenModal || isExporting
-                ? 'rgba(148, 163, 184, 0.3)'
-                : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-            color: '#fff',
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: !canOpenModal || isExporting ? 'not-allowed' : 'pointer',
-            transition: 'all 0.2s',
-            opacity: !canOpenModal || isExporting ? 0.5 : 1,
-          }}
-        >
-          {isExporting ? '⏳ Export en cours...' : '📄 Configurer et exporter'}
-        </button>
-
-        {!fileUrn && selectedArray.length > 0 && (
-          <p style={{ marginTop: 12, fontSize: 12, color: '#dc2626' }}>
-            Impossible de déterminer le fichier Revit sélectionné. Vérifie que la maquette possède un
-            URN valide.
-          </p>
-        )}
-
-        {Array.isArray(topFolders) && topFolders.length === 0 && selectedProject && (
-          <p style={{ marginTop: 12, fontSize: 12, color: '#dc2626' }}>
-            Aucun dossier ACC disponible pour ce projet. Charge les dossiers pour continuer.
-          </p>
-        )}
-      </div>
-
-      {showModal && (
-        <PDFExportModal
-          fileUrn={fileUrn}
-          projectId={selectedProject}
-          topFolders={topFolders}
-          childrenMap={childrenMap}
-          onLoadChildren={onLoadChildren}
-          onClose={() => setShowModal(false)}
-          onConfirm={handleConfirm}
-          isExporting={isExporting}
-        />
-      )}
-    </>
-  );
-}
-
 // Composant Card moderne
 function Card({ children, title, style = {}, id }) {
   return (
@@ -452,10 +315,19 @@ export default function PlanningPage() {
   const [topFolders, setTopFolders] = React.useState([]);
   const [childrenMap, setChildrenMap] = React.useState(new Map());
   const [selectedItems, setSelectedItems] = React.useState({});
-  const [exportingPDFs, setExportingPDFs] = React.useState(false);
   const [jobType, setJobType] = React.useState(null);
   const [jobName, setJobName] = React.useState('');
   const [pdfExportJobs, setPdfExportJobs] = React.useState([]);
+
+  // ✅ Configuration PDF (nouvelle)
+  const [pdfSelectionMode, setPdfSelectionMode] = React.useState('all');
+  const [pdfSelectedSheets, setPdfSelectedSheets] = React.useState([]);
+  const [pdfExportMode, setPdfExportMode] = React.useState('individual');
+  const [pdfMergedFileName, setPdfMergedFileName] = React.useState('Documents.pdf');
+  const [pdfSheetsLoaded, setPdfSheetsLoaded] = React.useState(false);
+  const [pdfAvailableSheets, setPdfAvailableSheets] = React.useState([]);
+  const [pdfLoadingSheets, setPdfLoadingSheets] = React.useState(false);
+  const [pdfCacheKey, setPdfCacheKey] = React.useState(null);
 
   const [jobs, setJobs] = React.useState([]);
   const [loadingJobs, setLoadingJobs] = React.useState(false);
@@ -477,8 +349,6 @@ export default function PlanningPage() {
   const [timezone, setTimezone] = React.useState(DEFAULT_TIMEZONE);
   const [error, setError] = React.useState('');
   const [toast, setToast] = React.useState('');
-
-  const exportPDFsEnabled = true;
 
   const preSelectHub = location.state?.preSelectHub;
   const preSelectProject = location.state?.preSelectProject;
@@ -712,9 +582,8 @@ export default function PlanningPage() {
   );
 
   async function handleCreatePDFExportJob() {
-    const selectedArray = Object.values(selectedItems);
-
-    if (selectedArray.length === 0) {
+    const selectedFile = Object.values(selectedItems)[0];
+    if (!selectedFile) {
       setToast('⚠️ Sélectionne 1 maquette');
       setTimeout(() => setToast(''), 3000);
       return;
@@ -738,15 +607,31 @@ export default function PlanningPage() {
       return;
     }
 
-    const fileUrn = selectedArray[0]?.publishUrn || selectedArray[0]?.id;
-    const fileName = selectedArray[0]?.name;
+    if (pdfSelectionMode === 'custom' && pdfSelectedSheets.length === 0) {
+      setToast('⚠️ Sélectionne au moins une feuille');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    if (pdfExportMode === 'combined' && !pdfMergedFileName.trim()) {
+      setToast('⚠️ Entre un nom pour le PDF fusionné');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    const fileUrn = selectedFile?.publishUrn || selectedFile?.id;
+    const fileName = selectedFile?.name;
 
     const projectObj = projects.find((p) => idOf(p) === selectedProject);
     const projectName = nameOf(projectObj, '');
 
-    console.log('📝 jobName avant envoi:', jobName);
-
     try {
+      // Préparer la liste des sheets sélectionnées avec les métadonnées
+      const sheetsForJob =
+        pdfSelectionMode === 'custom'
+          ? pdfAvailableSheets.filter((s) => pdfSelectedSheets.includes(s.name))
+          : [];
+
       await createPDFExportJob({
         name: jobName.trim(),
         projectId: selectedProject,
@@ -758,11 +643,14 @@ export default function PlanningPage() {
         scheduleEnabled: true,
         cronExpression,
         timezone,
-        selectionMode: 'all',
+        selectionMode: pdfSelectionMode,
+        selectedSheets: sheetsForJob,
         includeSheets: true,
         includeViews2D: true,
         includeMarkups: true,
-        exportMode: 'individual',
+        exportMode: pdfExportMode,
+        mergedFileName:
+          pdfExportMode === 'combined' ? pdfMergedFileName.trim() : null,
         notifyOnFailure: true,
       });
 
@@ -771,6 +659,13 @@ export default function PlanningPage() {
       setJobName('');
       setJobType(null);
       setSelectedItems({});
+      setPdfSelectionMode('all');
+      setPdfSelectedSheets([]);
+      setPdfSheetsLoaded(false);
+      setPdfAvailableSheets([]);
+      setPdfCacheKey(null);
+      setPdfExportMode('individual');
+      setPdfMergedFileName('Documents.pdf');
       triggerAutoRefreshWindow();
       await Promise.all([refreshPdfJobs({ silent: true }), refreshPdfRuns({ silent: true })]);
     } catch (e) {
@@ -967,6 +862,27 @@ export default function PlanningPage() {
   }, [jobType]);
 
   React.useEffect(() => {
+    if (jobType === 'pdf-export') return;
+    setPdfSelectionMode('all');
+    setPdfSelectedSheets([]);
+    setPdfExportMode('individual');
+    setPdfMergedFileName('Documents.pdf');
+    setPdfSheetsLoaded(false);
+    setPdfAvailableSheets([]);
+    setPdfLoadingSheets(false);
+    setPdfCacheKey(null);
+  }, [jobType]);
+
+  React.useEffect(() => {
+    if (jobType !== 'pdf-export') return;
+    setPdfSheetsLoaded(false);
+    setPdfAvailableSheets([]);
+    setPdfSelectedSheets([]);
+    setPdfLoadingSheets(false);
+    setPdfCacheKey(null);
+  }, [jobType, primarySelectedKey]);
+
+  React.useEffect(() => {
     return () => {
       if (autoRefreshTimeoutRef.current) {
         clearTimeout(autoRefreshTimeoutRef.current);
@@ -1050,6 +966,11 @@ export default function PlanningPage() {
     id,
     name: nameOf(node, id),
   }));
+
+  const primarySelectedKey = React.useMemo(() => {
+    const keys = Object.keys(selectedItems);
+    return keys[0] || null;
+  }, [selectedItems]);
 
   const filteredProjects = React.useMemo(() => {
     const sorted = [...projects].sort((a, b) => {
@@ -1308,130 +1229,159 @@ export default function PlanningPage() {
                 ))}
               </div>
 
-              {/* Export PDF Section */}
-              {exportPDFsEnabled && (
-                <PDFExportSection
-                  selectedArray={selectedArray}
-                  selectedItems={selectedItems}
-                  onExport={async (exportConfig) => {
-                    if (!selectedProject || selectedArray.length === 0) {
-                      setToast('⚠️ Sélectionne au moins une maquette');
-                      setTimeout(() => setToast(''), 3000);
-                      return;
-                    }
-
-                    setExportingPDFs(true);
-
-                    try {
-                      const {
-                        folderId,
-                        options: exportOptions = {},
-                        selectionMode = 'filters',
-                        customSheets = [],
-                        exportMode = 'individual',
-                        mergedFileName,
-                        fileUrn,
-                      } = exportConfig || {};
-
-                      if (!folderId) {
-                        throw new Error('Dossier de destination manquant');
-                      }
-
-                      const selectedValues = Object.values(selectedItems);
-                      const fallbackUrns = Array.from(
-                        new Set(
-                          selectedValues
-                            .map((item) => item?.publishUrn || item?.id || null)
-                            .filter((urn) => typeof urn === 'string' && urn.length > 0)
-                        )
-                      );
-
-                      const targetUrn = fileUrn || fallbackUrns[0] || null;
-
-                      if (!targetUrn) {
-                        throw new Error('Aucun lineage URN disponible');
-                      }
-
-                      setToast('⏳ Export et sauvegarde sur ACC en cours (2-5 min)...');
-
-                      console.log('🔐 Récupération token...');
-                      const userToken = await getUserApsToken();
-                      console.log('✅ Token obtenu:', userToken ? 'OK' : 'VIDE');
-
-                      console.log('🚀 Envoi requête...');
-                      const jwtToken = getToken();
-                      if (!jwtToken) {
-                        throw new Error('Session expirée, veuillez vous reconnecter');
-                      }
-
-                      // ✅ CORRECTION: customSheets doit être un array d'objets avec au minimum { id, name }
-                      // Les sheets viennent déjà du cache avec la bonne structure
-                      const payload = {
-                        fileUrn: targetUrn,
-                        projectId: selectedProject,
-                        folderId,
-                        filters: {
-                          includeSheets: exportOptions.includeSheets !== false,
-                          includeViews2D: exportOptions.includeViews2D !== false,
-                          includeMarkups: exportOptions.includeMarkups !== false,
-                        },
-                        selectionMode,
-                        customSheets: selectionMode === 'custom' ? customSheets : [],
-                        exportMode,
-                      };
-
-                      if (exportMode === 'combined' && mergedFileName) {
-                        payload.combinedFileName = mergedFileName;
-                      }
-
-                      console.log('📦 Payload:', JSON.stringify(payload, null, 2));
-
-                      const result = await fetch('/api/pdf-export/export-and-save', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'x-user-token': userToken,
-                          Authorization: `Bearer ${jwtToken}`,
-                        },
-                        body: JSON.stringify(payload),
-                      });
-
-                      console.log('📥 Status:', result.status);
-                      console.log('📥 OK?:', result.ok);
-
-                      const data = await result.json();
-                      console.log('📦 Réponse:', data);
-
-                      if (!result.ok) {
-                        throw new Error(data.message || 'Export failed');
-                      }
-
-                      // Afficher résultat
-                      if (data.success) {
-                        const message = data.failed > 0
-                          ? `✅ ${data.uploaded} PDF(s) sauvegardé(s) sur ACC (${data.failed} échec)`
-                          : `✅ ${data.uploaded} PDF(s) sauvegardé(s) sur ACC!`;
-
-                        setToast(message);
-                        setTimeout(() => setToast(''), 6000);
-                      } else {
-                        throw new Error('Export échoué');
-                      }
-
-                    } catch (err) {
-                      console.error('Erreur export:', err);
-                      setToast('❌ ' + (err.message || 'Erreur lors de l\'export'));
-                      setTimeout(() => setToast(''), 6000);
-                    } finally {
-                      setExportingPDFs(false);
-                    }
+              {/* ========== SECTION PDF: Configuration complète ========== */}
+              {jobType === 'pdf-export' && selectedArray.length > 0 && (
+                <div
+                  style={{
+                    marginBottom: 20,
+                    padding: 16,
+                    background: 'rgba(16, 185, 129, 0.08)',
+                    borderRadius: 10,
+                    border: '1px solid rgba(16, 185, 129, 0.2)',
                   }}
-                  isExporting={exportingPDFs}
-                  topFolders={topFolders}
-                  selectedProject={selectedProject}
-                  childrenMap={childrenMap}
-                  onLoadChildren={loadChildren}
-                />
+                >
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+                    📄 Configuration PDF Export
+                  </h4>
+
+                  {/* Option 1: Toutes les feuilles */}
+                  <label style={{ display: 'flex', alignItems: 'center', marginBottom: 12, cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="pdfSelection"
+                      checked={pdfSelectionMode === 'all'}
+                      onChange={() => {
+                        setPdfSelectionMode('all');
+                        setPdfSelectedSheets([]);
+                        setPdfSheetsLoaded(false);
+                      }}
+                      style={{ marginRight: 10, cursor: 'pointer', accentColor: '#10b981' }}
+                    />
+                    <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
+                      ✓ Exporter toutes les feuilles (global)
+                    </span>
+                  </label>
+
+                  {/* Option 2: Charger et sélectionner */}
+                  <label style={{ display: 'flex', alignItems: 'center', marginBottom: 12, cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="pdfSelection"
+                      checked={pdfSelectionMode === 'custom'}
+                      onChange={() => setPdfSelectionMode('custom')}
+                      style={{ marginRight: 10, cursor: 'pointer', accentColor: '#10b981' }}
+                    />
+                    <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
+                      📋 Sélectionner des feuilles spécifiques
+                    </span>
+                  </label>
+
+                  {/* Bouton charger sheets (si custom) */}
+                  {pdfSelectionMode === 'custom' && (
+                    <div style={{ marginLeft: 24, marginBottom: 12 }}>
+                      {!pdfSheetsLoaded ? (
+                        <button
+                          onClick={async () => {
+                            setPdfLoadingSheets(true);
+                            try {
+                              const selectedFile = Object.values(selectedItems)[0];
+                              const fileUrn = selectedFile?.publishUrn || selectedFile?.id;
+                              const result = await window.exportWithCache(fileUrn, selectedProject);
+                              setPdfAvailableSheets(result.sheets || []);
+                              setPdfSelectedSheets((result.sheets || []).map((s) => s.name));
+                              setPdfCacheKey(result.cacheKey);
+                              setPdfSheetsLoaded(true);
+                            } catch (err) {
+                              setToast('❌ ' + (err?.message || 'Erreur chargement sheets'));
+                              setTimeout(() => setToast(''), 3000);
+                            } finally {
+                              setPdfLoadingSheets(false);
+                            }
+                          }}
+                          disabled={pdfLoadingSheets}
+                          style={{
+                            padding: '10px 16px',
+                            borderRadius: 8,
+                            border: 'none',
+                            background:
+                              pdfLoadingSheets
+                                ? 'rgba(148, 163, 184, 0.3)'
+                                : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                            color: '#fff',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            cursor: pdfLoadingSheets ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {pdfLoadingSheets ? '⏳ Chargement...' : '📋 Charger les feuilles'}
+                        </button>
+                      ) : (
+                        <div style={{ fontSize: 13, color: '#047857', fontWeight: 500 }}>
+                          ✅ {pdfSelectedSheets.length}/{pdfAvailableSheets.length} feuille(s) sélectionnée(s)
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Format sortie */}
+                  <div style={{ marginBottom: 12, paddingTop: 12, borderTop: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', marginBottom: 10, cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="pdfFormat"
+                        checked={pdfExportMode === 'individual'}
+                        onChange={() => setPdfExportMode('individual')}
+                        style={{ marginRight: 10, cursor: 'pointer', accentColor: '#10b981' }}
+                      />
+                      <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
+                        📄 Export individuel (1 PDF par feuille)
+                      </span>
+                    </label>
+
+                    <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="pdfFormat"
+                        checked={pdfExportMode === 'combined'}
+                        onChange={() => setPdfExportMode('combined')}
+                        style={{ marginRight: 10, cursor: 'pointer', accentColor: '#10b981' }}
+                      />
+                      <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
+                        🔗 Combiner en un seul PDF
+                      </span>
+                    </label>
+
+                    {pdfExportMode === 'combined' && (
+                      <div style={{ marginTop: 10, marginLeft: 24 }}>
+                        <label
+                          style={{
+                            display: 'block',
+                            marginBottom: 6,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: '#475569',
+                          }}
+                        >
+                          Nom du fichier:
+                        </label>
+                        <input
+                          type="text"
+                          value={pdfMergedFileName}
+                          onChange={(e) => setPdfMergedFileName(e.target.value)}
+                          placeholder="Documents.pdf"
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            borderRadius: 8,
+                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                            fontSize: 13,
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
 
               <div
