@@ -110,7 +110,9 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
   const user = await User.findByPk(req.userId);
   if (!user) throw new NotFoundError('Utilisateur');
 
+  console.log('📦 Body reçu au backend:', req.body);
   const payload = normalizeJobInput(req.body);
+  console.log('📝 Après normalization:', payload);
   const err = validateJobPayload(payload);
   if (err) throw new ValidationError(err);
 
@@ -130,6 +132,7 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
 
   const job = await PDFExportJob.create({
     userId: user.id,
+    name: payload.name,
     projectId: payload.projectId,
     projectName: payload.projectName,
     folderId: payload.folderId,
@@ -155,6 +158,7 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
     history: [],
   });
 
+  console.log('✅ Job créé:', { id: job.id, name: job.name });
   if (job.scheduleEnabled) scheduler.scheduleJob(job);
 
   logger.info(`[PDFExportJobs] Job créé: ${job.id}`);

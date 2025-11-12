@@ -744,6 +744,8 @@ export default function PlanningPage() {
     const projectObj = projects.find((p) => idOf(p) === selectedProject);
     const projectName = nameOf(projectObj, '');
 
+    console.log('📝 jobName avant envoi:', jobName);
+
     try {
       await createPDFExportJob({
         name: jobName.trim(),
