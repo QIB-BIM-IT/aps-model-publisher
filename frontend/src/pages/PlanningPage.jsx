@@ -741,10 +741,14 @@ export default function PlanningPage() {
     const fileUrn = selectedArray[0]?.publishUrn || selectedArray[0]?.id;
     const fileName = selectedArray[0]?.name;
 
+    const projectObj = projects.find((p) => idOf(p) === selectedProject);
+    const projectName = nameOf(projectObj, '');
+
     try {
       await createPDFExportJob({
         name: jobName.trim(),
         projectId: selectedProject,
+        projectName,
         folderId: topFolders[0]?.id || '',
         folderName: topFolders[0]?.attributes?.displayName || '',
         fileUrn,

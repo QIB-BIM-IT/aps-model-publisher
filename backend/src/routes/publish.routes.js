@@ -51,6 +51,7 @@ function normalizeJobInput(body) {
   out.hubId = String(body.hubId || '').trim();
   const rawHubName = body.hubName;
   out.hubName = rawHubName == null ? null : String(rawHubName).trim() || null;
+  out.name = String(body.name || '').trim() || 'Tâche sans nom';
   out.projectId = String(body.projectId || '').trim();
   const rawProjectName = body.projectName;
   out.projectName = rawProjectName == null ? null : String(rawProjectName).trim() || null;
