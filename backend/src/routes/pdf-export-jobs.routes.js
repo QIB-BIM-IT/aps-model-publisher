@@ -30,6 +30,7 @@ function validTz(tz) {
 
 function normalizeJobInput(body) {
   const out = {};
+  out.name = String(body.name || '').trim() || 'Tâche sans nom';
   out.projectId = String(body.projectId || '').trim();
   out.projectName = body.projectName == null ? null : String(body.projectName).trim() || null;
   out.folderId = String(body.folderId || '').trim();
