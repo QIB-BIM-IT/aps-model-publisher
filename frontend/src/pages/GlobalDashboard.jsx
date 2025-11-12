@@ -514,8 +514,8 @@ export default function GlobalDashboard() {
                             borderRadius: 4,
                             fontSize: 11,
                             fontWeight: 600,
-                            background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                            color: isPublish ? '#1d4ed8' : '#059669'
+                            background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(34, 197, 94, 0.25)',
+                            color: isPublish ? '#1d4ed8' : '#16a34a'
                           }}>
                             {isPublish ? '🚀 Publish' : '📄 PDF'}
                           </span>
