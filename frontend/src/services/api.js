@@ -228,4 +228,53 @@ export async function exportWithCache(fileUrn, projectId) {
   }
 }
 
+/**
+ * Export PDFs depuis le cache vers ACC
+ * @param {object} params - Paramètres d'export
+ * @param {string} params.cacheKey - Clé du cache
+ * @param {string} params.projectId - ID du projet
+ * @param {string} params.folderId - ID du dossier de destination
+ * @param {Array<string>} params.selectedSheetNames - Noms des sheets à exporter
+ * @param {string} params.exportMode - Mode d'export ('combined' ou 'individual')
+ * @param {string} [params.combinedFileName] - Nom du fichier combiné (si exportMode === 'combined')
+ * @param {object} [params.options] - Options d'export
+ * @returns {Promise<{uploaded: number, failed: number}>}
+ */
+export async function exportPDFsFromCache(params) {
+  const { cacheKey, projectId, folderId, selectedSheetNames, exportMode, combinedFileName, options = {} } = params;
+
+  if (!cacheKey || !projectId || !folderId || !selectedSheetNames || !Array.isArray(selectedSheetNames)) {
+    throw new Error('Paramètres requis manquants');
+  }
+
+  try {
+    const { data } = await api.post('/api/pdf-export/export-from-cache', {
+      cacheKey,
+      projectId,
+      folderId,
+      selectedSheetNames,
+      exportMode: exportMode || 'individual',
+      combinedFileName,
+      options: {
+        includeSheets: options.includeSheets !== false,
+        includeViews2D: options.includeViews2D !== false,
+        includeMarkups: options.includeMarkups !== false,
+      },
+    });
+
+    if (!data.success) {
+      throw new Error(data.message || 'Export from cache failed');
+    }
+
+    return {
+      uploaded: data.uploaded || 0,
+      failed: data.failed || 0,
+      results: data.results || [],
+    };
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || 'Erreur lors de l\'export depuis le cache';
+    throw new Error(message);
+  }
+}
+
 export default api;
