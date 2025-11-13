@@ -26,16 +26,20 @@ export function PDFExportModal({
   showScheduleButton = false,
   jobName: initialJobName = '',
   onJobNameChange,
+  selectedHour: initialSelectedHour = '02:00',
+  setSelectedHour,
+  timezone: initialTimezone = 'UTC',
+  setTimezone,
+  hourOptions = [],
+  timezoneOptions = [],
+  defaultTimezone = 'UTC',
 }) {
-  // Filtres globaux
-  const [includeSheets, setIncludeSheets] = useState(true);
-  const [includeViews2D, setIncludeViews2D] = useState(true);
+  // Options d'export
   const [includeMarkups, setIncludeMarkups] = useState(true);
 
-  // Sélection custom
+  // Sélection de sheets
   const [selectionMode, setSelectionMode] = useState('all'); // 'all' ou 'custom'
   const [availableSheets, setAvailableSheets] = useState([]);
-  const [availableViews2D, setAvailableViews2D] = useState([]);
   const [availableMarkups, setAvailableMarkups] = useState([]);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -66,7 +70,7 @@ export function PDFExportModal({
     return availableSheets.filter((sheet) => keySet.has(getSheetKey(sheet)));
   }, [selectionMode, selectedSheetKeys, availableSheets]);
 
-  const handleLoadSheets = async () => {
+  const handleLoadSheets = React.useCallback(async () => {
     if (!fileUrn) {
       alert('Sélectionne un fichier Revit valide avant de charger les sheets');
       return;
@@ -94,7 +98,6 @@ export function PDFExportModal({
           }))
         : [];
       setAvailableSheets(sheets);
-      setAvailableViews2D(Array.isArray(result?.views2D) ? result.views2D : []);
       setAvailableMarkups(Array.isArray(result?.markups) ? result.markups : []);
       setCacheKey(result?.cacheKey || null);
       // Tout sélectionner par défaut
@@ -118,7 +121,14 @@ export function PDFExportModal({
       }
       setLoadingSheets(false);
     }
-  };
+  }, [fileUrn, projectId]);
+
+  // Charger automatiquement les sheets quand le modal s'ouvre
+  useEffect(() => {
+    if (fileUrn && !hasSheetsLoaded && !loadingSheets) {
+      handleLoadSheets();
+    }
+  }, [fileUrn, hasSheetsLoaded, loadingSheets, handleLoadSheets]);
 
   const handleExport = () => {
     if (!selectedFolder) {
@@ -144,11 +154,10 @@ export function PDFExportModal({
       mergedFileName: merge ? mergedFileName.trim() : null,
       cacheKey,
       availableSheets,
-      availableViews2D,
       availableMarkups,
       options: {
-        includeSheets,
-        includeViews2D,
+        includeSheets: true, // Toujours inclure les sheets
+        includeViews2D: false, // Plus de vues 2D
         includeMarkups,
       },
     });
@@ -209,216 +218,196 @@ export function PDFExportModal({
           Configure ton export et choisis la destination
         </p>
 
-        {/* SECTION 1: Filtres globaux */}
-        <div
-          style={{
-            padding: 16,
-            background: 'rgba(239, 246, 255, 0.5)',
-            borderRadius: 10,
-            border: '1px solid rgba(37, 99, 235, 0.2)',
-            marginBottom: 20,
-          }}
-        >
-          <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
-            ⚙️ Filtres globaux
-          </h4>
-
-          <label style={{ display: 'flex', alignItems: 'center', marginBottom: 10, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={includeSheets}
-              onChange={(e) => setIncludeSheets(e.target.checked)}
-              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
-            />
-            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
-              ✓ Tous les sheets disponibles
-            </span>
-          </label>
-
-          <label style={{ display: 'flex', alignItems: 'center', marginBottom: 10, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={includeViews2D}
-              onChange={(e) => setIncludeViews2D(e.target.checked)}
-              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
-            />
-            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
-              ✓ Toutes les vues 2D
-            </span>
-          </label>
-
-          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={includeMarkups}
-              onChange={(e) => setIncludeMarkups(e.target.checked)}
-              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
-            />
-            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
-              ✓ Inclure markups et annotations
-            </span>
-          </label>
-        </div>
-
-        {/* SECTION 2: Sélection custom */}
-        <div
-          style={{
-            padding: 16,
-            background: 'rgba(248, 250, 252, 0.8)',
-            borderRadius: 10,
-            border: '1px solid rgba(148, 163, 184, 0.3)',
-            marginBottom: 20,
-          }}
-        >
-          <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
-            🎯 Sélection de sheets
-          </h4>
-
-          <label style={{ display: 'flex', alignItems: 'center', marginBottom: 10, cursor: 'pointer' }}>
-            <input
-              type="radio"
-              name="selectionMode"
-              checked={selectionMode === 'all'}
-              onChange={() => setSelectionMode('all')}
-              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
-            />
-            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
-              Utiliser les filtres ci-dessus
-            </span>
-          </label>
-
-          <label style={{ display: 'flex', alignItems: 'center', marginBottom: 12, cursor: 'pointer' }}>
-            <input
-              type="radio"
-              name="selectionMode"
-              checked={selectionMode === 'custom'}
-              onChange={() => {
-                setSelectionMode('custom');
-                if (!hasSheetsLoaded && !loadingSheets) {
-                  handleLoadSheets();
-                }
+        {/* SECTION 1: Chargement des sheets */}
+        {loadingSheets && (
+          <div
+            style={{
+              padding: 16,
+              background: 'rgba(239, 246, 255, 0.5)',
+              borderRadius: 10,
+              border: '1px solid rgba(37, 99, 235, 0.2)',
+              marginBottom: 20,
+            }}
+          >
+            <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+              ⏳ Chargement des sheets disponibles...
+            </h4>
+            <div
+              style={{
+                width: '100%',
+                height: 8,
+                borderRadius: 4,
+                background: 'rgba(148, 163, 184, 0.2)',
+                overflow: 'hidden',
+                marginBottom: 8,
               }}
-              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
-            />
-            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
-              Sélectionner des sheets spécifiques
-            </span>
-          </label>
-
-          {selectionMode === 'custom' && (
-            <div style={{ marginLeft: 24 }}>
-              {!hasSheetsLoaded && loadingSheets ? (
-                <div>
-                  <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
-                    ⏳ Chargement des sheets disponibles (2-5 minutes)...
-                  </p>
-                  <div
-                    style={{
-                      width: '100%',
-                      height: 6,
-                      borderRadius: 3,
-                      background: 'rgba(148, 163, 184, 0.2)',
-                      overflow: 'hidden',
-                      marginBottom: 12,
-                    }}
-                  >
-                    <div
-                      style={{
-                        height: '100%',
-                        background: 'linear-gradient(90deg, #10b981 0%, #059669 100%)',
-                        width: `${loadingProgress}%`,
-                        transition: 'width 0.3s ease-out',
-                      }}
-                    />
-                  </div>
-                  <p style={{ fontSize: 12, color: '#64748b', marginBottom: 0 }}>
-                    {Math.round(loadingProgress)}% complété
-                  </p>
-                </div>
-              ) : !hasSheetsLoaded ? (
-                <p style={{ fontSize: 13, color: '#64748b', marginBottom: 0 }}>
-                  ⏳ Sélectionne cette option pour charger les sheets...
-                </p>
-              ) : (
-                <div>
-                  <div style={{ marginBottom: 8, fontSize: 13, color: '#64748b' }}>
-                    {selectedSheetCount}/{availableSheets.length} sheets sélectionnés
-                  </div>
-                  <div
-                    style={{
-                      border: '1px solid #d1d5db',
-                      borderRadius: 8,
-                      maxHeight: 200,
-                      overflowY: 'auto',
-                      background: '#fff',
-                    }}
-                  >
-                    {availableSheets
-                      .slice()
-                      .sort((a, b) => {
-                        const numberA = a?.number || '';
-                        const numberB = b?.number || '';
-
-                        if (numberA && numberB) {
-                          const comparison = numberA.localeCompare(numberB, undefined, { numeric: true });
-                          if (comparison !== 0) {
-                            return comparison;
-                          }
-                        } else if (numberA) {
-                          return -1;
-                        } else if (numberB) {
-                          return 1;
-                        }
-
-                        return (a?.name || '').localeCompare(b?.name || '');
-                      })
-                      .map((sheet) => {
-                      const key = getSheetKey(sheet);
-                      const isChecked = selectedSheetKeys.includes(key);
-
-                      return (
-                        <label
-                          key={key}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            padding: '8px 12px',
-                            borderBottom: '1px solid #e5e7eb',
-                            cursor: 'pointer',
-                            background: isChecked ? 'rgba(37, 99, 235, 0.05)' : 'transparent',
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedSheetKeys((prev) =>
-                                  prev.includes(key) ? prev : [...prev, key]
-                                );
-                              } else {
-                                setSelectedSheetKeys((prev) => prev.filter((id) => id !== key));
-                              }
-                            }}
-                            style={{ marginRight: 10, cursor: 'pointer', accentColor: '#2563eb' }}
-                          />
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 13, fontWeight: 500, color: '#1f2937' }}>
-                              {sheet.number && <strong>{sheet.number}</strong>} {sheet.number ? ' - ' : ''}
-                              {sheet.name}
-                            </div>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #10b981 0%, #059669 100%)',
+                  width: `${loadingProgress}%`,
+                  transition: 'width 0.3s ease-out',
+                }}
+              />
             </div>
-          )}
-        </div>
+            <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>
+              {Math.round(loadingProgress)}% complété (2-5 minutes)
+            </p>
+          </div>
+        )}
 
-        {/* SECTION 3: Format de sortie */}
+        {/* SECTION 2: Sélection de sheets */}
+        {hasSheetsLoaded && !loadingSheets && (
+          <div
+            style={{
+              padding: 16,
+              background: 'rgba(248, 250, 252, 0.8)',
+              borderRadius: 10,
+              border: '1px solid rgba(148, 163, 184, 0.3)',
+              marginBottom: 20,
+            }}
+          >
+            <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+              🎯 Sélection de sheets ({availableSheets.length} disponibles)
+            </h4>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', marginBottom: 10, cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="selectionMode"
+                  checked={selectionMode === 'all'}
+                  onChange={() => setSelectionMode('all')}
+                  style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                />
+                <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
+                  Tous les sheets disponibles
+                </span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="selectionMode"
+                  checked={selectionMode === 'custom'}
+                  onChange={() => setSelectionMode('custom')}
+                  style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                />
+                <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
+                  Sélectionner des sheets spécifiques
+                </span>
+              </label>
+            </div>
+
+            {selectionMode === 'custom' && (
+              <div>
+                <div style={{ marginBottom: 8, fontSize: 13, color: '#64748b' }}>
+                  {selectedSheetCount}/{availableSheets.length} sheets sélectionnés
+                </div>
+                <div
+                  style={{
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    maxHeight: 200,
+                    overflowY: 'auto',
+                    background: '#fff',
+                  }}
+                >
+                  {availableSheets
+                    .slice()
+                    .sort((a, b) => {
+                      const numberA = a?.number || '';
+                      const numberB = b?.number || '';
+
+                      if (numberA && numberB) {
+                        const comparison = numberA.localeCompare(numberB, undefined, { numeric: true });
+                        if (comparison !== 0) {
+                          return comparison;
+                        }
+                      } else if (numberA) {
+                        return -1;
+                      } else if (numberB) {
+                        return 1;
+                      }
+
+                      return (a?.name || '').localeCompare(b?.name || '');
+                    })
+                    .map((sheet) => {
+                    const key = getSheetKey(sheet);
+                    const isChecked = selectedSheetKeys.includes(key);
+
+                    return (
+                      <label
+                        key={key}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          borderBottom: '1px solid #e5e7eb',
+                          cursor: 'pointer',
+                          background: isChecked ? 'rgba(37, 99, 235, 0.05)' : 'transparent',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedSheetKeys((prev) =>
+                                prev.includes(key) ? prev : [...prev, key]
+                              );
+                            } else {
+                              setSelectedSheetKeys((prev) => prev.filter((id) => id !== key));
+                            }
+                          }}
+                          style={{ marginRight: 10, cursor: 'pointer', accentColor: '#2563eb' }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: '#1f2937' }}>
+                            {sheet.number && <strong>{sheet.number}</strong>} {sheet.number ? ' - ' : ''}
+                            {sheet.name}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SECTION 3: Options d'export */}
+        {hasSheetsLoaded && !loadingSheets && (
+          <div
+            style={{
+              padding: 16,
+              background: 'rgba(239, 246, 255, 0.5)',
+              borderRadius: 10,
+              border: '1px solid rgba(37, 99, 235, 0.2)',
+              marginBottom: 20,
+            }}
+          >
+            <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+              ⚙️ Options d'export
+            </h4>
+
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={includeMarkups}
+                onChange={(e) => setIncludeMarkups(e.target.checked)}
+                style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+              />
+              <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
+                ✓ Inclure markups et annotations
+              </span>
+            </label>
+          </div>
+        )}
+
+        {/* SECTION 4: Format de sortie */}
         <div
           style={{
             padding: 16,
@@ -481,7 +470,7 @@ export function PDFExportModal({
           )}
         </div>
 
-        {/* SECTION 4: Sélection dossier */}
+        {/* SECTION 5: Sélection dossier */}
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: '#475569' }}>
             📁 Destination (dossier ACC)
@@ -527,6 +516,69 @@ export function PDFExportModal({
             <p style={{ margin: 0, fontSize: 12, color: '#047857', fontWeight: 600 }}>
               ✓ Destination: {selectedFolder.attributes?.displayName || selectedFolder.name}
             </p>
+          </div>
+        )}
+
+        {/* Heure et fuseau horaire (pour la planification) */}
+        {showScheduleButton && (
+          <div style={{ marginBottom: 20 }}>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+              🕐 Planification
+            </h4>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap', marginBottom: 16 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                  Heure de publication
+                </label>
+                <select
+                  value={initialSelectedHour}
+                  onChange={(e) => setSelectedHour && setSelectedHour(e.target.value)}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    background: 'rgba(248, 250, 252, 0.9)',
+                    fontSize: 14,
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {hourOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 220px', minWidth: 220 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                  Fuseau horaire
+                </label>
+                <select
+                  value={initialTimezone}
+                  onChange={(e) => setTimezone && setTimezone(e.target.value)}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    background: 'rgba(248, 250, 252, 0.9)',
+                    fontSize: 14,
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {timezoneOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <span style={{ fontSize: 12, color: '#64748b' }}>
+                  Fuseau détecté : <strong>{defaultTimezone}</strong>
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
@@ -586,11 +638,10 @@ export function PDFExportModal({
                     mergedFileName: merge ? mergedFileName.trim() : null,
                     cacheKey,
                     availableSheets,
-                    availableViews2D,
                     availableMarkups,
                     options: {
-                      includeSheets,
-                      includeViews2D,
+                      includeSheets: true,
+                      includeViews2D: false,
                       includeMarkups,
                     },
                   };
@@ -619,6 +670,10 @@ export function PDFExportModal({
                     alert('⚠️ Entre un nom pour la tâche');
                     return;
                   }
+                  // Calculer le cronExpression à partir de l'heure sélectionnée
+                  const [hour, minute] = initialSelectedHour.split(':');
+                  const cronExpression = `${minute} ${hour} * * *`;
+                  
                   const config = {
                     folderId: selectedFolder.id,
                     mode: selectionMode,
@@ -627,12 +682,13 @@ export function PDFExportModal({
                     mergedFileName: merge ? mergedFileName.trim() : null,
                     cacheKey,
                     availableSheets,
-                    availableViews2D,
                     availableMarkups,
                     jobName: jobName.trim(),
+                    cronExpression,
+                    timezone: initialTimezone,
                     options: {
-                      includeSheets,
-                      includeViews2D,
+                      includeSheets: true,
+                      includeViews2D: false,
                       includeMarkups,
                     },
                   };

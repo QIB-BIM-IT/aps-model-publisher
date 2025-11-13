@@ -697,6 +697,10 @@ export default function PlanningPage() {
       const sheetsForJob =
         config.mode === 'custom' ? config.customSheets : [];
 
+      // Utiliser le cronExpression et timezone du config (depuis le modal) ou ceux de la page principale
+      const scheduleCronExpression = config.cronExpression || cronExpression;
+      const scheduleTimezone = config.timezone || timezone;
+
       await createPDFExportJob({
         name: config.jobName.trim(),
         projectId: selectedProject,
@@ -706,8 +710,8 @@ export default function PlanningPage() {
         fileUrn,
         fileName,
         scheduleEnabled: true,
-        cronExpression,
-        timezone,
+        cronExpression: scheduleCronExpression,
+        timezone: scheduleTimezone,
         selectionMode: config.mode,
         selectedSheets: sheetsForJob,
         includeSheets: config.options?.includeSheets !== false,
@@ -1301,103 +1305,112 @@ export default function PlanningPage() {
                 }}
               />
 
-              <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                    Heure de publication
-                  </label>
-                  <select
-                    value={selectedHour}
-                    onChange={(e) => setSelectedHour(e.target.value)}
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: '1px solid rgba(148, 163, 184, 0.3)',
-                      background: 'rgba(248, 250, 252, 0.9)',
-                      fontSize: 14,
-                      outline: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {HOUR_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 220px', minWidth: 220 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                    Fuseau horaire
-                  </label>
-                  <select
-                    value={timezone}
-                    onChange={(e) => setTimezone(e.target.value)}
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: '1px solid rgba(148, 163, 184, 0.3)',
-                      background: 'rgba(248, 250, 252, 0.9)',
-                      fontSize: 14,
-                      outline: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {timezoneOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span style={{ fontSize: 12, color: '#64748b' }}>
-                    Fuseau détecté : <strong>{DEFAULT_TIMEZONE}</strong>
-                  </span>
-                </div>
-              </div>
-
               {jobType !== null && (
-                <div
-                  style={{
-                    padding: 16,
-                    background: 'rgba(239, 246, 255, 0.5)',
-                    borderRadius: 10,
-                    border: '1px solid rgba(37, 99, 235, 0.2)',
-                    marginBottom: 16,
-                  }}
-                >
-                  <label
+                <>
+                  <div
                     style={{
-                      display: 'block',
-                      marginBottom: 8,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: '#475569',
+                      padding: 16,
+                      background: 'rgba(239, 246, 255, 0.5)',
+                      borderRadius: 10,
+                      border: '1px solid rgba(37, 99, 235, 0.2)',
+                      marginBottom: 16,
                     }}
                   >
-                    📝 Nom de la tâche
-                  </label>
-                  <input
-                    type="text"
-                    value={jobName}
-                    onChange={(e) => setJobName(e.target.value)}
-                    placeholder={
-                      jobType === 'publish'
-                        ? 'Ex: Publish Revit - Quotidien'
-                        : 'Ex: Export PDF - Architecte'
-                    }
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: '1px solid rgba(148, 163, 184, 0.3)',
-                      background: 'rgba(248, 250, 252, 0.9)',
-                      fontSize: 14,
-                      outline: 'none',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
+                    <label
+                      style={{
+                        display: 'block',
+                        marginBottom: 8,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                      }}
+                    >
+                      📝 Nom de la tâche
+                    </label>
+                    <input
+                      type="text"
+                      value={jobName}
+                      onChange={(e) => setJobName(e.target.value)}
+                      placeholder={
+                        jobType === 'publish'
+                          ? 'Ex: Publish Revit - Quotidien'
+                          : 'Ex: Export PDF - Architecte'
+                      }
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        border: '1px solid rgba(148, 163, 184, 0.3)',
+                        background: 'rgba(248, 250, 252, 0.9)',
+                        fontSize: 14,
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+
+                  {jobType === 'publish' && (
+                    <div style={{ marginBottom: 16 }}>
+                      <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+                        🕐 Planification
+                      </h4>
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                            Heure de publication
+                          </label>
+                          <select
+                            value={selectedHour}
+                            onChange={(e) => setSelectedHour(e.target.value)}
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: 10,
+                              border: '1px solid rgba(148, 163, 184, 0.3)',
+                              background: 'rgba(248, 250, 252, 0.9)',
+                              fontSize: 14,
+                              outline: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {HOUR_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 220px', minWidth: 220 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                            Fuseau horaire
+                          </label>
+                          <select
+                            value={timezone}
+                            onChange={(e) => setTimezone(e.target.value)}
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: 10,
+                              border: '1px solid rgba(148, 163, 184, 0.3)',
+                              background: 'rgba(248, 250, 252, 0.9)',
+                              fontSize: 14,
+                              outline: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {timezoneOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <span style={{ fontSize: 12, color: '#64748b' }}>
+                            Fuseau détecté : <strong>{DEFAULT_TIMEZONE}</strong>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               <div style={{ display: 'flex', gap: 12 }}>
@@ -1427,10 +1440,15 @@ export default function PlanningPage() {
                         setJobType('pdf-export');
                         setShowPDFModal(true);
                       }}
+                      disabled={Object.keys(selectedItems).length > 1}
                       style={{
                         padding: '12px 24px',
                         flex: 1,
-                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        background: Object.keys(selectedItems).length > 1
+                          ? 'rgba(148, 163, 184, 0.3)'
+                          : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        opacity: Object.keys(selectedItems).length > 1 ? 0.5 : 1,
+                        cursor: Object.keys(selectedItems).length > 1 ? 'not-allowed' : 'pointer',
                       }}
                     >
                       📄 Créer tâche PDF
@@ -1967,6 +1985,13 @@ export default function PlanningPage() {
             showScheduleButton={true}
             jobName={jobName}
             onJobNameChange={setJobName}
+            selectedHour={selectedHour}
+            setSelectedHour={setSelectedHour}
+            timezone={timezone}
+            setTimezone={setTimezone}
+            hourOptions={HOUR_OPTIONS}
+            timezoneOptions={timezoneOptions}
+            defaultTimezone={DEFAULT_TIMEZONE}
           />
         );
       })()}
