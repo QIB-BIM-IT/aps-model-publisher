@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { exportWithCache } from '../services/api';
 
 function getSheetKey(sheet) {
@@ -20,7 +20,12 @@ export function PDFExportModal({
   onLoadChildren,
   onClose,
   onConfirm,
+  onRunNow,
+  onSchedule,
   isExporting,
+  showScheduleButton = false,
+  jobName: initialJobName = '',
+  onJobNameChange,
 }) {
   // Filtres globaux
   const [includeSheets, setIncludeSheets] = useState(true);
@@ -41,6 +46,15 @@ export function PDFExportModal({
   // Format de sortie
   const [merge, setMerge] = useState(false);
   const [mergedFileName, setMergedFileName] = useState('Documents.pdf');
+  
+  // Nom de la tâche (pour la planification)
+  const [jobName, setJobName] = useState(initialJobName);
+  
+  useEffect(() => {
+    if (onJobNameChange) {
+      onJobNameChange(jobName);
+    }
+  }, [jobName, onJobNameChange]);
 
   // Dossier destination
   const [selectedFolder, setSelectedFolder] = useState(null);
@@ -516,6 +530,31 @@ export function PDFExportModal({
           </div>
         )}
 
+        {/* Nom de la tâche (pour la planification) */}
+        {showScheduleButton && (
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 600, color: '#475569' }}>
+              📝 Nom de la tâche (requis pour la planification)
+            </label>
+            <input
+              type="text"
+              value={jobName}
+              onChange={(e) => setJobName(e.target.value)}
+              placeholder="Ex: Export PDF - Architecte"
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                borderRadius: 10,
+                border: '1px solid rgba(148, 163, 184, 0.3)',
+                background: 'rgba(248, 250, 252, 0.9)',
+                fontSize: 14,
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+        )}
+
         {/* Buttons */}
         <div style={{ display: 'flex', gap: 12 }}>
           <button
@@ -535,26 +574,110 @@ export function PDFExportModal({
           >
             Annuler
           </button>
-          <button
-            onClick={handlePrimaryAction}
-            disabled={isPrimaryDisabled}
-            style={{
-              flex: 1,
-              padding: '12px 16px',
-              borderRadius: 10,
-              border: 'none',
-              background:
-                isPrimaryDisabled
-                  ? 'rgba(148, 163, 184, 0.3)'
-                  : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-              color: '#fff',
-              fontWeight: 600,
-              cursor:
-                isPrimaryDisabled ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {primaryButtonLabel}
-          </button>
+          {showScheduleButton && onRunNow && onSchedule ? (
+            <>
+              <button
+                onClick={() => {
+                  const config = {
+                    folderId: selectedFolder.id,
+                    mode: selectionMode,
+                    customSheets: selectionMode === 'custom' ? selectedSheets : [],
+                    merge,
+                    mergedFileName: merge ? mergedFileName.trim() : null,
+                    cacheKey,
+                    availableSheets,
+                    availableViews2D,
+                    availableMarkups,
+                    options: {
+                      includeSheets,
+                      includeViews2D,
+                      includeMarkups,
+                    },
+                  };
+                  onRunNow(config);
+                }}
+                disabled={isPrimaryDisabled || isExporting}
+                style={{
+                  flex: 1,
+                  padding: '12px 16px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background:
+                    isPrimaryDisabled || isExporting
+                      ? 'rgba(148, 163, 184, 0.3)'
+                      : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                  color: '#fff',
+                  fontWeight: 600,
+                  cursor: isPrimaryDisabled || isExporting ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {isExporting ? '⏳ Export...' : '🚀 Run Now'}
+              </button>
+              <button
+                onClick={() => {
+                  if (!jobName.trim()) {
+                    alert('⚠️ Entre un nom pour la tâche');
+                    return;
+                  }
+                  const config = {
+                    folderId: selectedFolder.id,
+                    mode: selectionMode,
+                    customSheets: selectionMode === 'custom' ? selectedSheets : [],
+                    merge,
+                    mergedFileName: merge ? mergedFileName.trim() : null,
+                    cacheKey,
+                    availableSheets,
+                    availableViews2D,
+                    availableMarkups,
+                    jobName: jobName.trim(),
+                    options: {
+                      includeSheets,
+                      includeViews2D,
+                      includeMarkups,
+                    },
+                  };
+                  onSchedule(config);
+                }}
+                disabled={isPrimaryDisabled || isExporting || !jobName.trim()}
+                style={{
+                  flex: 1,
+                  padding: '12px 16px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background:
+                    isPrimaryDisabled || isExporting
+                      ? 'rgba(148, 163, 184, 0.3)'
+                      : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  color: '#fff',
+                  fontWeight: 600,
+                  cursor: isPrimaryDisabled || isExporting ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {isExporting ? '⏳ Planification...' : '📅 Planifier'}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handlePrimaryAction}
+              disabled={isPrimaryDisabled}
+              style={{
+                flex: 1,
+                padding: '12px 16px',
+                borderRadius: 10,
+                border: 'none',
+                background:
+                  isPrimaryDisabled
+                    ? 'rgba(148, 163, 184, 0.3)'
+                    : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color: '#fff',
+                fontWeight: 600,
+                cursor:
+                  isPrimaryDisabled ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {primaryButtonLabel}
+            </button>
+          )}
         </div>
       </div>
     </div>
