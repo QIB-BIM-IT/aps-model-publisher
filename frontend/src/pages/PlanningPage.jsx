@@ -17,7 +17,9 @@ import api, {
   patchPDFExportJob,
   runPDFExportJobNow,
   getPDFExportRuns,
+  exportPDFsFromCache,
 } from '../services/api';
+import { PDFExportModal } from '../components/PDFExportModal';
 
 // Helpers
 function nameOf(node, fall = '') {
@@ -350,6 +352,10 @@ export default function PlanningPage() {
   const [error, setError] = React.useState('');
   const [toast, setToast] = React.useState('');
 
+  // État pour le modal PDF
+  const [showPDFModal, setShowPDFModal] = React.useState(false);
+  const [isExportingPDF, setIsExportingPDF] = React.useState(false);
+
   const preSelectHub = location.state?.preSelectHub;
   const preSelectProject = location.state?.preSelectProject;
   const highlightJobId = location.state?.highlightJobId;
@@ -587,7 +593,70 @@ export default function PlanningPage() {
     []
   );
 
-  async function handleCreatePDFExportJob() {
+  // Fonction pour exporter immédiatement (Run Now)
+  async function handleRunNowPDF(config) {
+    const selectedFile = Object.values(selectedItems)[0];
+    if (!selectedFile || !selectedProject) {
+      setToast('⚠️ Sélectionne une maquette et un projet');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    if (!config.cacheKey) {
+      setToast('⚠️ Cache expiré, recharge les sheets');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    if (!config.folderId) {
+      setToast('⚠️ Sélectionne un dossier de destination');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    const selectedSheetNames =
+      config.mode === 'custom'
+        ? config.customSheets.map((s) => s.name || s)
+        : config.availableSheets.map((s) => s.name || s);
+
+    if (selectedSheetNames.length === 0) {
+      setToast('⚠️ Aucune sheet sélectionnée');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    setIsExportingPDF(true);
+    try {
+      const result = await exportPDFsFromCache({
+        cacheKey: config.cacheKey,
+        projectId: selectedProject,
+        folderId: config.folderId,
+        selectedSheetNames,
+        exportMode: config.merge ? 'combined' : 'individual',
+        combinedFileName: config.merge ? config.mergedFileName : undefined,
+      });
+
+      const uploadLabel = config.merge ? 'PDF combiné' : 'PDF(s)';
+      const successMessage =
+        result.failed > 0
+          ? `✅ ${result.uploaded} ${uploadLabel} exporté(s) (${result.failed} échec)`
+          : `✅ ${result.uploaded} ${uploadLabel} exporté(s) vers ACC`;
+
+      setToast(successMessage);
+      setTimeout(() => setToast(''), 5000);
+      setShowPDFModal(false);
+      triggerAutoRefreshWindow();
+      await refreshPdfRuns({ silent: true });
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur export'));
+      setTimeout(() => setToast(''), 5000);
+    } finally {
+      setIsExportingPDF(false);
+    }
+  }
+
+  // Fonction pour planifier la tâche (Schedule)
+  async function handleSchedulePDF(config) {
     const selectedFile = Object.values(selectedItems)[0];
     if (!selectedFile) {
       setToast('⚠️ Sélectionne 1 maquette');
@@ -601,26 +670,14 @@ export default function PlanningPage() {
       return;
     }
 
-    if (!Array.isArray(topFolders) || topFolders.length === 0) {
-      setToast('⚠️ Charge les dossiers ACC');
-      setTimeout(() => setToast(''), 3000);
-      return;
-    }
-
-    if (!jobName.trim()) {
+    if (!config.jobName || !config.jobName.trim()) {
       setToast('⚠️ Donne un nom à la tâche');
       setTimeout(() => setToast(''), 3000);
       return;
     }
 
-    if (pdfSelectionMode === 'custom' && pdfSelectedSheets.length === 0) {
-      setToast('⚠️ Sélectionne au moins une feuille');
-      setTimeout(() => setToast(''), 3000);
-      return;
-    }
-
-    if (pdfExportMode === 'combined' && !pdfMergedFileName.trim()) {
-      setToast('⚠️ Entre un nom pour le PDF fusionné');
+    if (!config.folderId) {
+      setToast('⚠️ Sélectionne un dossier de destination');
       setTimeout(() => setToast(''), 3000);
       return;
     }
@@ -631,53 +688,59 @@ export default function PlanningPage() {
     const projectObj = projects.find((p) => idOf(p) === selectedProject);
     const projectName = nameOf(projectObj, '');
 
+    const selectedFolder = topFolders.find((f) => f.id === config.folderId) ||
+      Array.from(childrenMap.values())
+        .flat()
+        .find((f) => f.id === config.folderId);
+
     try {
-      // Préparer la liste des sheets sélectionnées avec les métadonnées
       const sheetsForJob =
-        pdfSelectionMode === 'custom'
-          ? pdfAvailableSheets.filter((s) => pdfSelectedSheets.includes(s.name))
-          : [];
+        config.mode === 'custom' ? config.customSheets : [];
 
       await createPDFExportJob({
-        name: jobName.trim(),
+        name: config.jobName.trim(),
         projectId: selectedProject,
         projectName,
-        folderId: topFolders[0]?.id || '',
-        folderName: topFolders[0]?.attributes?.displayName || '',
+        folderId: config.folderId,
+        folderName: selectedFolder?.attributes?.displayName || selectedFolder?.name || '',
         fileUrn,
         fileName,
         scheduleEnabled: true,
         cronExpression,
         timezone,
-        selectionMode: pdfSelectionMode,
+        selectionMode: config.mode,
         selectedSheets: sheetsForJob,
-        includeSheets: true,
-        includeViews2D: true,
-        includeMarkups: true,
-        exportMode: pdfExportMode,
-        mergedFileName:
-          pdfExportMode === 'combined' ? pdfMergedFileName.trim() : null,
+        includeSheets: config.options?.includeSheets !== false,
+        includeViews2D: config.options?.includeViews2D !== false,
+        includeMarkups: config.options?.includeMarkups !== false,
+        exportMode: config.merge ? 'combined' : 'individual',
+        mergedFileName: config.merge ? config.mergedFileName : null,
         notifyOnFailure: true,
       });
 
-      setToast('✅ Tâche PDF créée!');
+      setToast('✅ Tâche PDF planifiée!');
       setTimeout(() => setToast(''), 3000);
       setJobName('');
       setJobType(null);
-      setSelectedItems({});
-      setPdfSelectionMode('all');
-      setPdfSelectedSheets([]);
-      setPdfSheetsLoaded(false);
-      setPdfAvailableSheets([]);
-      setPdfCacheKey(null);
-      setPdfExportMode('individual');
-      setPdfMergedFileName('Documents.pdf');
+      setShowPDFModal(false);
       triggerAutoRefreshWindow();
       await Promise.all([refreshPdfJobs({ silent: true }), refreshPdfRuns({ silent: true })]);
     } catch (e) {
       setToast('❌ ' + (e?.message || 'Erreur'));
       setTimeout(() => setToast(''), 3000);
     }
+  }
+
+  async function handleCreatePDFExportJob() {
+    // Cette fonction n'est plus utilisée directement, mais conservée pour compatibilité
+    // Le modal est maintenant ouvert via le bouton "Créer tâche PDF"
+    const selectedFile = Object.values(selectedItems)[0];
+    if (!selectedFile) {
+      setToast('⚠️ Sélectionne 1 maquette');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+    setShowPDFModal(true);
   }
 
   async function handleCreatePublishJob() {
@@ -1355,8 +1418,14 @@ export default function PlanningPage() {
                     </Button>
                     <Button
                       onClick={() => {
+                        const selectedFile = Object.values(selectedItems)[0];
+                        if (!selectedFile) {
+                          setToast('⚠️ Sélectionne 1 maquette');
+                          setTimeout(() => setToast(''), 3000);
+                          return;
+                        }
                         setJobType('pdf-export');
-                        setJobName('');
+                        setShowPDFModal(true);
                       }}
                       style={{
                         padding: '12px 24px',
@@ -1875,6 +1944,32 @@ export default function PlanningPage() {
         </Card>
         </div>
       </div>
+
+      {/* Modal PDF Export */}
+      {showPDFModal && jobType === 'pdf-export' && (() => {
+        const selectedFile = Object.values(selectedItems)[0];
+        const fileUrn = selectedFile?.publishUrn || selectedFile?.id;
+        return (
+          <PDFExportModal
+            fileUrn={fileUrn}
+            projectId={selectedProject}
+            topFolders={topFolders}
+            childrenMap={childrenMap}
+            onLoadChildren={loadChildren}
+            onClose={() => {
+              setShowPDFModal(false);
+              setJobType(null);
+              setJobName('');
+            }}
+            onRunNow={handleRunNowPDF}
+            onSchedule={handleSchedulePDF}
+            isExporting={isExportingPDF}
+            showScheduleButton={true}
+            jobName={jobName}
+            onJobNameChange={setJobName}
+          />
+        );
+      })()}
     </>
   );
 }
