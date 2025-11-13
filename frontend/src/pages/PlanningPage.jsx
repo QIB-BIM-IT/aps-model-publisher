@@ -357,6 +357,12 @@ export default function PlanningPage() {
   const preselectProjectApplied = React.useRef(false);
   const appliedHighlightJob = React.useRef(null);
 
+  // Définir primarySelectedKey avant les useEffect qui l'utilisent
+  const primarySelectedKey = React.useMemo(() => {
+    const keys = Object.keys(selectedItems);
+    return keys[0] || null;
+  }, [selectedItems]);
+
   React.useEffect(() => {
     appliedHighlightJob.current = null;
     preselectHubApplied.current = false;
@@ -966,11 +972,6 @@ export default function PlanningPage() {
     id,
     name: nameOf(node, id),
   }));
-
-  const primarySelectedKey = React.useMemo(() => {
-    const keys = Object.keys(selectedItems);
-    return keys[0] || null;
-  }, [selectedItems]);
 
   const filteredProjects = React.useMemo(() => {
     const sorted = [...projects].sort((a, b) => {
