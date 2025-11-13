@@ -31,7 +31,7 @@ export default function Login() {
     }
     try {
       const data = await me();
-      if (!data?.token) {
+      if (!data || data?.success === false) {
         clearToken();
         setHasToken(false);
       } else {
