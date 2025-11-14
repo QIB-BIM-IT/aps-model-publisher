@@ -129,6 +129,36 @@ const DEFAULT_TIMEZONE =
     ? Intl.DateTimeFormat().resolvedOptions().timeZone
     : 'UTC';
 
+const DAY_OF_WEEK_OPTIONS = [
+  { value: 0, label: 'Dimanche' },
+  { value: 1, label: 'Lundi' },
+  { value: 2, label: 'Mardi' },
+  { value: 3, label: 'Mercredi' },
+  { value: 4, label: 'Jeudi' },
+  { value: 5, label: 'Vendredi' },
+  { value: 6, label: 'Samedi' },
+];
+
+/**
+ * Génère une expression cron selon la récurrence choisie
+ * @param {string} recurrenceType - 'daily' ou 'weekly'
+ * @param {string} hour - Format 'HH:MM'
+ * @param {number} dayOfWeek - 0-6 (0=dimanche, 6=samedi)
+ * @returns {string} Expression cron
+ */
+function generateCronExpression(recurrenceType, hour, dayOfWeek = 1) {
+  const [hourStr, minuteStr] = hour.split(':');
+  const minute = minuteStr || '0';
+  
+  if (recurrenceType === 'weekly') {
+    // Format: minute hour * * dayOfWeek
+    return `${minute} ${hourStr} * * ${dayOfWeek}`;
+  } else {
+    // Format: minute hour * * * (daily)
+    return `${minute} ${hourStr} * * *`;
+  }
+}
+
 // Tree Node avec style moderne
 function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onToggleSelect }) {
   const [expanded, setExpanded] = React.useState(false);
@@ -349,6 +379,8 @@ export default function PlanningPage() {
   const [selectedHour, setSelectedHour] = React.useState('02:00');
   const [cronExpression, setCronExpression] = React.useState('0 2 * * *');
   const [timezone, setTimezone] = React.useState(DEFAULT_TIMEZONE);
+  const [recurrenceType, setRecurrenceType] = React.useState('daily'); // 'daily' ou 'weekly'
+  const [selectedDayOfWeek, setSelectedDayOfWeek] = React.useState(1); // 0=dimanche, 1=lundi, ..., 6=samedi
   const [error, setError] = React.useState('');
   const [toast, setToast] = React.useState('');
 
@@ -376,9 +408,8 @@ export default function PlanningPage() {
   }, [location.key]);
 
   React.useEffect(() => {
-    const [hour, minute] = selectedHour.split(':');
-    setCronExpression(`${minute} ${hour} * * *`);
-  }, [selectedHour]);
+    setCronExpression(generateCronExpression(recurrenceType, selectedHour, selectedDayOfWeek));
+  }, [selectedHour, recurrenceType, selectedDayOfWeek]);
 
   async function loadHubs() {
     setLoadingHubs(true);
@@ -614,10 +645,17 @@ export default function PlanningPage() {
       return;
     }
 
+    // Validation des sheets disponibles
+    if (!config.availableSheets || !Array.isArray(config.availableSheets) || config.availableSheets.length === 0) {
+      setToast('⚠️ Aucune sheet disponible, recharge les sheets');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
     const selectedSheetNames =
       config.mode === 'custom'
-        ? config.customSheets.map((s) => s.name || s)
-        : config.availableSheets.map((s) => s.name || s);
+        ? (config.customSheets || []).map((s) => (typeof s === 'string' ? s : s.name || s)).filter(Boolean)
+        : (config.availableSheets || []).map((s) => (typeof s === 'string' ? s : s.name || s)).filter(Boolean);
 
     if (selectedSheetNames.length === 0) {
       setToast('⚠️ Aucune sheet sélectionnée');
@@ -644,12 +682,21 @@ export default function PlanningPage() {
 
       setToast(successMessage);
       setTimeout(() => setToast(''), 5000);
-      setShowPDFModal(false);
+      
+      // Ne pas fermer le modal automatiquement pour permettre un autre export
+      // L'utilisateur peut fermer manuellement s'il le souhaite
       triggerAutoRefreshWindow();
       await refreshPdfRuns({ silent: true });
     } catch (e) {
-      setToast('❌ ' + (e?.message || 'Erreur export'));
-      setTimeout(() => setToast(''), 5000);
+      const errorMessage = e?.message || 'Erreur export';
+      // Détecter si c'est une erreur de cache expiré
+      if (errorMessage.toLowerCase().includes('cache') || errorMessage.toLowerCase().includes('expiré') || errorMessage.toLowerCase().includes('invalid')) {
+        setToast('⚠️ Cache expiré, recharge les sheets dans le modal');
+        setTimeout(() => setToast(''), 5000);
+      } else {
+        setToast('❌ ' + errorMessage);
+        setTimeout(() => setToast(''), 5000);
+      }
     } finally {
       setIsExportingPDF(false);
     }
@@ -697,8 +744,13 @@ export default function PlanningPage() {
       const sheetsForJob =
         config.mode === 'custom' ? config.customSheets : [];
 
-      // Utiliser le cronExpression et timezone du config (depuis le modal) ou ceux de la page principale
-      const scheduleCronExpression = config.cronExpression || cronExpression;
+      // Utiliser la récurrence du config (depuis le modal) ou celle de la page principale
+      const scheduleRecurrenceType = config.recurrenceType || recurrenceType;
+      const scheduleDayOfWeek = config.selectedDayOfWeek !== undefined ? config.selectedDayOfWeek : selectedDayOfWeek;
+      const scheduleHour = config.selectedHour || selectedHour;
+      
+      // Générer l'expression cron selon la récurrence
+      const scheduleCronExpression = generateCronExpression(scheduleRecurrenceType, scheduleHour, scheduleDayOfWeek);
       const scheduleTimezone = config.timezone || timezone;
 
       await createPDFExportJob({
@@ -1354,7 +1406,64 @@ export default function PlanningPage() {
                       <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
                         🕐 Planification
                       </h4>
+                      
+                      {/* Type de récurrence */}
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4, display: 'block', marginBottom: 8 }}>
+                          Récurrence
+                        </label>
+                        <div style={{ display: 'flex', gap: 12 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              name="recurrence-publish"
+                              checked={recurrenceType === 'daily'}
+                              onChange={() => setRecurrenceType('daily')}
+                              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                            />
+                            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>📅 Quotidien</span>
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              name="recurrence-publish"
+                              checked={recurrenceType === 'weekly'}
+                              onChange={() => setRecurrenceType('weekly')}
+                              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                            />
+                            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>📆 Hebdomadaire</span>
+                          </label>
+                        </div>
+                      </div>
+
                       <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
+                        {recurrenceType === 'weekly' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
+                            <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                              Jour de la semaine
+                            </label>
+                            <select
+                              value={selectedDayOfWeek}
+                              onChange={(e) => setSelectedDayOfWeek(Number(e.target.value))}
+                              style={{
+                                padding: '10px 14px',
+                                borderRadius: 10,
+                                border: '1px solid rgba(148, 163, 184, 0.3)',
+                                background: 'rgba(248, 250, 252, 0.9)',
+                                fontSize: 14,
+                                outline: 'none',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {DAY_OF_WEEK_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
                           <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
                             Heure de publication
@@ -1989,8 +2098,13 @@ export default function PlanningPage() {
             setSelectedHour={setSelectedHour}
             timezone={timezone}
             setTimezone={setTimezone}
+            recurrenceType={recurrenceType}
+            setRecurrenceType={setRecurrenceType}
+            selectedDayOfWeek={selectedDayOfWeek}
+            setSelectedDayOfWeek={setSelectedDayOfWeek}
             hourOptions={HOUR_OPTIONS}
             timezoneOptions={timezoneOptions}
+            dayOfWeekOptions={DAY_OF_WEEK_OPTIONS}
             defaultTimezone={DEFAULT_TIMEZONE}
           />
         );

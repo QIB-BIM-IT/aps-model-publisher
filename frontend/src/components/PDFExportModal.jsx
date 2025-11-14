@@ -30,8 +30,13 @@ export function PDFExportModal({
   setSelectedHour,
   timezone: initialTimezone = 'UTC',
   setTimezone,
+  recurrenceType: initialRecurrenceType = 'daily',
+  setRecurrenceType,
+  selectedDayOfWeek: initialSelectedDayOfWeek = 1,
+  setSelectedDayOfWeek,
   hourOptions = [],
   timezoneOptions = [],
+  dayOfWeekOptions = [],
   defaultTimezone = 'UTC',
 }) {
   // Options d'export
@@ -556,7 +561,72 @@ export function PDFExportModal({
             <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
               🕐 Planification
             </h4>
+            
+            {/* Type de récurrence */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4, display: 'block', marginBottom: 8 }}>
+                Récurrence
+              </label>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="recurrence-pdf"
+                    checked={initialRecurrenceType === 'daily'}
+                    onChange={() => setRecurrenceType && setRecurrenceType('daily')}
+                    style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                  />
+                  <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>📅 Quotidien</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="recurrence-pdf"
+                    checked={initialRecurrenceType === 'weekly'}
+                    onChange={() => setRecurrenceType && setRecurrenceType('weekly')}
+                    style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                  />
+                  <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>📆 Hebdomadaire</span>
+                </label>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap', marginBottom: 16 }}>
+              {initialRecurrenceType === 'weekly' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                    Jour de la semaine
+                  </label>
+                  <select
+                    value={initialSelectedDayOfWeek}
+                    onChange={(e) => setSelectedDayOfWeek && setSelectedDayOfWeek(Number(e.target.value))}
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(148, 163, 184, 0.3)',
+                      background: 'rgba(248, 250, 252, 0.9)',
+                      fontSize: 14,
+                      outline: 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {(dayOfWeekOptions.length > 0 ? dayOfWeekOptions : [
+                      { value: 0, label: 'Dimanche' },
+                      { value: 1, label: 'Lundi' },
+                      { value: 2, label: 'Mardi' },
+                      { value: 3, label: 'Mercredi' },
+                      { value: 4, label: 'Jeudi' },
+                      { value: 5, label: 'Vendredi' },
+                      { value: 6, label: 'Samedi' },
+                    ]).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
                 <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
                   Heure de publication
@@ -701,9 +771,19 @@ export function PDFExportModal({
                     alert('⚠️ Entre un nom pour la tâche');
                     return;
                   }
-                  // Calculer le cronExpression à partir de l'heure sélectionnée
-                  const [hour, minute] = initialSelectedHour.split(':');
-                  const cronExpression = `${minute} ${hour} * * *`;
+                  
+                  // Fonction pour générer l'expression cron
+                  const generateCron = (recurrenceType, hour, dayOfWeek = 1) => {
+                    const [hourStr, minuteStr] = hour.split(':');
+                    const minute = minuteStr || '0';
+                    if (recurrenceType === 'weekly') {
+                      return `${minute} ${hourStr} * * ${dayOfWeek}`;
+                    } else {
+                      return `${minute} ${hourStr} * * *`;
+                    }
+                  };
+                  
+                  const cronExpression = generateCron(initialRecurrenceType, initialSelectedHour, initialSelectedDayOfWeek);
                   
                   const config = {
                     folderId: selectedFolder.id,
@@ -716,6 +796,9 @@ export function PDFExportModal({
                     availableMarkups,
                     jobName: jobName.trim(),
                     cronExpression,
+                    recurrenceType: initialRecurrenceType,
+                    selectedDayOfWeek: initialSelectedDayOfWeek,
+                    selectedHour: initialSelectedHour,
                     timezone: initialTimezone,
                     options: {
                       includeSheets: true,
