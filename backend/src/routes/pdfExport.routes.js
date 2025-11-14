@@ -300,10 +300,19 @@ router.post('/export-with-cache', asyncHandler(async (req, res) => {
 
     logger.info(`[ExportWithCache] Job lancé: ${jobId}`);
 
-    const jobResult = await accExportService.waitForJobCompletion(jobId, userToken);
+    let jobResult;
+    try {
+      jobResult = await accExportService.waitForJobCompletion(jobId, userToken);
+    } catch (error) {
+      logger.error(`[ExportWithCache] ❌ Erreur lors de l'attente du job: ${error.message}`);
+      logger.error(`[ExportWithCache] Stack: ${error.stack}`);
+      throw error;
+    }
 
     const jobStatus = jobResult?.status;
     if (jobStatus && jobStatus !== 'successful' && jobStatus !== 'partialSuccess') {
+      logger.error(`[ExportWithCache] ❌ Job terminé avec status invalide: ${jobStatus}`);
+      logger.error(`[ExportWithCache] jobResult: ${JSON.stringify(jobResult, null, 2)}`);
       throw new Error(`Export échoué: ${jobStatus}`);
     }
 
