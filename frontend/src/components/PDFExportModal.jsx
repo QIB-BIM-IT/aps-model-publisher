@@ -126,7 +126,25 @@ export function PDFExportModal({
       }, 800);
     } catch (error) {
       console.error('Erreur chargement sheets:', error);
-      const errorMessage = error?.message || error?.response?.data?.message || 'Impossible de charger les sheets';
+      let errorMessage = error?.message || error?.response?.data?.message || 'Impossible de charger les sheets';
+      
+      // Améliorer le message si c'est une erreur de sheets non disponibles ou de format URN
+      if (errorMessage.includes('ERR_NO_PROCESSABLE_FILES') || 
+          errorMessage.includes('Aucune sheet publiée') ||
+          errorMessage.includes('Vérifiez que la maquette')) {
+        // Extraire seulement la partie utile du message (à partir de "Vérifiez")
+        let displayMessage = errorMessage;
+        const verifiezIndex = errorMessage.indexOf('Vérifiez');
+        if (verifiezIndex !== -1) {
+          displayMessage = errorMessage.substring(verifiezIndex);
+        }
+        // S'assurer qu'il y a un emoji warning
+        if (!displayMessage.startsWith('⚠️')) {
+          displayMessage = '⚠️ ' + displayMessage;
+        }
+        errorMessage = displayMessage;
+      }
+      
       alert(errorMessage);
       setHasSheetsLoaded(false);
       lastLoadedFileUrnRef.current = null;

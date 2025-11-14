@@ -76,9 +76,14 @@ export default function GlobalDashboard() {
 
   function handleJobClick(job, jobType) {
     if (!job) return;
+    
+    // Utiliser hubId s'il existe (pour publish et pdf si disponible)
+    // Sinon, passer null et PlanningPage devra trouver le hub depuis le projet
+    const hubId = job.hubId || null;
+    
     navigate('/planning', {
       state: {
-        preSelectHub: jobType === 'publish' ? job.hubId : null,
+        preSelectHub: hubId,
         preSelectProject: job.projectId,
         highlightJobId: job.id,
         preSelectJobType: jobType,
@@ -450,8 +455,9 @@ export default function GlobalDashboard() {
                         borderRadius: 4,
                         fontSize: 10,
                         fontWeight: 600,
-                        background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(34, 197, 94, 0.25)',
-                        color: isPublish ? '#1d4ed8' : '#16a34a'
+                        background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.4)',
+                        color: isPublish ? '#1d4ed8' : '#059669',
+                        border: isPublish ? 'none' : '1px solid rgba(16, 185, 129, 0.3)'
                       }}>
                         {isPublish ? '🚀' : '📄'}
                       </span>
@@ -510,12 +516,13 @@ export default function GlobalDashboard() {
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'center', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
                           <span style={{
-                            padding: '3px 8px',
-                            borderRadius: 4,
+                            padding: '4px 10px',
+                            borderRadius: 6,
                             fontSize: 11,
                             fontWeight: 600,
-                            background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(34, 197, 94, 0.25)',
-                            color: isPublish ? '#1d4ed8' : '#16a34a'
+                            background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.4)',
+                            color: isPublish ? '#1d4ed8' : '#059669',
+                            border: isPublish ? 'none' : '1px solid rgba(16, 185, 129, 0.3)'
                           }}>
                             {isPublish ? '🚀 Publish' : '📄 PDF'}
                           </span>

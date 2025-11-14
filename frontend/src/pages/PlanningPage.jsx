@@ -421,9 +421,36 @@ export default function PlanningPage() {
       setHubs(data);
       if (data.length) {
         if (preSelectHub && data.some((hub) => idOf(hub) === preSelectHub)) {
+          // Hub pré-sélectionné trouvé
           setSelectedHub(preSelectHub);
           preselectHubApplied.current = true;
+        } else if (!preSelectHub && preSelectProject) {
+          // Pas de hub pré-sélectionné mais un projet oui : chercher le hub qui contient ce projet
+          // Commencer avec le premier hub pour ne pas bloquer l'UI
+          setSelectedHub(idOf(data[0]));
+          
+          // Chercher le bon hub en arrière-plan
+          (async () => {
+            let foundHub = null;
+            for (const hub of data) {
+              try {
+                const projects = await fetchProjects(idOf(hub));
+                if (projects.some((p) => idOf(p) === preSelectProject)) {
+                  foundHub = idOf(hub);
+                  break;
+                }
+              } catch (e) {
+                // Continuer avec le hub suivant si erreur
+                console.warn(`Erreur lors de la recherche du projet dans le hub ${idOf(hub)}:`, e);
+              }
+            }
+            if (foundHub) {
+              setSelectedHub(foundHub);
+              preselectHubApplied.current = true;
+            }
+          })();
         } else {
+          // Aucune pré-sélection : premier hub
           setSelectedHub(idOf(data[0]));
         }
       }
@@ -688,12 +715,31 @@ export default function PlanningPage() {
       triggerAutoRefreshWindow();
       await refreshPdfRuns({ silent: true });
     } catch (e) {
-      const errorMessage = e?.message || 'Erreur export';
+      let errorMessage = e?.message || 'Erreur export';
+      
       // Détecter si c'est une erreur de cache expiré
       if (errorMessage.toLowerCase().includes('cache') || errorMessage.toLowerCase().includes('expiré') || errorMessage.toLowerCase().includes('invalid')) {
         setToast('⚠️ Cache expiré, recharge les sheets dans le modal');
         setTimeout(() => setToast(''), 5000);
-      } else {
+      } 
+      // Détecter si c'est une erreur de sheets non disponibles ou de format URN
+      else if (errorMessage.includes('ERR_NO_PROCESSABLE_FILES') || 
+               errorMessage.includes('Aucune sheet publiée') ||
+               errorMessage.includes('Vérifiez que la maquette')) {
+        // Extraire seulement la partie utile du message (à partir de "Vérifiez")
+        let displayMessage = errorMessage;
+        const verifiezIndex = errorMessage.indexOf('Vérifiez');
+        if (verifiezIndex !== -1) {
+          displayMessage = errorMessage.substring(verifiezIndex);
+        }
+        // S'assurer qu'il y a un emoji warning
+        if (!displayMessage.startsWith('⚠️')) {
+          displayMessage = '⚠️ ' + displayMessage;
+        }
+        setToast(displayMessage);
+        setTimeout(() => setToast(''), 7000);
+      } 
+      else {
         setToast('❌ ' + errorMessage);
         setTimeout(() => setToast(''), 5000);
       }
@@ -1709,17 +1755,17 @@ export default function PlanningPage() {
                       const badgeStyles = !j.scheduleEnabled
                         ? { background: 'rgba(148, 163, 184, 0.2)', color: '#475569' }
                         : j.status === 'running'
-                        ? { background: 'rgba(52, 211, 153, 0.2)', color: '#047857' }
-                        : { background: 'rgba(16, 185, 129, 0.18)', color: '#047857' };
+                        ? { background: 'rgba(52, 211, 153, 0.35)', color: '#047857', border: '1px solid rgba(52, 211, 153, 0.4)' }
+                        : { background: 'rgba(16, 185, 129, 0.35)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.4)' };
 
                       return (
                         <div
                           key={j.id}
                           style={{
                             padding: '10px 12px',
-                            background: 'rgba(16, 185, 129, 0.08)',
+                            background: 'rgba(16, 185, 129, 0.12)',
                             borderRadius: 8,
-                            border: '1px solid rgba(16, 185, 129, 0.2)',
+                            border: '1px solid rgba(16, 185, 129, 0.35)',
                             fontSize: 13,
                             display: 'flex',
                             flexDirection: 'column',
@@ -1967,7 +2013,17 @@ export default function PlanningPage() {
                             {r.jobName || r.name || `Job ${jobIdShort}`}
                           </div>
                           <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', gap: 6, alignItems: 'center' }}>
-                            <span>{r.jobType === 'pdf-export' ? '📄 PDF' : '🚀 Publish'}</span>
+                            <span style={{
+                              padding: '2px 6px',
+                              borderRadius: 4,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              background: r.jobType === 'pdf-export' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.15)',
+                              color: r.jobType === 'pdf-export' ? '#059669' : '#1d4ed8',
+                              border: r.jobType === 'pdf-export' ? '1px solid rgba(16, 185, 129, 0.3)' : 'none'
+                            }}>
+                              {r.jobType === 'pdf-export' ? '📄 PDF' : '🚀 Publish'}
+                            </span>
                             <span style={{ fontFamily: 'monospace' }}>{jobIdShort}</span>
                           </div>
                         </td>
