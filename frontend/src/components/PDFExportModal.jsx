@@ -63,6 +63,8 @@ export function PDFExportModal({
   // Dossier destination
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [hasSheetsLoaded, setHasSheetsLoaded] = useState(false);
+  const lastLoadedFileUrnRef = React.useRef(null);
+  const loadingRef = React.useRef(false);
 
   const selectedSheets = useMemo(() => {
     if (selectionMode !== 'custom') return [];
@@ -76,6 +78,12 @@ export function PDFExportModal({
       return;
     }
 
+    // Éviter les appels multiples simultanés
+    if (loadingRef.current) {
+      return;
+    }
+
+    loadingRef.current = true;
     setLoadingSheets(true);
     setLoadingProgress(0);
 
@@ -104,6 +112,7 @@ export function PDFExportModal({
       const keys = sheets.map((s) => getSheetKey(s)).filter(Boolean);
       setSelectedSheetKeys(keys);
       setHasSheetsLoaded(true);
+      lastLoadedFileUrnRef.current = fileUrn;
 
       setLoadingProgress(100);
 
@@ -112,23 +121,45 @@ export function PDFExportModal({
       }, 800);
     } catch (error) {
       console.error('Erreur chargement sheets:', error);
-      alert(error?.message || 'Impossible de charger les sheets');
+      const errorMessage = error?.message || error?.response?.data?.message || 'Impossible de charger les sheets';
+      alert(errorMessage);
       setHasSheetsLoaded(false);
+      lastLoadedFileUrnRef.current = null;
       setLoadingProgress(0);
     } finally {
       if (progressInterval) {
         clearInterval(progressInterval);
       }
       setLoadingSheets(false);
+      loadingRef.current = false;
     }
   }, [fileUrn, projectId]);
 
   // Charger automatiquement les sheets quand le modal s'ouvre
   useEffect(() => {
-    if (fileUrn && !hasSheetsLoaded && !loadingSheets) {
+    // Réinitialiser l'état quand le modal se ferme (pas de fileUrn)
+    if (!fileUrn) {
+      setHasSheetsLoaded(false);
+      setAvailableSheets([]);
+      setSelectedSheetKeys([]);
+      setCacheKey(null);
+      lastLoadedFileUrnRef.current = null;
+      setSelectedFolder(null);
+      loadingRef.current = false;
+      return;
+    }
+
+    // Charger seulement si :
+    // 1. Le fichier a changé OU
+    // 2. Les sheets n'ont jamais été chargés pour ce fichier
+    const fileChanged = lastLoadedFileUrnRef.current !== fileUrn;
+    const needsLoad = !hasSheetsLoaded || fileChanged;
+
+    if (needsLoad && !loadingSheets && !loadingRef.current) {
       handleLoadSheets();
     }
-  }, [fileUrn, hasSheetsLoaded, loadingSheets, handleLoadSheets]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileUrn]); // Seulement dépendre de fileUrn pour éviter les boucles
 
   const handleExport = () => {
     if (!selectedFolder) {

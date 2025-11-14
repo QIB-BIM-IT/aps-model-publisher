@@ -1560,7 +1560,7 @@ export default function PlanningPage() {
                               disabled={j.status === 'running'}
                               style={{ padding: '6px 12px', fontSize: 12 }}
                             >
-                              🚀 Lancer
+                              🚀 Run Now
                             </Button>
                             <Button
                               variant="danger"
@@ -1650,7 +1650,7 @@ export default function PlanningPage() {
                               disabled={j.status === 'running'}
                               style={{ padding: '6px 12px', fontSize: 12 }}
                             >
-                              🚀 Lancer
+                              🚀 Run Now
                             </Button>
                             <Button
                               variant="danger"
