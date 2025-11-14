@@ -381,6 +381,7 @@ export default function PlanningPage() {
   const [timezone, setTimezone] = React.useState(DEFAULT_TIMEZONE);
   const [recurrenceType, setRecurrenceType] = React.useState('daily'); // 'daily' ou 'weekly'
   const [selectedDayOfWeek, setSelectedDayOfWeek] = React.useState(1); // 0=dimanche, 1=lundi, ..., 6=samedi
+  const [notifyOnFailure, setNotifyOnFailure] = React.useState(false); // Notification email en cas d'échec (décochée par défaut)
   const [error, setError] = React.useState('');
   const [toast, setToast] = React.useState('');
 
@@ -817,7 +818,7 @@ export default function PlanningPage() {
         includeMarkups: config.options?.includeMarkups !== false,
         exportMode: config.merge ? 'combined' : 'individual',
         mergedFileName: config.merge ? config.mergedFileName : null,
-        notifyOnFailure: true,
+        notifyOnFailure: config.notifyOnFailure !== undefined ? config.notifyOnFailure : notifyOnFailure,
       });
 
       setToast('✅ Tâche PDF planifiée!');
@@ -875,7 +876,7 @@ export default function PlanningPage() {
         scheduleEnabled: true,
         cronExpression,
         timezone,
-        notifyOnFailure: true,
+        notifyOnFailure: notifyOnFailure,
       });
       setToast('✅ Tâche Publish créée!');
       setTimeout(() => setToast(''), 3000);
@@ -1563,6 +1564,24 @@ export default function PlanningPage() {
                           </span>
                         </div>
                       </div>
+
+                      {/* Notification email */}
+                      <div style={{ marginTop: 16 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={notifyOnFailure}
+                            onChange={(e) => setNotifyOnFailure(e.target.checked)}
+                            style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#2563eb' }}
+                          />
+                          <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
+                            📧 Notification par courriel en cas d'échec
+                          </span>
+                        </label>
+                        <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4, marginLeft: 26 }}>
+                          Recevoir un email avec les détails de l'erreur si la tâche échoue
+                        </p>
+                      </div>
                     </div>
                   )}
                 </>
@@ -2162,6 +2181,8 @@ export default function PlanningPage() {
             timezoneOptions={timezoneOptions}
             dayOfWeekOptions={DAY_OF_WEEK_OPTIONS}
             defaultTimezone={DEFAULT_TIMEZONE}
+            notifyOnFailure={notifyOnFailure}
+            setNotifyOnFailure={setNotifyOnFailure}
           />
         );
       })()}
