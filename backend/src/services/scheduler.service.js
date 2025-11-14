@@ -6,9 +6,10 @@
 
 const cron = require('node-cron');
 const logger = require('../config/logger');
-const { PublishJob, PublishRun, PDFExportJob, PDFExportRun } = require('../models');
+const { PublishJob, PublishRun, PDFExportJob, PDFExportRun, User } = require('../models');
 const apsPublishService = require('./apsPublish.service');
 const pdfExportSchedulerService = require('./pdfExportScheduler.service');
+const emailService = require('./email.service');
 
 // Map<jobId, CronTask>
 const TASKS = new Map();
@@ -164,9 +165,23 @@ async function runJob(jobId, jobInstance = null, options = {}) {
     logger.info(
       `[Scheduler] Job ${job.id} exécuté (type=${jobType}, status=${finishedRun.status})`
     );
+
+    // Vérifier si le run a échoué (failed, error, ou partial avec des échecs) et envoyer une notification si nécessaire
+    if (finishedRun && (finishedRun.status === 'failed' || finishedRun.status === 'error')) {
+      await sendFailureEmailIfNeeded(job, finishedRun, jobType);
+    } else if (finishedRun && finishedRun.status === 'partial') {
+      // Pour les échecs partiels, vérifier s'il y a des échecs
+      const stats = finishedRun.stats || {};
+      const failCount = stats.failCount || stats.failed || 0;
+      if (failCount > 0) {
+        await sendFailureEmailIfNeeded(job, finishedRun, jobType);
+      }
+    }
+
     return run;
   } catch (e) {
     logger.error(`[Scheduler] Echec job ${jobId}: ${e.message}`);
+    let failedRun = null;
     try {
       if (run) {
         const finishOptions = {
@@ -177,9 +192,9 @@ async function runJob(jobId, jobInstance = null, options = {}) {
         };
 
         if (jobType === 'pdf-export') {
-          await pdfExportSchedulerService.finishRun(run, finishOptions);
+          failedRun = await pdfExportSchedulerService.finishRun(run, finishOptions);
         } else {
-          await apsPublishService.finishRun(run, finishOptions);
+          failedRun = await apsPublishService.finishRun(run, finishOptions);
         }
       }
     } catch {}
@@ -194,6 +209,11 @@ async function runJob(jobId, jobInstance = null, options = {}) {
         await job.save();
       }
     } catch {}
+
+    // Envoyer une notification d'échec si nécessaire
+    if (failedRun) {
+      await sendFailureEmailIfNeeded(job, failedRun, jobType);
+    }
 
     return run;
   } finally {
@@ -309,6 +329,72 @@ async function init() {
     logger.info(`[Scheduler] ${pdfJobs.length} PDFExportJob(s) planifié(s) au démarrage`);
   } catch (e) {
     logger.error(`[Scheduler] Erreur init PDFExportJobs: ${e.message}`);
+  }
+}
+
+/**
+ * Envoie un email de notification si la tâche a échoué et que les notifications sont activées
+ */
+async function sendFailureEmailIfNeeded(job, run, jobType) {
+  try {
+    // Vérifier si les notifications sont activées pour cet échec
+    if (!job.notifyOnFailure) {
+      logger.debug(`[Scheduler] Notifications désactivées pour job ${job.id}`);
+      return;
+    }
+
+    // Récupérer les destinataires
+    let recipients = [];
+    
+    // Si des destinataires sont spécifiés dans le job, les utiliser
+    if (job.notificationRecipients && Array.isArray(job.notificationRecipients) && job.notificationRecipients.length > 0) {
+      recipients = job.notificationRecipients.filter(email => email && typeof email === 'string');
+    }
+    
+    // Sinon, utiliser l'email de l'utilisateur propriétaire du job
+    if (recipients.length === 0 && job.userId) {
+      const user = await User.findByPk(job.userId);
+      if (user && user.email) {
+        recipients = [user.email];
+      }
+    }
+
+    if (recipients.length === 0) {
+      logger.warn(`[Scheduler] Aucun destinataire trouvé pour notification job ${job.id}`);
+      return;
+    }
+
+    // Préparer les détails du job selon le type
+    const jobDetails = {
+      projectName: job.projectName || 'N/A',
+      hubName: job.hubName || 'N/A',
+    };
+
+    if (jobType === 'pdf-export') {
+      jobDetails.fileName = job.fileName || job.fileUrn || 'N/A';
+      jobDetails.fileUrn = job.fileUrn;
+    }
+
+    // Préparer les détails du run
+    const runDetails = {
+      stats: run.stats || {},
+      results: run.results || [],
+      items: run.items || [],
+    };
+
+    // Envoyer l'email
+    await emailService.sendFailureNotification({
+      jobName: job.name || 'Tâche sans nom',
+      jobType: jobType,
+      jobId: job.id,
+      runId: run.id,
+      errorMessage: run.message || 'Erreur inconnue',
+      runDetails,
+      recipients,
+      jobDetails,
+    });
+  } catch (error) {
+    logger.error(`[Scheduler] Erreur envoi notification email: ${error.message}`);
   }
 }
 

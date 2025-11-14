@@ -54,7 +54,7 @@ function normalizeJobInput(body) {
   
   out.notificationsEnabled = !!body.notificationsEnabled;
   out.notifyOnSuccess = !!body.notifyOnSuccess;
-  out.notifyOnFailure = body.notifyOnFailure !== false;
+  out.notifyOnFailure = !!body.notifyOnFailure;
   out.notificationRecipients = Array.isArray(body.notificationRecipients)
     ? body.notificationRecipients
     : [];
