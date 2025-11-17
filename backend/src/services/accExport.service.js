@@ -221,22 +221,20 @@ class ACCExportService {
     const cleanProjectId = projectId.replace(/^b\./, '');
 
     logger.info(`[ACCExport] projectId nettoyé: ${cleanProjectId}`);
-    logger.info(`[ACCExport] fileUrns (avant nettoyage): ${JSON.stringify(fileUrns)}`);
+    logger.info(`[ACCExport] fileUrns originaux: ${JSON.stringify(fileUrns)}`);
 
-    // Nettoyer les URNs : enlever les query parameters qui pourraient causer des problèmes
+    // Ne PAS nettoyer les URNs - l'API ACC Export requiert le format exact
+    // Formats acceptés:
+    // - urn:adsk.wipprod:fs.file:vf.xxx?version=N (versionedFileUrn) - DOIT inclure ?version=X
+    // - urn:adsk.wipprod:dm.lineage:xxx (lineageUrn) - sans version
     const cleanedFileUrns = fileUrns.map((urn) => {
       if (typeof urn === 'string') {
-        // Enlever les query parameters (tout après ?)
-        const cleaned = urn.split('?')[0];
-        if (cleaned !== urn) {
-          logger.info(`[ACCExport] URN nettoyé: ${urn.substring(0, 80)}... → ${cleaned.substring(0, 80)}...`);
-        }
-        return cleaned;
+        return urn.trim();
       }
       return urn;
     });
 
-    logger.info(`[ACCExport] fileUrns (après nettoyage): ${JSON.stringify(cleanedFileUrns)}`);
+    logger.info(`[ACCExport] fileUrns (après validation): ${JSON.stringify(cleanedFileUrns)}`);
 
     const { includeMarkups = true } = exportOptions;
 
