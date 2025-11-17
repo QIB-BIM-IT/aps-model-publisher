@@ -69,18 +69,31 @@ class PDFExportSchedulerService {
 
       logger.debug(`[PDFExportScheduler] Payload: ${JSON.stringify(payload, null, 2)}`);
 
-      // Appeler /export-and-save
+      // Appeler /export-and-save (requête interne depuis le scheduler)
+      const apiUrl = process.env.API_URL || 'http://localhost:3000';
+      const url = `${apiUrl}/api/pdf-export/export-and-save`;
+      
+      logger.debug(`[PDFExportScheduler] Appel interne vers ${url} avec userId=${run.userId}`);
+      
       const response = await axios.post(
-        `${process.env.API_URL || 'http://localhost:3000'}/api/pdf-export/export-and-save`,
+        url,
         payload,
         {
           headers: {
             'Content-Type': 'application/json',
             'x-user-token': accessToken,
-            Authorization: `Bearer ${await apsAuthService.ensureValidToken(run.userId)}`,
+            'x-internal-request': 'true',
+            'x-user-id': String(run.userId),
           },
+          // S'assurer que les headers sont bien envoyés
+          validateStatus: () => true, // Ne pas throw sur les erreurs HTTP
         }
       );
+      
+      if (response.status === 401) {
+        logger.error(`[PDFExportScheduler] Erreur 401 - Headers envoyés: x-internal-request=true, x-user-id=${run.userId}, x-user-token=${accessToken ? 'présent' : 'absent'}`);
+        throw new Error(`Authentification échouée (401): ${response.data?.message || response.statusText}`);
+      }
 
       const data = response.data;
 

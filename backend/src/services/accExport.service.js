@@ -68,8 +68,40 @@ class ACCExportService {
 
       if (status.status === 'failed') {
         this.jobProjectMap.delete(jobId);
-        const errorMsg = status.error || status.result?.error || 'Erreur inconnue';
+        // Formater l'erreur correctement (peut être un objet ou une string)
+        let errorMsg = 'Erreur inconnue';
+        let errorCode = null;
+        let errorDetail = null;
+        
+        if (status.error) {
+          if (typeof status.error === 'string') {
+            errorMsg = status.error;
+          } else {
+            errorCode = status.error.code || null;
+            errorDetail = status.error.detail || status.error.title || null;
+            errorMsg = status.error.detail || status.error.title || JSON.stringify(status.error);
+          }
+        } else if (status.result?.error) {
+          if (typeof status.result.error === 'string') {
+            errorMsg = status.result.error;
+          } else {
+            errorCode = status.result.error.code || null;
+            errorDetail = status.result.error.detail || status.result.error.title || null;
+            errorMsg = status.result.error.detail || status.result.error.title || JSON.stringify(status.result.error);
+          }
+        }
+        
+        // Logger la réponse complète pour debug
         logger.error(`[ACCExport] ❌ Job échoué: ${errorMsg}`);
+        logger.error(`[ACCExport] Code erreur: ${errorCode || 'N/A'}`);
+        logger.error(`[ACCExport] Détail: ${errorDetail || 'N/A'}`);
+        logger.error(`[ACCExport] Status complet: ${JSON.stringify(status, null, 2)}`);
+        
+        // Message d'erreur plus explicite pour l'utilisateur
+        if (errorCode === 'ERR_NO_PROCESSABLE_FILES') {
+          throw new Error('Aucune sheet publiée disponible pour cette maquette. Assurez-vous que la maquette contient des sheets et qu\'elles ont été publiées sur ACC.');
+        }
+        
         throw new Error(`Export PDF échoué: ${errorMsg}`);
       }
 
@@ -189,7 +221,20 @@ class ACCExportService {
     const cleanProjectId = projectId.replace(/^b\./, '');
 
     logger.info(`[ACCExport] projectId nettoyé: ${cleanProjectId}`);
-    logger.info(`[ACCExport] fileUrns: ${JSON.stringify(fileUrns)}`);
+    logger.info(`[ACCExport] fileUrns originaux: ${JSON.stringify(fileUrns)}`);
+
+    // Ne PAS nettoyer les URNs - l'API ACC Export requiert le format exact
+    // Formats acceptés:
+    // - urn:adsk.wipprod:fs.file:vf.xxx?version=N (versionedFileUrn) - DOIT inclure ?version=X
+    // - urn:adsk.wipprod:dm.lineage:xxx (lineageUrn) - sans version
+    const cleanedFileUrns = fileUrns.map((urn) => {
+      if (typeof urn === 'string') {
+        return urn.trim();
+      }
+      return urn;
+    });
+
+    logger.info(`[ACCExport] fileUrns (après validation): ${JSON.stringify(cleanedFileUrns)}`);
 
     const { includeMarkups = true } = exportOptions;
 
@@ -197,7 +242,7 @@ class ACCExportService {
 
     const body = {
       options: {},
-      fileVersions: fileUrns,
+      fileVersions: cleanedFileUrns,
     };
 
     body.options.standardMarkups = {
@@ -221,11 +266,54 @@ class ACCExportService {
       return response.data;
     } catch (error) {
       if (error.response) {
+        const status = error.response.status;
+        const errorData = error.response.data || {};
+        const errorMessage = errorData.message || errorData.detail || errorData.title || error.response.statusText;
+        const errorCode = errorData.code || errorData.error?.code || null;
+        
         logger.error(
-          `[ACCExport] Erreur API: ${error.response.status} - ${JSON.stringify(error.response.data, null, 2)}`
+          `[ACCExport] Erreur API: ${status} - ${JSON.stringify(errorData, null, 2)}`
         );
+        logger.error(`[ACCExport] Code erreur: ${errorCode || 'N/A'}`);
+        logger.error(`[ACCExport] Message: ${errorMessage}`);
+        
+        // Détecter les erreurs spécifiques et améliorer les messages
+        const errorMessageLower = (errorMessage || '').toLowerCase();
+        const errorDataString = JSON.stringify(errorData).toLowerCase();
+        
+        // Détecter les erreurs de validation de format URN (400 Bad Request)
+        if (status === 400 && (
+          errorMessageLower.includes('must match format') ||
+          errorMessageLower.includes('versionedfileurn') ||
+          errorMessageLower.includes('lineageurn') ||
+          errorMessageLower.includes('oneof') ||
+          errorDataString.includes('must match format')
+        )) {
+          throw new Error('⚠️ Vérifiez que la maquette contient des sheets publiées et qu\'elle est accessible.');
+        }
+        
+        // Détecter les erreurs de sheets non disponibles
+        if (errorCode === 'ERR_NO_PROCESSABLE_FILES' || 
+            errorMessageLower.includes('no processable files') ||
+            errorMessageLower.includes('err_no_processable_files') ||
+            errorDataString.includes('no processable files') ||
+            errorDataString.includes('processable files')) {
+          throw new Error('⚠️ Aucune sheet publiée disponible pour cette maquette. Assurez-vous que la maquette contient des sheets et qu\'elles ont été publiées sur ACC.');
+        }
+        
+        // Pour les erreurs 400 génériques, message simplifié
+        if (status === 400) {
+          const detail = errorData.detail || errorData.error?.detail || errorData.error?.message || errorMessage;
+          const detailLower = (detail || '').toLowerCase();
+          if (detailLower.includes('processable') || detailLower.includes('sheet') || detailLower.includes('no files')) {
+            throw new Error('⚠️ Aucune sheet publiée disponible pour cette maquette. Assurez-vous que la maquette contient des sheets et qu\'elles ont été publiées sur ACC.');
+          }
+          // Message générique pour erreur 400
+          throw new Error('⚠️ Vérifiez que la maquette contient des sheets publiées et qu\'elle est accessible.');
+        }
+        
         throw new Error(
-          `API ACC Export: ${error.response.data.message || error.response.statusText}`
+          `API ACC Export: ${errorMessage}`
         );
       }
       throw error;
@@ -252,8 +340,40 @@ class ACCExportService {
       }
 
       if (status.status === 'failed') {
-        const errorMsg = status.error || status.result?.error || 'Erreur inconnue';
+        // Formater l'erreur correctement (peut être un objet ou une string)
+        let errorMsg = 'Erreur inconnue';
+        let errorCode = null;
+        let errorDetail = null;
+        
+        if (status.error) {
+          if (typeof status.error === 'string') {
+            errorMsg = status.error;
+          } else {
+            errorCode = status.error.code || null;
+            errorDetail = status.error.detail || status.error.title || null;
+            errorMsg = status.error.detail || status.error.title || JSON.stringify(status.error);
+          }
+        } else if (status.result?.error) {
+          if (typeof status.result.error === 'string') {
+            errorMsg = status.result.error;
+          } else {
+            errorCode = status.result.error.code || null;
+            errorDetail = status.result.error.detail || status.result.error.title || null;
+            errorMsg = status.result.error.detail || status.result.error.title || JSON.stringify(status.result.error);
+          }
+        }
+        
+        // Logger la réponse complète pour debug
         logger.error(`[ACCExport] ❌ Job échoué: ${errorMsg}`);
+        logger.error(`[ACCExport] Code erreur: ${errorCode || 'N/A'}`);
+        logger.error(`[ACCExport] Détail: ${errorDetail || 'N/A'}`);
+        logger.error(`[ACCExport] Status complet: ${JSON.stringify(status, null, 2)}`);
+        
+        // Message d'erreur plus explicite pour l'utilisateur
+        if (errorCode === 'ERR_NO_PROCESSABLE_FILES') {
+          throw new Error('Aucune sheet publiée disponible pour cette maquette. Assurez-vous que la maquette contient des sheets et qu\'elles ont été publiées sur ACC.');
+        }
+        
         throw new Error(`Export PDF échoué: ${errorMsg}`);
       }
 
@@ -287,6 +407,11 @@ class ACCExportService {
           Authorization: `Bearer ${accessToken}`,
         },
       });
+
+      // Logger la réponse complète si le status est failed pour debug
+      if (response.data?.status === 'failed') {
+        logger.error(`[ACCExport] Réponse API pour job ${jobId}: ${JSON.stringify(response.data, null, 2)}`);
+      }
 
       return response.data;
     } catch (error) {

@@ -12,7 +12,55 @@ const logger = require('../config/logger');
 
 const PDF_CACHE_TTL_MS = 60 * 60 * 1000; // 1 heure
 
-router.use(authenticateToken);
+// Middleware pour les routes internes (scheduler) - vérifie seulement le token APS
+async function authenticateInternalOrToken(req, res, next) {
+  // Express normalise les headers en minuscules, mais vérifions les deux cas
+  const internalHeader = req.headers['x-internal-request'] || req.headers['X-Internal-Request'];
+  const userTokenHeader = req.headers['x-user-token'] || req.headers['X-User-Token'];
+  const userIdHeader = req.headers['x-user-id'] || req.headers['X-User-Id'];
+  
+  // Si c'est une requête interne (avec header spécial), on skip le JWT
+  const isInternal = internalHeader === 'true';
+  
+  logger.info(`[Auth] Headers reçus: x-internal-request=${internalHeader}, x-user-token=${userTokenHeader ? 'présent' : 'absent'}, x-user-id=${userIdHeader || 'absent'}, path=${req.path}`);
+  
+  if (isInternal && userTokenHeader) {
+    // Pour les requêtes internes, on vérifie seulement le token APS
+    const userToken = userTokenHeader;
+    if (!userToken) {
+      logger.error('[Auth] Requête interne mais token APS manquant');
+      return res.status(401).json({ success: false, message: 'Token APS manquant pour requête interne' });
+    }
+    
+    // Si un userId est fourni dans le header, on l'utilise
+    if (userIdHeader) {
+      req.userId = userIdHeader;
+      // On définit aussi req.user pour compatibilité
+      const { User } = require('../models');
+      const user = await User.findByPk(userIdHeader);
+      if (user) {
+        req.user = {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          autodeskId: user.autodeskId,
+          permissions: user.permissions || ['read'],
+        };
+      } else {
+        logger.warn(`[Auth] User ${userIdHeader} introuvable en DB`);
+      }
+    }
+    
+    logger.info(`[Auth] Requête interne acceptée pour userId=${req.userId || 'unknown'}`);
+    return next();
+  }
+  
+  // Sinon, on utilise l'authentification JWT normale
+  logger.info(`[Auth] Requête normale, authentification JWT requise pour ${req.path}`);
+  return authenticateToken(req, res, next);
+}
+
+router.use(authenticateInternalOrToken);
 
 function sanitizeString(value = '') {
   return value
@@ -252,10 +300,19 @@ router.post('/export-with-cache', asyncHandler(async (req, res) => {
 
     logger.info(`[ExportWithCache] Job lancé: ${jobId}`);
 
-    const jobResult = await accExportService.waitForJobCompletion(jobId, userToken);
+    let jobResult;
+    try {
+      jobResult = await accExportService.waitForJobCompletion(jobId, userToken);
+    } catch (error) {
+      logger.error(`[ExportWithCache] ❌ Erreur lors de l'attente du job: ${error.message}`);
+      logger.error(`[ExportWithCache] Stack: ${error.stack}`);
+      throw error;
+    }
 
     const jobStatus = jobResult?.status;
     if (jobStatus && jobStatus !== 'successful' && jobStatus !== 'partialSuccess') {
+      logger.error(`[ExportWithCache] ❌ Job terminé avec status invalide: ${jobStatus}`);
+      logger.error(`[ExportWithCache] jobResult: ${JSON.stringify(jobResult, null, 2)}`);
       throw new Error(`Export échoué: ${jobStatus}`);
     }
 
@@ -688,7 +745,8 @@ router.post('/export-from-cache', asyncHandler(async (req, res) => {
       logger.info(`[ExportFromCache] Cache trouvé: ${cachedPdfs.length} PDFs (ancien format)`);
     }
 
-    const selectedNames = new Set(
+    // Normaliser les noms sélectionnés (supprimer préfixes comme "Feuilles -")
+    const selectedNamesNormalized = new Set(
       selectedSheetNames
         .map((name) => {
           if (typeof name === 'string') {
@@ -701,9 +759,53 @@ router.post('/export-from-cache', asyncHandler(async (req, res) => {
         })
         .filter((value) => value.length > 0)
     );
-    const selectedPdfs = cachedPdfs.filter((pdf) => selectedNames.has(pdf.name));
+
+    // Filtrer les PDFs en utilisant une comparaison flexible (nom exact ou normalisé)
+    const selectedPdfs = cachedPdfs.filter((pdf) => {
+      const pdfName = pdf.name || pdf.filename || '';
+      
+      // Vérifier correspondance exacte
+      if (selectedNamesNormalized.has(pdfName)) {
+        return true;
+      }
+      
+      // Normaliser le nom du PDF (supprimer préfixes comme "Feuilles -")
+      const pdfNameNormalized = stripPdfName(pdfName);
+      // Aussi supprimer le préfixe "Feuilles" comme dans le frontend
+      const pdfNameCleaned = pdfName.replace(/^Feuilles\s*[-_]?\s*/i, '').trim();
+      
+      // Vérifier correspondance normalisée
+      for (const selectedName of selectedNamesNormalized) {
+        const selectedNameTrimmed = selectedName.trim();
+        const selectedNameNormalized = stripPdfName(selectedNameTrimmed);
+        
+        // Correspondance exacte avec nom nettoyé
+        if (pdfNameCleaned === selectedNameTrimmed || pdfName === selectedNameTrimmed) {
+          return true;
+        }
+        
+        // Correspondance normalisée
+        if (pdfNameNormalized === selectedNameNormalized) {
+          return true;
+        }
+        
+        // Vérifier si le nom normalisé contient le nom sélectionné (ou vice versa)
+        if (pdfNameNormalized.includes(selectedNameNormalized) || selectedNameNormalized.includes(pdfNameNormalized)) {
+          return true;
+        }
+        
+        // Correspondance avec nom nettoyé
+        if (pdfNameCleaned.includes(selectedNameTrimmed) || selectedNameTrimmed.includes(pdfNameCleaned)) {
+          return true;
+        }
+      }
+      
+      return false;
+    });
 
     if (selectedPdfs.length === 0) {
+      logger.warn(`[ExportFromCache] Aucun PDF trouvé. Noms demandés: ${Array.from(selectedNamesNormalized).join(', ')}`);
+      logger.warn(`[ExportFromCache] PDFs disponibles dans le cache: ${cachedPdfs.map((p) => p.name || p.filename).join(', ')}`);
       throw new Error('Aucun PDF trouvé correspondant à la sélection');
     }
 

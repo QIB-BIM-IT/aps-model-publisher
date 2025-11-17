@@ -17,7 +17,9 @@ import api, {
   patchPDFExportJob,
   runPDFExportJobNow,
   getPDFExportRuns,
+  exportPDFsFromCache,
 } from '../services/api';
+import { PDFExportModal } from '../components/PDFExportModal';
 
 // Helpers
 function nameOf(node, fall = '') {
@@ -126,6 +128,36 @@ const DEFAULT_TIMEZONE =
   typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().timeZone
     ? Intl.DateTimeFormat().resolvedOptions().timeZone
     : 'UTC';
+
+const DAY_OF_WEEK_OPTIONS = [
+  { value: 0, label: 'Dimanche' },
+  { value: 1, label: 'Lundi' },
+  { value: 2, label: 'Mardi' },
+  { value: 3, label: 'Mercredi' },
+  { value: 4, label: 'Jeudi' },
+  { value: 5, label: 'Vendredi' },
+  { value: 6, label: 'Samedi' },
+];
+
+/**
+ * Génère une expression cron selon la récurrence choisie
+ * @param {string} recurrenceType - 'daily' ou 'weekly'
+ * @param {string} hour - Format 'HH:MM'
+ * @param {number} dayOfWeek - 0-6 (0=dimanche, 6=samedi)
+ * @returns {string} Expression cron
+ */
+function generateCronExpression(recurrenceType, hour, dayOfWeek = 1) {
+  const [hourStr, minuteStr] = hour.split(':');
+  const minute = minuteStr || '0';
+  
+  if (recurrenceType === 'weekly') {
+    // Format: minute hour * * dayOfWeek
+    return `${minute} ${hourStr} * * ${dayOfWeek}`;
+  } else {
+    // Format: minute hour * * * (daily)
+    return `${minute} ${hourStr} * * *`;
+  }
+}
 
 // Tree Node avec style moderne
 function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onToggleSelect }) {
@@ -347,8 +379,15 @@ export default function PlanningPage() {
   const [selectedHour, setSelectedHour] = React.useState('02:00');
   const [cronExpression, setCronExpression] = React.useState('0 2 * * *');
   const [timezone, setTimezone] = React.useState(DEFAULT_TIMEZONE);
+  const [recurrenceType, setRecurrenceType] = React.useState('daily'); // 'daily' ou 'weekly'
+  const [selectedDayOfWeek, setSelectedDayOfWeek] = React.useState(1); // 0=dimanche, 1=lundi, ..., 6=samedi
+  const [notifyOnFailure, setNotifyOnFailure] = React.useState(false); // Notification email en cas d'échec (décochée par défaut)
   const [error, setError] = React.useState('');
   const [toast, setToast] = React.useState('');
+
+  // État pour le modal PDF
+  const [showPDFModal, setShowPDFModal] = React.useState(false);
+  const [isExportingPDF, setIsExportingPDF] = React.useState(false);
 
   const preSelectHub = location.state?.preSelectHub;
   const preSelectProject = location.state?.preSelectProject;
@@ -357,6 +396,12 @@ export default function PlanningPage() {
   const preselectProjectApplied = React.useRef(false);
   const appliedHighlightJob = React.useRef(null);
 
+  // Définir primarySelectedKey avant les useEffect qui l'utilisent
+  const primarySelectedKey = React.useMemo(() => {
+    const keys = Object.keys(selectedItems);
+    return keys[0] || null;
+  }, [selectedItems]);
+
   React.useEffect(() => {
     appliedHighlightJob.current = null;
     preselectHubApplied.current = false;
@@ -364,9 +409,8 @@ export default function PlanningPage() {
   }, [location.key]);
 
   React.useEffect(() => {
-    const [hour, minute] = selectedHour.split(':');
-    setCronExpression(`${minute} ${hour} * * *`);
-  }, [selectedHour]);
+    setCronExpression(generateCronExpression(recurrenceType, selectedHour, selectedDayOfWeek));
+  }, [selectedHour, recurrenceType, selectedDayOfWeek]);
 
   async function loadHubs() {
     setLoadingHubs(true);
@@ -378,9 +422,36 @@ export default function PlanningPage() {
       setHubs(data);
       if (data.length) {
         if (preSelectHub && data.some((hub) => idOf(hub) === preSelectHub)) {
+          // Hub pré-sélectionné trouvé
           setSelectedHub(preSelectHub);
           preselectHubApplied.current = true;
+        } else if (!preSelectHub && preSelectProject) {
+          // Pas de hub pré-sélectionné mais un projet oui : chercher le hub qui contient ce projet
+          // Commencer avec le premier hub pour ne pas bloquer l'UI
+          setSelectedHub(idOf(data[0]));
+          
+          // Chercher le bon hub en arrière-plan
+          (async () => {
+            let foundHub = null;
+            for (const hub of data) {
+              try {
+                const projects = await fetchProjects(idOf(hub));
+                if (projects.some((p) => idOf(p) === preSelectProject)) {
+                  foundHub = idOf(hub);
+                  break;
+                }
+              } catch (e) {
+                // Continuer avec le hub suivant si erreur
+                console.warn(`Erreur lors de la recherche du projet dans le hub ${idOf(hub)}:`, e);
+              }
+            }
+            if (foundHub) {
+              setSelectedHub(foundHub);
+              preselectHubApplied.current = true;
+            }
+          })();
         } else {
+          // Aucune pré-sélection : premier hub
           setSelectedHub(idOf(data[0]));
         }
       }
@@ -581,7 +652,105 @@ export default function PlanningPage() {
     []
   );
 
-  async function handleCreatePDFExportJob() {
+  // Fonction pour exporter immédiatement (Run Now)
+  async function handleRunNowPDF(config) {
+    const selectedFile = Object.values(selectedItems)[0];
+    if (!selectedFile || !selectedProject) {
+      setToast('⚠️ Sélectionne une maquette et un projet');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    if (!config.cacheKey) {
+      setToast('⚠️ Cache expiré, recharge les sheets');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    if (!config.folderId) {
+      setToast('⚠️ Sélectionne un dossier de destination');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    // Validation des sheets disponibles
+    if (!config.availableSheets || !Array.isArray(config.availableSheets) || config.availableSheets.length === 0) {
+      setToast('⚠️ Aucune sheet disponible, recharge les sheets');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    const selectedSheetNames =
+      config.mode === 'custom'
+        ? (config.customSheets || []).map((s) => (typeof s === 'string' ? s : s.name || s)).filter(Boolean)
+        : (config.availableSheets || []).map((s) => (typeof s === 'string' ? s : s.name || s)).filter(Boolean);
+
+    if (selectedSheetNames.length === 0) {
+      setToast('⚠️ Aucune sheet sélectionnée');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    setIsExportingPDF(true);
+    try {
+      const result = await exportPDFsFromCache({
+        cacheKey: config.cacheKey,
+        projectId: selectedProject,
+        folderId: config.folderId,
+        selectedSheetNames,
+        exportMode: config.merge ? 'combined' : 'individual',
+        combinedFileName: config.merge ? config.mergedFileName : undefined,
+      });
+
+      const uploadLabel = config.merge ? 'PDF combiné' : 'PDF(s)';
+      const successMessage =
+        result.failed > 0
+          ? `✅ ${result.uploaded} ${uploadLabel} exporté(s) (${result.failed} échec)`
+          : `✅ ${result.uploaded} ${uploadLabel} exporté(s) vers ACC`;
+
+      setToast(successMessage);
+      setTimeout(() => setToast(''), 5000);
+      
+      // Ne pas fermer le modal automatiquement pour permettre un autre export
+      // L'utilisateur peut fermer manuellement s'il le souhaite
+      triggerAutoRefreshWindow();
+      await refreshPdfRuns({ silent: true });
+    } catch (e) {
+      let errorMessage = e?.message || 'Erreur export';
+      
+      // Détecter si c'est une erreur de cache expiré
+      if (errorMessage.toLowerCase().includes('cache') || errorMessage.toLowerCase().includes('expiré') || errorMessage.toLowerCase().includes('invalid')) {
+        setToast('⚠️ Cache expiré, recharge les sheets dans le modal');
+        setTimeout(() => setToast(''), 5000);
+      } 
+      // Détecter si c'est une erreur de sheets non disponibles ou de format URN
+      else if (errorMessage.includes('ERR_NO_PROCESSABLE_FILES') || 
+               errorMessage.includes('Aucune sheet publiée') ||
+               errorMessage.includes('Vérifiez que la maquette')) {
+        // Extraire seulement la partie utile du message (à partir de "Vérifiez")
+        let displayMessage = errorMessage;
+        const verifiezIndex = errorMessage.indexOf('Vérifiez');
+        if (verifiezIndex !== -1) {
+          displayMessage = errorMessage.substring(verifiezIndex);
+        }
+        // S'assurer qu'il y a un emoji warning
+        if (!displayMessage.startsWith('⚠️')) {
+          displayMessage = '⚠️ ' + displayMessage;
+        }
+        setToast(displayMessage);
+        setTimeout(() => setToast(''), 7000);
+      } 
+      else {
+        setToast('❌ ' + errorMessage);
+        setTimeout(() => setToast(''), 5000);
+      }
+    } finally {
+      setIsExportingPDF(false);
+    }
+  }
+
+  // Fonction pour planifier la tâche (Schedule)
+  async function handleSchedulePDF(config) {
     const selectedFile = Object.values(selectedItems)[0];
     if (!selectedFile) {
       setToast('⚠️ Sélectionne 1 maquette');
@@ -595,26 +764,14 @@ export default function PlanningPage() {
       return;
     }
 
-    if (!Array.isArray(topFolders) || topFolders.length === 0) {
-      setToast('⚠️ Charge les dossiers ACC');
-      setTimeout(() => setToast(''), 3000);
-      return;
-    }
-
-    if (!jobName.trim()) {
+    if (!config.jobName || !config.jobName.trim()) {
       setToast('⚠️ Donne un nom à la tâche');
       setTimeout(() => setToast(''), 3000);
       return;
     }
 
-    if (pdfSelectionMode === 'custom' && pdfSelectedSheets.length === 0) {
-      setToast('⚠️ Sélectionne au moins une feuille');
-      setTimeout(() => setToast(''), 3000);
-      return;
-    }
-
-    if (pdfExportMode === 'combined' && !pdfMergedFileName.trim()) {
-      setToast('⚠️ Entre un nom pour le PDF fusionné');
+    if (!config.folderId) {
+      setToast('⚠️ Sélectionne un dossier de destination');
       setTimeout(() => setToast(''), 3000);
       return;
     }
@@ -625,53 +782,68 @@ export default function PlanningPage() {
     const projectObj = projects.find((p) => idOf(p) === selectedProject);
     const projectName = nameOf(projectObj, '');
 
+    const selectedFolder = topFolders.find((f) => f.id === config.folderId) ||
+      Array.from(childrenMap.values())
+        .flat()
+        .find((f) => f.id === config.folderId);
+
     try {
-      // Préparer la liste des sheets sélectionnées avec les métadonnées
       const sheetsForJob =
-        pdfSelectionMode === 'custom'
-          ? pdfAvailableSheets.filter((s) => pdfSelectedSheets.includes(s.name))
-          : [];
+        config.mode === 'custom' ? config.customSheets : [];
+
+      // Utiliser la récurrence du config (depuis le modal) ou celle de la page principale
+      const scheduleRecurrenceType = config.recurrenceType || recurrenceType;
+      const scheduleDayOfWeek = config.selectedDayOfWeek !== undefined ? config.selectedDayOfWeek : selectedDayOfWeek;
+      const scheduleHour = config.selectedHour || selectedHour;
+      
+      // Générer l'expression cron selon la récurrence
+      const scheduleCronExpression = generateCronExpression(scheduleRecurrenceType, scheduleHour, scheduleDayOfWeek);
+      const scheduleTimezone = config.timezone || timezone;
 
       await createPDFExportJob({
-        name: jobName.trim(),
+        name: config.jobName.trim(),
         projectId: selectedProject,
         projectName,
-        folderId: topFolders[0]?.id || '',
-        folderName: topFolders[0]?.attributes?.displayName || '',
+        folderId: config.folderId,
+        folderName: selectedFolder?.attributes?.displayName || selectedFolder?.name || '',
         fileUrn,
         fileName,
         scheduleEnabled: true,
-        cronExpression,
-        timezone,
-        selectionMode: pdfSelectionMode,
+        cronExpression: scheduleCronExpression,
+        timezone: scheduleTimezone,
+        selectionMode: config.mode,
         selectedSheets: sheetsForJob,
-        includeSheets: true,
-        includeViews2D: true,
-        includeMarkups: true,
-        exportMode: pdfExportMode,
-        mergedFileName:
-          pdfExportMode === 'combined' ? pdfMergedFileName.trim() : null,
-        notifyOnFailure: true,
+        includeSheets: config.options?.includeSheets !== false,
+        includeViews2D: config.options?.includeViews2D !== false,
+        includeMarkups: config.options?.includeMarkups !== false,
+        exportMode: config.merge ? 'combined' : 'individual',
+        mergedFileName: config.merge ? config.mergedFileName : null,
+        notifyOnFailure: config.notifyOnFailure !== undefined ? config.notifyOnFailure : notifyOnFailure,
       });
 
-      setToast('✅ Tâche PDF créée!');
+      setToast('✅ Tâche PDF planifiée!');
       setTimeout(() => setToast(''), 3000);
       setJobName('');
       setJobType(null);
-      setSelectedItems({});
-      setPdfSelectionMode('all');
-      setPdfSelectedSheets([]);
-      setPdfSheetsLoaded(false);
-      setPdfAvailableSheets([]);
-      setPdfCacheKey(null);
-      setPdfExportMode('individual');
-      setPdfMergedFileName('Documents.pdf');
+      setShowPDFModal(false);
       triggerAutoRefreshWindow();
       await Promise.all([refreshPdfJobs({ silent: true }), refreshPdfRuns({ silent: true })]);
     } catch (e) {
       setToast('❌ ' + (e?.message || 'Erreur'));
       setTimeout(() => setToast(''), 3000);
     }
+  }
+
+  async function handleCreatePDFExportJob() {
+    // Cette fonction n'est plus utilisée directement, mais conservée pour compatibilité
+    // Le modal est maintenant ouvert via le bouton "Créer tâche PDF"
+    const selectedFile = Object.values(selectedItems)[0];
+    if (!selectedFile) {
+      setToast('⚠️ Sélectionne 1 maquette');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+    setShowPDFModal(true);
   }
 
   async function handleCreatePublishJob() {
@@ -704,7 +876,7 @@ export default function PlanningPage() {
         scheduleEnabled: true,
         cronExpression,
         timezone,
-        notifyOnFailure: true,
+        notifyOnFailure: notifyOnFailure,
       });
       setToast('✅ Tâche Publish créée!');
       setTimeout(() => setToast(''), 3000);
@@ -966,11 +1138,6 @@ export default function PlanningPage() {
     id,
     name: nameOf(node, id),
   }));
-
-  const primarySelectedKey = React.useMemo(() => {
-    const keys = Object.keys(selectedItems);
-    return keys[0] || null;
-  }, [selectedItems]);
 
   const filteredProjects = React.useMemo(() => {
     const sorted = [...projects].sort((a, b) => {
@@ -1237,103 +1404,187 @@ export default function PlanningPage() {
                 }}
               />
 
-              <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                    Heure de publication
-                  </label>
-                  <select
-                    value={selectedHour}
-                    onChange={(e) => setSelectedHour(e.target.value)}
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: '1px solid rgba(148, 163, 184, 0.3)',
-                      background: 'rgba(248, 250, 252, 0.9)',
-                      fontSize: 14,
-                      outline: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {HOUR_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 220px', minWidth: 220 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
-                    Fuseau horaire
-                  </label>
-                  <select
-                    value={timezone}
-                    onChange={(e) => setTimezone(e.target.value)}
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: '1px solid rgba(148, 163, 184, 0.3)',
-                      background: 'rgba(248, 250, 252, 0.9)',
-                      fontSize: 14,
-                      outline: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {timezoneOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <span style={{ fontSize: 12, color: '#64748b' }}>
-                    Fuseau détecté : <strong>{DEFAULT_TIMEZONE}</strong>
-                  </span>
-                </div>
-              </div>
-
               {jobType !== null && (
-                <div
-                  style={{
-                    padding: 16,
-                    background: 'rgba(239, 246, 255, 0.5)',
-                    borderRadius: 10,
-                    border: '1px solid rgba(37, 99, 235, 0.2)',
-                    marginBottom: 16,
-                  }}
-                >
-                  <label
+                <>
+                  <div
                     style={{
-                      display: 'block',
-                      marginBottom: 8,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: '#475569',
+                      padding: 16,
+                      background: 'rgba(239, 246, 255, 0.5)',
+                      borderRadius: 10,
+                      border: '1px solid rgba(37, 99, 235, 0.2)',
+                      marginBottom: 16,
                     }}
                   >
-                    📝 Nom de la tâche
-                  </label>
-                  <input
-                    type="text"
-                    value={jobName}
-                    onChange={(e) => setJobName(e.target.value)}
-                    placeholder={
-                      jobType === 'publish'
-                        ? 'Ex: Publish Revit - Quotidien'
-                        : 'Ex: Export PDF - Architecte'
-                    }
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      border: '1px solid rgba(148, 163, 184, 0.3)',
-                      background: 'rgba(248, 250, 252, 0.9)',
-                      fontSize: 14,
-                      outline: 'none',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
+                    <label
+                      style={{
+                        display: 'block',
+                        marginBottom: 8,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: '#475569',
+                      }}
+                    >
+                      📝 Nom de la tâche
+                    </label>
+                    <input
+                      type="text"
+                      value={jobName}
+                      onChange={(e) => setJobName(e.target.value)}
+                      placeholder={
+                        jobType === 'publish'
+                          ? 'Ex: Publish Revit - Quotidien'
+                          : 'Ex: Export PDF - Architecte'
+                      }
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        border: '1px solid rgba(148, 163, 184, 0.3)',
+                        background: 'rgba(248, 250, 252, 0.9)',
+                        fontSize: 14,
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+
+                  {jobType === 'publish' && (
+                    <div style={{ marginBottom: 16 }}>
+                      <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+                        🕐 Planification
+                      </h4>
+                      
+                      {/* Type de récurrence */}
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4, display: 'block', marginBottom: 8 }}>
+                          Récurrence
+                        </label>
+                        <div style={{ display: 'flex', gap: 12 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              name="recurrence-publish"
+                              checked={recurrenceType === 'daily'}
+                              onChange={() => setRecurrenceType('daily')}
+                              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                            />
+                            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>📅 Quotidien</span>
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                            <input
+                              type="radio"
+                              name="recurrence-publish"
+                              checked={recurrenceType === 'weekly'}
+                              onChange={() => setRecurrenceType('weekly')}
+                              style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
+                            />
+                            <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>📆 Hebdomadaire</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
+                        {recurrenceType === 'weekly' && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
+                            <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                              Jour de la semaine
+                            </label>
+                            <select
+                              value={selectedDayOfWeek}
+                              onChange={(e) => setSelectedDayOfWeek(Number(e.target.value))}
+                              style={{
+                                padding: '10px 14px',
+                                borderRadius: 10,
+                                border: '1px solid rgba(148, 163, 184, 0.3)',
+                                background: 'rgba(248, 250, 252, 0.9)',
+                                fontSize: 14,
+                                outline: 'none',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {DAY_OF_WEEK_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 180 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                            Heure de publication
+                          </label>
+                          <select
+                            value={selectedHour}
+                            onChange={(e) => setSelectedHour(e.target.value)}
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: 10,
+                              border: '1px solid rgba(148, 163, 184, 0.3)',
+                              background: 'rgba(248, 250, 252, 0.9)',
+                              fontSize: 14,
+                              outline: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {HOUR_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 220px', minWidth: 220 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                            Fuseau horaire
+                          </label>
+                          <select
+                            value={timezone}
+                            onChange={(e) => setTimezone(e.target.value)}
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: 10,
+                              border: '1px solid rgba(148, 163, 184, 0.3)',
+                              background: 'rgba(248, 250, 252, 0.9)',
+                              fontSize: 14,
+                              outline: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {timezoneOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <span style={{ fontSize: 12, color: '#64748b' }}>
+                            Fuseau détecté : <strong>{DEFAULT_TIMEZONE}</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Notification email */}
+                      <div style={{ marginTop: 16 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={notifyOnFailure}
+                            onChange={(e) => setNotifyOnFailure(e.target.checked)}
+                            style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#2563eb' }}
+                          />
+                          <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>
+                            📧 Notification par courriel en cas d'échec
+                          </span>
+                        </label>
+                        <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4, marginLeft: 26 }}>
+                          Recevoir un email avec les détails de l'erreur si la tâche échoue
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               <div style={{ display: 'flex', gap: 12 }}>
@@ -1354,13 +1605,24 @@ export default function PlanningPage() {
                     </Button>
                     <Button
                       onClick={() => {
+                        const selectedFile = Object.values(selectedItems)[0];
+                        if (!selectedFile) {
+                          setToast('⚠️ Sélectionne 1 maquette');
+                          setTimeout(() => setToast(''), 3000);
+                          return;
+                        }
                         setJobType('pdf-export');
-                        setJobName('');
+                        setShowPDFModal(true);
                       }}
+                      disabled={Object.keys(selectedItems).length > 1}
                       style={{
                         padding: '12px 24px',
                         flex: 1,
-                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        background: Object.keys(selectedItems).length > 1
+                          ? 'rgba(148, 163, 184, 0.3)'
+                          : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        opacity: Object.keys(selectedItems).length > 1 ? 0.5 : 1,
+                        cursor: Object.keys(selectedItems).length > 1 ? 'not-allowed' : 'pointer',
                       }}
                     >
                       📄 Créer tâche PDF
@@ -1472,7 +1734,7 @@ export default function PlanningPage() {
                               disabled={j.status === 'running'}
                               style={{ padding: '6px 12px', fontSize: 12 }}
                             >
-                              🚀 Lancer
+                              🚀 Run Now
                             </Button>
                             <Button
                               variant="danger"
@@ -1512,17 +1774,17 @@ export default function PlanningPage() {
                       const badgeStyles = !j.scheduleEnabled
                         ? { background: 'rgba(148, 163, 184, 0.2)', color: '#475569' }
                         : j.status === 'running'
-                        ? { background: 'rgba(52, 211, 153, 0.2)', color: '#047857' }
-                        : { background: 'rgba(16, 185, 129, 0.18)', color: '#047857' };
+                        ? { background: 'rgba(52, 211, 153, 0.35)', color: '#047857', border: '1px solid rgba(52, 211, 153, 0.4)' }
+                        : { background: 'rgba(16, 185, 129, 0.35)', color: '#059669', border: '1px solid rgba(16, 185, 129, 0.4)' };
 
                       return (
                         <div
                           key={j.id}
                           style={{
                             padding: '10px 12px',
-                            background: 'rgba(16, 185, 129, 0.08)',
+                            background: 'rgba(16, 185, 129, 0.12)',
                             borderRadius: 8,
-                            border: '1px solid rgba(16, 185, 129, 0.2)',
+                            border: '1px solid rgba(16, 185, 129, 0.35)',
                             fontSize: 13,
                             display: 'flex',
                             flexDirection: 'column',
@@ -1562,7 +1824,7 @@ export default function PlanningPage() {
                               disabled={j.status === 'running'}
                               style={{ padding: '6px 12px', fontSize: 12 }}
                             >
-                              🚀 Lancer
+                              🚀 Run Now
                             </Button>
                             <Button
                               variant="danger"
@@ -1770,7 +2032,17 @@ export default function PlanningPage() {
                             {r.jobName || r.name || `Job ${jobIdShort}`}
                           </div>
                           <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', gap: 6, alignItems: 'center' }}>
-                            <span>{r.jobType === 'pdf-export' ? '📄 PDF' : '🚀 Publish'}</span>
+                            <span style={{
+                              padding: '2px 6px',
+                              borderRadius: 4,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              background: r.jobType === 'pdf-export' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.15)',
+                              color: r.jobType === 'pdf-export' ? '#059669' : '#1d4ed8',
+                              border: r.jobType === 'pdf-export' ? '1px solid rgba(16, 185, 129, 0.3)' : 'none'
+                            }}>
+                              {r.jobType === 'pdf-export' ? '📄 PDF' : '🚀 Publish'}
+                            </span>
                             <span style={{ fontFamily: 'monospace' }}>{jobIdShort}</span>
                           </div>
                         </td>
@@ -1874,6 +2146,46 @@ export default function PlanningPage() {
         </Card>
         </div>
       </div>
+
+      {/* Modal PDF Export */}
+      {showPDFModal && jobType === 'pdf-export' && (() => {
+        const selectedFile = Object.values(selectedItems)[0];
+        const fileUrn = selectedFile?.publishUrn || selectedFile?.id;
+        return (
+          <PDFExportModal
+            fileUrn={fileUrn}
+            projectId={selectedProject}
+            topFolders={topFolders}
+            childrenMap={childrenMap}
+            onLoadChildren={loadChildren}
+            onClose={() => {
+              setShowPDFModal(false);
+              setJobType(null);
+              setJobName('');
+            }}
+            onRunNow={handleRunNowPDF}
+            onSchedule={handleSchedulePDF}
+            isExporting={isExportingPDF}
+            showScheduleButton={true}
+            jobName={jobName}
+            onJobNameChange={setJobName}
+            selectedHour={selectedHour}
+            setSelectedHour={setSelectedHour}
+            timezone={timezone}
+            setTimezone={setTimezone}
+            recurrenceType={recurrenceType}
+            setRecurrenceType={setRecurrenceType}
+            selectedDayOfWeek={selectedDayOfWeek}
+            setSelectedDayOfWeek={setSelectedDayOfWeek}
+            hourOptions={HOUR_OPTIONS}
+            timezoneOptions={timezoneOptions}
+            dayOfWeekOptions={DAY_OF_WEEK_OPTIONS}
+            defaultTimezone={DEFAULT_TIMEZONE}
+            notifyOnFailure={notifyOnFailure}
+            setNotifyOnFailure={setNotifyOnFailure}
+          />
+        );
+      })()}
     </>
   );
 }

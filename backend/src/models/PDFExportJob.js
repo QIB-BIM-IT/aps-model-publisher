@@ -63,7 +63,7 @@ PDFExportJob.init(
     // Notifications
     notificationsEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     notifyOnSuccess: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-    notifyOnFailure: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    notifyOnFailure: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     notificationRecipients: { type: DataTypes.ARRAY(DataTypes.STRING), allowNull: false, defaultValue: [] },
 
     // Historique
