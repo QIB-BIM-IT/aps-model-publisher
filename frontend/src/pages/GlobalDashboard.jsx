@@ -73,6 +73,7 @@ export default function GlobalDashboard() {
   const [pdfRuns, setPdfRuns] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
+  const [timeFilter, setTimeFilter] = React.useState('forever'); // day, week, month, year, forever
 
   function handleJobClick(job, jobType) {
     if (!job) return;
@@ -123,14 +124,42 @@ export default function GlobalDashboard() {
   const allJobs = [...publishJobs, ...pdfJobs];
   const allRuns = [...publishRuns, ...pdfRuns];
   
+  // Filtrage temporel
+  const getFilteredRuns = React.useCallback((runs) => {
+    if (timeFilter === 'forever') return runs;
+    
+    const now = Date.now();
+    const filters = {
+      day: 24 * 60 * 60 * 1000,
+      week: 7 * 24 * 60 * 60 * 1000,
+      month: 30 * 24 * 60 * 60 * 1000,
+      year: 365 * 24 * 60 * 60 * 1000,
+    };
+    
+    const threshold = now - filters[timeFilter];
+    return runs.filter(r => {
+      const createdAt = new Date(r.createdAt).getTime();
+      return createdAt >= threshold;
+    });
+  }, [timeFilter]);
+  
+  const filteredRuns = React.useMemo(() => getFilteredRuns(allRuns), [allRuns, getFilteredRuns]);
+  
   const totalJobs = allJobs.length;
   const activeJobs = allJobs.filter(j => j.scheduleEnabled).length;
   const totalModels = publishJobs.reduce((sum, j) => sum + (Array.isArray(j.models) ? j.models.length : 0), 0);
-  const recentRuns = allRuns.filter(r => {
-    const createdAt = new Date(r.createdAt);
-    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    return createdAt > last24h;
-  }).length;
+  
+  // Nombre de sheets exportées en PDF (stats.uploaded = nombre de sheets, pas de PDFs)
+  const totalSheetsExported = React.useMemo(() => {
+    return filteredRuns
+      .filter(r => r.jobType === 'pdf-export' || pdfRuns.some(pr => pr.id === r.id))
+      .reduce((sum, r) => {
+        const uploaded = r.stats?.uploaded || r.stats?.okCount || 0;
+        return sum + uploaded;
+      }, 0);
+  }, [filteredRuns, pdfRuns]);
+  
+  const totalRunsInPeriod = filteredRuns.length;
 
   const hourlyData = React.useMemo(() => {
     const hours = {};
@@ -159,26 +188,31 @@ export default function GlobalDashboard() {
       .slice(0, 6);
   }, [allJobs]);
 
-  const statusData = React.useMemo(() => {
-    const recent = allRuns.slice(0, 50);
-    const statuses = {
-      success: 0,
-      failed: 0,
-      running: 0,
-    };
+  // Graphique basé sur les fichiers individuels (pas les runs)
+  const fileStatusData = React.useMemo(() => {
+    let successFiles = 0;
+    let failedFiles = 0;
+    let runningFiles = 0;
     
-    recent.forEach(run => {
-      if (statuses[run.status] !== undefined) {
-        statuses[run.status]++;
+    filteredRuns.forEach(run => {
+      if (run.status === 'running') {
+        // Pour les runs en cours, estimer basé sur les items
+        const items = run.items || [];
+        runningFiles += items.length;
+      } else {
+        // Pour les runs terminés, utiliser les stats
+        const stats = run.stats || {};
+        successFiles += stats.okCount || stats.uploaded || 0;
+        failedFiles += stats.failCount || stats.failed || 0;
       }
     });
     
     return [
-      { name: 'Succès', value: statuses.success, color: '#10b981' },
-      { name: 'Échecs', value: statuses.failed, color: '#ef4444' },
-      { name: 'En cours', value: statuses.running, color: '#f59e0b' },
+      { name: 'Fichiers réussis', value: successFiles, color: '#10b981' },
+      { name: 'Fichiers échoués', value: failedFiles, color: '#ef4444' },
+      { name: 'En traitement', value: runningFiles, color: '#f59e0b' },
     ].filter(d => d.value > 0);
-  }, [allRuns]);
+  }, [filteredRuns]);
 
   const upcomingJobs = React.useMemo(() => {
     const now = new Date();
@@ -258,7 +292,7 @@ export default function GlobalDashboard() {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: 32
+          marginBottom: 24
         }}>
           <div>
             <h1 style={{
@@ -298,6 +332,50 @@ export default function GlobalDashboard() {
           </button>
         </div>
 
+        {/* Filtre temporel */}
+        <Card style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#475569' }}>📅 Période:</span>
+            {[
+              { value: 'day', label: 'Aujourd\'hui' },
+              { value: 'week', label: 'Cette semaine' },
+              { value: 'month', label: 'Ce mois' },
+              { value: 'year', label: 'Cette année' },
+              { value: 'forever', label: 'Tout' }
+            ].map(option => (
+              <button
+                key={option.value}
+                onClick={() => setTimeFilter(option.value)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: timeFilter === option.value ? '2px solid #2563eb' : '1px solid rgba(148, 163, 184, 0.3)',
+                  background: timeFilter === option.value ? 'rgba(37, 99, 235, 0.1)' : 'white',
+                  color: timeFilter === option.value ? '#2563eb' : '#64748b',
+                  fontSize: 13,
+                  fontWeight: timeFilter === option.value ? 600 : 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  if (timeFilter !== option.value) {
+                    e.currentTarget.style.background = 'rgba(248, 250, 252, 0.8)';
+                    e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.3)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (timeFilter !== option.value) {
+                    e.currentTarget.style.background = 'white';
+                    e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+                  }
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </Card>
+
         {error && (
           <div style={{
             background: 'rgba(220, 38, 38, 0.1)',
@@ -321,7 +399,8 @@ export default function GlobalDashboard() {
           <KPICard icon="📅" label="Tâches planifiées" value={totalJobs} color="#2563eb" />
           <KPICard icon="✅" label="Tâches actives" value={activeJobs} color="#10b981" />
           <KPICard icon="📦" label="Maquettes (Publish)" value={totalModels} color="#8b5cf6" />
-          <KPICard icon="🚀" label="Exécutions (24h)" value={recentRuns} color="#f59e0b" />
+          <KPICard icon="📄" label="Sheets exportées (PDF)" value={totalSheetsExported} color="#10b981" />
+          <KPICard icon="🚀" label={`Exécutions (${timeFilter === 'day' ? '24h' : timeFilter === 'week' ? '7j' : timeFilter === 'month' ? '30j' : timeFilter === 'year' ? '365j' : 'Total'})`} value={totalRunsInPeriod} color="#f59e0b" />
         </div>
 
         {/* Graphiques */}
@@ -345,20 +424,20 @@ export default function GlobalDashboard() {
             </ResponsiveContainer>
           </Card>
 
-          <Card title="📈 Status des exécutions">
+          <Card title="📈 Taux de succès des fichiers">
             <ResponsiveContainer width="100%" height={280}>
               <PieChart>
                 <Pie
-                  data={statusData}
+                  data={fileStatusData}
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => `${name.split(' ')[0]} ${(percent * 100).toFixed(0)}%`}
                   outerRadius={90}
                   fill="#8884d8"
                   dataKey="value"
                 >
-                  {statusData.map((entry, index) => (
+                  {fileStatusData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
@@ -372,6 +451,14 @@ export default function GlobalDashboard() {
                 />
               </PieChart>
             </ResponsiveContainer>
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 20, fontSize: 12, color: '#64748b' }}>
+              {fileStatusData.map((entry) => (
+                <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ width: 12, height: 12, borderRadius: '50%', background: entry.color }} />
+                  <span>{entry.name}: <strong style={{ color: '#1f2937' }}>{entry.value}</strong></span>
+                </div>
+              ))}
+            </div>
           </Card>
         </div>
 
