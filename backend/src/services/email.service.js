@@ -11,7 +11,8 @@ const SMTP_SECURE = String(process.env.SMTP_SECURE || 'false').toLowerCase() ===
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const EMAIL_FROM = process.env.EMAIL_FROM || SMTP_USER || 'noreply@aps-model-publisher.com';
-const EMAIL_ENABLED = String(process.env.EMAIL_ENABLED || 'false').toLowerCase() === 'true';
+// Service désactivé par défaut - l'infrastructure reste en place pour activation future
+const EMAIL_ENABLED = false;
 
 let transporter = null;
 
@@ -20,7 +21,7 @@ let transporter = null;
  */
 function initTransporter() {
   if (!EMAIL_ENABLED) {
-    logger.info('[Email] Service email désactivé (EMAIL_ENABLED=false ou non configuré)');
+    logger.info('[Email] Service email désactivé - Infrastructure en place pour activation future si nécessaire');
     return null;
   }
 
