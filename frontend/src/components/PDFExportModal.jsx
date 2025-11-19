@@ -85,6 +85,32 @@ export function PDFExportModal({
   const lastLoadedFileUrnRef = React.useRef(null);
   const loadingRef = React.useRef(false);
 
+  // Pré-remplir les valeurs en mode édition
+  useEffect(() => {
+    if (editingJob) {
+      // Pré-remplir le mode et les sheets
+      if (editingJob.selectionMode) setSelectionMode(editingJob.selectionMode);
+      if (editingJob.exportMode === 'combined') setMerge(true);
+      if (editingJob.mergedFileName) setMergedFileName(editingJob.mergedFileName);
+      
+      // Pré-sélectionner le dossier si possible
+      if (editingJob.folderId && (topFolders || childrenMap)) {
+        // Rechercher le dossier dans topFolders
+        const folder = topFolders?.find(f => f.id === editingJob.folderId);
+        if (folder) {
+          setSelectedFolder(folder);
+        } else {
+          // Rechercher dans childrenMap
+          const allFolders = Array.from(childrenMap?.values() || []).flat();
+          const foundFolder = allFolders.find(f => f.id === editingJob.folderId);
+          if (foundFolder) {
+            setSelectedFolder(foundFolder);
+          }
+        }
+      }
+    }
+  }, [editingJob, topFolders, childrenMap]);
+
   const selectedSheets = useMemo(() => {
     if (selectionMode !== 'custom') return [];
     const keySet = new Set(selectedSheetKeys);

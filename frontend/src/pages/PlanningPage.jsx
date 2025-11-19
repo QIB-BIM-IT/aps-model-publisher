@@ -960,32 +960,47 @@ export default function PlanningPage() {
     if (job.hubId) setSelectedHub(job.hubId);
     if (job.projectId) setSelectedProject(job.projectId);
     
-    // Pré-sélectionner les modèles
-    if (Array.isArray(job.models)) {
+    // Pré-sélectionner les modèles (conversion correcte pour le formulaire)
+    if (Array.isArray(job.models) && job.models.length > 0) {
       const itemsMap = {};
       job.models.forEach(model => {
-        if (model.urn) {
-          itemsMap[model.urn] = { checked: true, data: model };
+        // Les modèles sont stockés avec { urn, name } dans la DB
+        // Le formulaire attend { publishUrn, data: { urn, name } }
+        const modelUrn = model.urn || model.publishUrn || model.id;
+        if (modelUrn) {
+          itemsMap[modelUrn] = { 
+            checked: true, 
+            publishUrn: modelUrn, // Utilisé lors de la création du job
+            data: { 
+              urn: modelUrn, 
+              name: model.name || 'Maquette',
+              id: modelUrn
+            }
+          };
         }
       });
       setSelectedItems(itemsMap);
+      
+      // Log pour debugging
+      console.log('[Edit] Modèles pré-sélectionnés:', Object.keys(itemsMap).length);
     }
     
     // Configurer l'horaire
     const cronParts = (job.cronExpression || '0 2 * * *').split(' ');
     const minute = cronParts[0] || '0';
     const hour = cronParts[1] || '2';
-    setSelectedHour(`${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`);
-    setCronExpression(job.cronExpression || '0 2 * * *');
-    setTimezone(job.timezone || DEFAULT_TIMEZONE);
+    const hourMinute = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
     
     // Déterminer le type de récurrence
     const dayOfWeek = cronParts[4];
-    if (dayOfWeek && dayOfWeek !== '*') {
-      setRecurrenceType('weekly');
+    const isWeekly = dayOfWeek && dayOfWeek !== '*';
+    
+    // Définir les états (le useEffect mettra à jour cronExpression automatiquement)
+    setSelectedHour(hourMinute);
+    setTimezone(job.timezone || DEFAULT_TIMEZONE);
+    setRecurrenceType(isWeekly ? 'weekly' : 'daily');
+    if (isWeekly) {
       setSelectedDayOfWeek(parseInt(dayOfWeek, 10));
-    } else {
-      setRecurrenceType('daily');
     }
     
     // Notification
@@ -993,7 +1008,7 @@ export default function PlanningPage() {
     
     // Scroller vers le haut du formulaire
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    setToast('✏️ Mode édition activé');
+    setToast('✏️ Mode édition Publish activé');
     setTimeout(() => setToast(''), 3000);
   }
 
@@ -1050,7 +1065,16 @@ export default function PlanningPage() {
     // Pré-sélectionner le fichier (si disponible)
     if (job.fileUrn) {
       setSelectedItems({
-        [job.fileUrn]: { checked: true, data: { urn: job.fileUrn, name: job.fileName || 'Fichier' } }
+        [job.fileUrn]: { 
+          checked: true, 
+          publishUrn: job.fileUrn,
+          id: job.fileUrn,
+          data: { 
+            urn: job.fileUrn, 
+            name: job.fileName || 'Fichier',
+            id: job.fileUrn
+          }
+        }
       });
     }
     
@@ -1064,17 +1088,18 @@ export default function PlanningPage() {
     const cronParts = (job.cronExpression || '0 2 * * *').split(' ');
     const minute = cronParts[0] || '0';
     const hour = cronParts[1] || '2';
-    setSelectedHour(`${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`);
-    setCronExpression(job.cronExpression || '0 2 * * *');
-    setTimezone(job.timezone || DEFAULT_TIMEZONE);
+    const hourMinute = `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`;
     
     // Déterminer le type de récurrence
     const dayOfWeek = cronParts[4];
-    if (dayOfWeek && dayOfWeek !== '*') {
-      setRecurrenceType('weekly');
+    const isWeekly = dayOfWeek && dayOfWeek !== '*';
+    
+    // Définir les états (le useEffect mettra à jour cronExpression automatiquement)
+    setSelectedHour(hourMinute);
+    setTimezone(job.timezone || DEFAULT_TIMEZONE);
+    setRecurrenceType(isWeekly ? 'weekly' : 'daily');
+    if (isWeekly) {
       setSelectedDayOfWeek(parseInt(dayOfWeek, 10));
-    } else {
-      setRecurrenceType('daily');
     }
     
     // Notification
@@ -1092,6 +1117,14 @@ export default function PlanningPage() {
   React.useEffect(() => {
     loadHubs();
   }, []);
+
+  // Mettre à jour le cronExpression automatiquement quand l'utilisateur change l'heure ou la récurrence
+  React.useEffect(() => {
+    if (selectedHour && recurrenceType) {
+      const newCronExpression = generateCronExpression(recurrenceType, selectedHour, selectedDayOfWeek);
+      setCronExpression(newCronExpression);
+    }
+  }, [selectedHour, recurrenceType, selectedDayOfWeek]);
 
   React.useEffect(() => {
     if (
