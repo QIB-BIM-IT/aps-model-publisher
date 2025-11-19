@@ -154,13 +154,14 @@ export default function GlobalDashboard() {
   const activeJobs = allJobs.filter(j => j.scheduleEnabled).length;
   const totalModels = publishJobs.reduce((sum, j) => sum + (Array.isArray(j.models) ? j.models.length : 0), 0);
   
-  // Nombre de sheets exportées en PDF (stats.uploaded = nombre de sheets, pas de PDFs)
+  // Nombre de sheets exportées en PDF (pas le nombre de PDFs)
+  // Utilise stats.sheetCount qui compte les sheets réelles (même en mode combined)
   const totalSheetsExported = React.useMemo(() => {
     return filteredRuns
       .filter(r => r.jobType === 'pdf-export' || pdfRuns.some(pr => pr.id === r.id))
       .reduce((sum, r) => {
-        const uploaded = r.stats?.uploaded || r.stats?.okCount || 0;
-        return sum + uploaded;
+        const sheetCount = r.stats?.sheetCount || r.stats?.uploaded || r.stats?.okCount || 0;
+        return sum + sheetCount;
       }, 0);
   }, [filteredRuns, pdfRuns]);
   

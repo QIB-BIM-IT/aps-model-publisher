@@ -1273,12 +1273,20 @@ router.post('/export-and-save', async (req, res) => {
       }
     }
 
+    // Calculer le nombre réel de sheets exportées
+    // Mode individual: 1 PDF = 1 sheet, donc sheetCount = uploaded
+    // Mode combined: additionner les mergedCount de chaque résultat
+    const sheetCount = exportMode === 'combined'
+      ? uploadResults.reduce((sum, r) => sum + (r.mergedCount || 1), 0)
+      : uploadResults.length;
+
     const response = {
       success: uploadResults.length > 0 && uploadErrors.length === 0,
       exported: extractedPdfs.length,
       processed: filteredPdfs.length,
       uploaded: uploadResults.length,
       failed: uploadErrors.length,
+      sheetCount, // Nombre réel de sheets exportées
       results: uploadResults,
       errors: uploadErrors.length > 0 ? uploadErrors : undefined,
       filters: {

@@ -102,7 +102,7 @@ class PDFExportSchedulerService {
       }
 
       logger.info(
-        `[PDFExportScheduler] ✅ Export réussi: uploaded=${data.uploaded}, failed=${data.failed}`
+        `[PDFExportScheduler] ✅ Export réussi: uploaded=${data.uploaded} PDFs, ${data.sheetCount || data.uploaded} sheets, failed=${data.failed}`
       );
 
       const durationMs = Date.now() - started;
@@ -111,6 +111,7 @@ class PDFExportSchedulerService {
         results: data.results || [],
         uploaded: data.uploaded || 0,
         failed: data.failed || 0,
+        sheetCount: data.sheetCount || data.uploaded || 0, // Nombre réel de sheets
         errors: data.errors || [],
         durationMs,
       };
@@ -127,6 +128,7 @@ class PDFExportSchedulerService {
     const results = summary.results || [];
     const uploaded = summary.uploaded || 0;
     const failed = summary.failed || 0;
+    const sheetCount = summary.sheetCount || uploaded; // Fallback sur uploaded si sheetCount absent
     const errors = summary.errors || [];
 
     let finalStatus = 'success';
@@ -144,8 +146,9 @@ class PDFExportSchedulerService {
     run.stats = {
       ...(run.stats || {}),
       durationMs: summary.durationMs,
-      uploaded,
+      uploaded, // Nombre de PDFs uploadés
       failed,
+      sheetCount, // Nombre de sheets exportées (peut être > uploaded en mode combined)
       total: uploaded + failed,
     };
 
@@ -156,7 +159,7 @@ class PDFExportSchedulerService {
     await run.save();
 
     logger.info(
-      `[PDFExportScheduler] Run sauvegardé: ${run.id} status=${run.status} stats=${JSON.stringify(run.stats)}`
+      `[PDFExportScheduler] Run sauvegardé: ${run.id} status=${run.status} uploaded=${uploaded} PDFs, ${sheetCount} sheets`
     );
     return run;
   }
