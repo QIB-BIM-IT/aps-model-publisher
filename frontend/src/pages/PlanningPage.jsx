@@ -837,6 +837,7 @@ export default function PlanningPage() {
       setJobName('');
       setJobType(null);
       setShowPDFModal(false);
+      setSelectedItems({}); // Réinitialiser les sélections
       setEditingJob(null); // Sortir du mode édition
       triggerAutoRefreshWindow();
       await Promise.all([refreshPdfJobs({ silent: true }), refreshPdfRuns({ silent: true })]);
@@ -1837,6 +1838,8 @@ export default function PlanningPage() {
                       onClick={() => {
                         setJobType(null);
                         setJobName('');
+                        setSelectedItems({}); // Réinitialiser les sélections
+                        setEditingJob(null); // Sortir du mode édition si actif
                       }}
                       variant="secondary"
                       style={{ padding: '12px 24px', flex: 1 }}
@@ -2383,6 +2386,7 @@ export default function PlanningPage() {
               setShowPDFModal(false);
               setJobType(null);
               setJobName('');
+              setSelectedItems({}); // Réinitialiser les sélections
               setEditingJob(null); // Sortir du mode édition
             }}
             onRunNow={handleRunNowPDF}
