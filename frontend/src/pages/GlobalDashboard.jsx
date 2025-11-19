@@ -333,9 +333,17 @@ export default function GlobalDashboard() {
         </div>
 
         {/* Filtre temporel */}
-        <Card style={{ marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#475569' }}>📅 Période:</span>
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(37, 99, 235, 0.03) 100%)',
+          backdropFilter: 'blur(20px)',
+          borderRadius: 16,
+          border: '1px solid rgba(96, 165, 250, 0.2)',
+          boxShadow: '0 4px 24px rgba(37, 99, 235, 0.15)',
+          padding: 20,
+          marginBottom: 24
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#cbd5e1' }}>📅 Période:</span>
             {[
               { value: 'day', label: 'Aujourd\'hui' },
               { value: 'week', label: 'Cette semaine' },
@@ -349,24 +357,29 @@ export default function GlobalDashboard() {
                 style={{
                   padding: '8px 16px',
                   borderRadius: 8,
-                  border: timeFilter === option.value ? '2px solid #2563eb' : '1px solid rgba(148, 163, 184, 0.3)',
-                  background: timeFilter === option.value ? 'rgba(37, 99, 235, 0.1)' : 'white',
-                  color: timeFilter === option.value ? '#2563eb' : '#64748b',
+                  border: timeFilter === option.value ? '2px solid #3b82f6' : '1px solid rgba(148, 163, 184, 0.3)',
+                  background: timeFilter === option.value 
+                    ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' 
+                    : 'rgba(255, 255, 255, 0.05)',
+                  color: timeFilter === option.value ? '#ffffff' : '#cbd5e1',
                   fontSize: 13,
                   fontWeight: timeFilter === option.value ? 600 : 500,
                   cursor: 'pointer',
-                  transition: 'all 0.2s'
+                  transition: 'all 0.2s',
+                  boxShadow: timeFilter === option.value ? '0 4px 12px rgba(37, 99, 235, 0.4)' : 'none'
                 }}
                 onMouseEnter={(e) => {
                   if (timeFilter !== option.value) {
-                    e.currentTarget.style.background = 'rgba(248, 250, 252, 0.8)';
-                    e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.3)';
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                    e.currentTarget.style.borderColor = 'rgba(96, 165, 250, 0.5)';
+                    e.currentTarget.style.color = '#f1f5f9';
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (timeFilter !== option.value) {
-                    e.currentTarget.style.background = 'white';
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
                     e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+                    e.currentTarget.style.color = '#cbd5e1';
                   }
                 }}
               >
@@ -374,7 +387,7 @@ export default function GlobalDashboard() {
               </button>
             ))}
           </div>
-        </Card>
+        </div>
 
         {error && (
           <div style={{
