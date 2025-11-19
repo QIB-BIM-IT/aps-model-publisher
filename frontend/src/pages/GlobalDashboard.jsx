@@ -7,11 +7,11 @@ import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Toolti
 function Card({ children, title, style = {} }) {
   return (
     <div style={{
-      background: 'rgba(255, 255, 255, 0.95)',
+      background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.04) 100%)',
       backdropFilter: 'blur(20px)',
       borderRadius: 16,
       border: '1px solid rgba(148, 163, 184, 0.2)',
-      boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
+      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
       padding: 24,
       ...style
     }}>
@@ -20,7 +20,7 @@ function Card({ children, title, style = {} }) {
           margin: '0 0 20px 0',
           fontSize: 18,
           fontWeight: 600,
-          color: '#0f172a',
+          color: '#e2e8f0',
           display: 'flex',
           alignItems: 'center',
           gap: 10
@@ -37,13 +37,16 @@ function Card({ children, title, style = {} }) {
 function KPICard({ icon, label, value, color = '#2563eb' }) {
   return (
     <div style={{
-      background: `linear-gradient(135deg, ${color}15 0%, ${color}08 100%)`,
+      background: `linear-gradient(135deg, ${color}20 0%, ${color}10 100%)`,
+      backdropFilter: 'blur(10px)',
       borderRadius: 12,
       padding: '20px 24px',
-      border: `1px solid ${color}30`,
+      border: `1px solid ${color}40`,
+      boxShadow: `0 4px 16px ${color}20, inset 0 1px 0 rgba(255, 255, 255, 0.1)`,
       display: 'flex',
       alignItems: 'center',
-      gap: 16
+      gap: 16,
+      transition: 'transform 0.2s, box-shadow 0.2s'
     }}>
       <div style={{
         fontSize: 36,
@@ -52,14 +55,15 @@ function KPICard({ icon, label, value, color = '#2563eb' }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: `${color}20`,
-        borderRadius: 12
+        background: `${color}30`,
+        borderRadius: 12,
+        boxShadow: `0 4px 12px ${color}30`
       }}>
         {icon}
       </div>
       <div>
-        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 4 }}>{label}</div>
-        <div style={{ fontSize: 28, fontWeight: 700, color: '#0f172a' }}>{value}</div>
+        <div style={{ fontSize: 13, color: '#cbd5e1', marginBottom: 4, fontWeight: 500 }}>{label}</div>
+        <div style={{ fontSize: 28, fontWeight: 700, color: '#f1f5f9' }}>{value}</div>
       </div>
     </div>
   );
@@ -421,18 +425,24 @@ export default function GlobalDashboard() {
           <Card title="📊 Répartition des tâches par heure">
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={hourlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="heure" stroke="#64748b" style={{ fontSize: 12 }} />
-                <YAxis stroke="#64748b" style={{ fontSize: 12 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.2)" />
+                <XAxis dataKey="heure" stroke="#94a3b8" style={{ fontSize: 12, fill: '#cbd5e1' }} />
+                <YAxis stroke="#94a3b8" style={{ fontSize: 12, fill: '#cbd5e1' }} />
                 <Tooltip
                   contentStyle={{
                     background: 'rgba(15, 23, 42, 0.95)',
-                    border: '1px solid rgba(148, 163, 184, 0.2)',
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
                     borderRadius: 8,
                     color: '#fff'
                   }}
                 />
-                <Bar dataKey="jobs" fill="#2563eb" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="jobs" fill="url(#colorGradient)" radius={[8, 8, 0, 0]} />
+                <defs>
+                  <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#3b82f6" stopOpacity={1} />
+                    <stop offset="100%" stopColor="#2563eb" stopOpacity={0.8} />
+                  </linearGradient>
+                </defs>
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -464,11 +474,11 @@ export default function GlobalDashboard() {
                 />
               </PieChart>
             </ResponsiveContainer>
-            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 20, fontSize: 12, color: '#64748b' }}>
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 20, fontSize: 12, color: '#cbd5e1' }}>
               {fileStatusData.map((entry) => (
                 <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ width: 12, height: 12, borderRadius: '50%', background: entry.color }} />
-                  <span>{entry.name}: <strong style={{ color: '#1f2937' }}>{entry.value}</strong></span>
+                  <div style={{ width: 12, height: 12, borderRadius: '50%', background: entry.color, boxShadow: `0 0 8px ${entry.color}60` }} />
+                  <span>{entry.name}: <strong style={{ color: '#f1f5f9' }}>{entry.value}</strong></span>
                 </div>
               ))}
             </div>
@@ -478,7 +488,7 @@ export default function GlobalDashboard() {
         {/* Prochaines exécutions */}
         <Card title="⏰ Prochaines exécutions planifiées" style={{ marginBottom: 24 }}>
           {upcomingJobs.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 20 }}>
+            <p style={{ color: '#94a3b8', textAlign: 'center', padding: 20 }}>
               Aucune exécution planifiée
             </p>
           ) : (
@@ -500,37 +510,40 @@ export default function GlobalDashboard() {
                       gridTemplateColumns: '120px 1fr 150px 100px 80px',
                       alignItems: 'center',
                       padding: '14px 16px',
-                      background: 'rgba(239, 246, 255, 0.5)',
+                      background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(37, 99, 235, 0.06) 100%)',
                       borderRadius: 10,
-                      border: '1px solid rgba(37, 99, 235, 0.15)',
+                      border: '1px solid rgba(96, 165, 250, 0.3)',
                       gap: 16,
                       cursor: 'pointer',
                       transition: 'all 0.2s',
                       textAlign: 'left',
+                      boxShadow: '0 2px 8px rgba(37, 99, 235, 0.15)'
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(239, 246, 255, 0.8)';
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(37, 99, 235, 0.2) 0%, rgba(37, 99, 235, 0.1) 100%)';
                       e.currentTarget.style.transform = 'translateX(4px)';
-                      e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.3)';
+                      e.currentTarget.style.borderColor = 'rgba(96, 165, 250, 0.5)';
+                      e.currentTarget.style.boxShadow = '0 4px 16px rgba(37, 99, 235, 0.3)';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(239, 246, 255, 0.5)';
+                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(37, 99, 235, 0.06) 100%)';
                       e.currentTarget.style.transform = 'none';
-                      e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.15)';
+                      e.currentTarget.style.borderColor = 'rgba(96, 165, 250, 0.3)';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(37, 99, 235, 0.15)';
                     }}
                   >
-                    <div style={{ fontSize: 16, fontWeight: 600, color: '#2563eb', fontFamily: 'monospace' }}>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: '#60a5fa', fontFamily: 'monospace' }}>
                       🕐 {hour}:{minute}
                     </div>
                     <div>
-                      <div style={{ fontSize: 14, fontWeight: 500, color: '#1f2937', marginBottom: 2 }}>
+                      <div style={{ fontSize: 14, fontWeight: 500, color: '#e2e8f0', marginBottom: 2 }}>
                         {job.name || job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`}
                       </div>
-                      <div style={{ fontSize: 12, color: '#6b7280' }}>
+                      <div style={{ fontSize: 12, color: '#94a3b8' }}>
                         {job.projectName || `Projet ${job.projectId?.slice(0, 8)}`} • {job.timezone}
                       </div>
                     </div>
-                    <div style={{ fontSize: 13, color: '#64748b', textAlign: 'right' }}>
+                    <div style={{ fontSize: 13, color: '#cbd5e1', textAlign: 'right' }}>
                       {job.isComplexCron ? (
                         <span style={{ fontStyle: 'italic' }}>Variable</span>
                       ) : (
@@ -543,8 +556,9 @@ export default function GlobalDashboard() {
                         borderRadius: 6,
                         fontSize: 11,
                         fontWeight: 600,
-                        background: 'rgba(34, 197, 94, 0.15)',
-                        color: '#16a34a'
+                        background: 'rgba(34, 197, 94, 0.25)',
+                        color: '#4ade80',
+                        border: '1px solid rgba(34, 197, 94, 0.3)'
                       }}>
                         {job.status || 'idle'}
                       </span>
@@ -555,9 +569,9 @@ export default function GlobalDashboard() {
                         borderRadius: 4,
                         fontSize: 10,
                         fontWeight: 600,
-                        background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.4)',
-                        color: isPublish ? '#1d4ed8' : '#059669',
-                        border: isPublish ? 'none' : '1px solid rgba(16, 185, 129, 0.3)'
+                        background: isPublish ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.25)',
+                        color: isPublish ? '#60a5fa' : '#34d399',
+                        border: `1px solid ${isPublish ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`
                       }}>
                         {isPublish ? '🚀' : '📄'}
                       </span>
@@ -572,20 +586,20 @@ export default function GlobalDashboard() {
         {/* Tableau récapitulatif */}
         <Card title="📋 Toutes les tâches planifiées">
           {allJobs.length === 0 ? (
-            <p style={{ color: '#9ca3af', textAlign: 'center', padding: 40 }}>
+            <p style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>
               Aucune tâche planifiée. Cliquez sur "Planifier une tâche" pour commencer!
             </p>
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr style={{ borderBottom: '2px solid rgba(148, 163, 184, 0.2)', background: 'rgba(248, 250, 252, 0.5)' }}>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Nom</th>
-                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Type</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Projet</th>
-                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Heure</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>Timezone</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#475569' }}>Status</th>
+                  <tr style={{ borderBottom: '2px solid rgba(96, 165, 250, 0.3)', background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.15) 0%, rgba(37, 99, 235, 0.08) 100%)' }}>
+                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Nom</th>
+                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Type</th>
+                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Projet</th>
+                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Heure</th>
+                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Timezone</th>
+                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1' }}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -599,41 +613,42 @@ export default function GlobalDashboard() {
                       <tr
                         key={job.id}
                         style={{
-                          background: index % 2 === 0 ? 'rgba(248, 250, 252, 0.3)' : 'transparent',
-                          borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
-                          cursor: 'pointer'
+                          background: index % 2 === 0 ? 'rgba(255, 255, 255, 0.03)' : 'transparent',
+                          borderBottom: '1px solid rgba(148, 163, 184, 0.15)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s'
                         }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'rgba(239, 246, 255, 0.6)';
+                          e.currentTarget.style.background = 'linear-gradient(135deg, rgba(37, 99, 235, 0.15) 0%, rgba(37, 99, 235, 0.08) 100%)';
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.background = index % 2 === 0 ? 'rgba(248, 250, 252, 0.3)' : 'transparent';
+                          e.currentTarget.style.background = index % 2 === 0 ? 'rgba(255, 255, 255, 0.03)' : 'transparent';
                         }}
                         onClick={() => handleJobClick(job, isPublish ? 'publish' : 'pdf-export')}
                       >
-                        <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 500, borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                        <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 500, color: '#e2e8f0', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
                           {job.name || 'Sans nom'}
                         </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                        <td style={{ padding: '12px 16px', textAlign: 'center', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
                           <span style={{
                             padding: '4px 10px',
                             borderRadius: 6,
                             fontSize: 11,
                             fontWeight: 600,
-                            background: isPublish ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.4)',
-                            color: isPublish ? '#1d4ed8' : '#059669',
-                            border: isPublish ? 'none' : '1px solid rgba(16, 185, 129, 0.3)'
+                            background: isPublish ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.25)',
+                            color: isPublish ? '#60a5fa' : '#34d399',
+                            border: `1px solid ${isPublish ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`
                           }}>
                             {isPublish ? '🚀 Publish' : '📄 PDF'}
                           </span>
                         </td>
-                        <td style={{ padding: '12px 16px', fontSize: 13, borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                        <td style={{ padding: '12px 16px', fontSize: 13, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
                           {job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`}
                         </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: 14, fontWeight: 500, fontFamily: 'monospace', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                        <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: 14, fontWeight: 500, fontFamily: 'monospace', color: '#60a5fa', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
                           🕐 {hour}:{minute}
                         </td>
-                        <td style={{ padding: '12px 16px', fontSize: 13, color: '#64748b', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
+                        <td style={{ padding: '12px 16px', fontSize: 13, color: '#94a3b8', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
                           {job.timezone || 'UTC'}
                         </td>
                         <td style={{ padding: '12px 16px' }}>
@@ -643,11 +658,14 @@ export default function GlobalDashboard() {
                             fontSize: 12,
                             fontWeight: 600,
                             background: job.scheduleEnabled
-                              ? (job.status === 'running' ? 'rgba(251, 146, 60, 0.15)' : 'rgba(34, 197, 94, 0.15)')
-                              : 'rgba(156, 163, 175, 0.15)',
+                              ? (job.status === 'running' ? 'rgba(251, 146, 60, 0.25)' : 'rgba(34, 197, 94, 0.25)')
+                              : 'rgba(156, 163, 175, 0.25)',
                             color: job.scheduleEnabled
-                              ? (job.status === 'running' ? '#ea580c' : '#16a34a')
-                              : '#6b7280'
+                              ? (job.status === 'running' ? '#fb923c' : '#4ade80')
+                              : '#94a3b8',
+                            border: `1px solid ${job.scheduleEnabled
+                              ? (job.status === 'running' ? 'rgba(251, 146, 60, 0.4)' : 'rgba(34, 197, 94, 0.4)')
+                              : 'rgba(156, 163, 175, 0.3)'}`
                           }}>
                             {!job.scheduleEnabled ? 'Pausé' : (job.status || 'idle')}
                           </span>
