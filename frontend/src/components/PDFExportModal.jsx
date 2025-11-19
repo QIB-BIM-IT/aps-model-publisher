@@ -40,6 +40,7 @@ export function PDFExportModal({
   defaultTimezone = 'UTC',
   notifyOnFailure: initialNotifyOnFailure = false,
   setNotifyOnFailure,
+  editingJob = null, // Pour détecter le mode édition
 }) {
   // Options d'export
   const [includeMarkups, setIncludeMarkups] = useState(true);
@@ -279,7 +280,7 @@ export function PDFExportModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 style={{ margin: '0 0 8px 0', fontSize: 24, fontWeight: 700, color: '#0f172a' }}>
-          📄 Export PDF to ACC
+          {editingJob ? '✏️ Modifier l\'export PDF' : '📄 Export PDF to ACC'}
         </h2>
         <p style={{ margin: '0 0 24px 0', fontSize: 14, color: '#64748b' }}>
           Configure ton export et choisis la destination
@@ -873,7 +874,7 @@ export function PDFExportModal({
                   cursor: isPrimaryDisabled || isExporting ? 'not-allowed' : 'pointer',
                 }}
               >
-                {isExporting ? '⏳ Planification...' : '📅 Planifier'}
+                {isExporting ? (editingJob ? '⏳ Mise à jour...' : '⏳ Planification...') : (editingJob ? '✏️ Mettre à jour' : '📅 Planifier')}
               </button>
             </>
           ) : (

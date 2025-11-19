@@ -389,6 +389,9 @@ export default function PlanningPage() {
   const [showPDFModal, setShowPDFModal] = React.useState(false);
   const [isExportingPDF, setIsExportingPDF] = React.useState(false);
 
+  // État pour l'édition de jobs existants
+  const [editingJob, setEditingJob] = React.useState(null); // Contient le job en cours d'édition
+
   const preSelectHub = location.state?.preSelectHub;
   const preSelectProject = location.state?.preSelectProject;
   const highlightJobId = location.state?.highlightJobId;
@@ -800,7 +803,7 @@ export default function PlanningPage() {
       const scheduleCronExpression = generateCronExpression(scheduleRecurrenceType, scheduleHour, scheduleDayOfWeek);
       const scheduleTimezone = config.timezone || timezone;
 
-      await createPDFExportJob({
+      const pdfJobData = {
         name: config.jobName.trim(),
         projectId: selectedProject,
         projectName,
@@ -819,13 +822,22 @@ export default function PlanningPage() {
         exportMode: config.merge ? 'combined' : 'individual',
         mergedFileName: config.merge ? config.mergedFileName : null,
         notifyOnFailure: config.notifyOnFailure !== undefined ? config.notifyOnFailure : notifyOnFailure,
-      });
+      };
 
-      setToast('✅ Tâche PDF planifiée!');
+      // Mode édition ou création
+      if (editingJob && editingJob.type === 'pdf-export') {
+        await patchPDFExportJob(editingJob.id, pdfJobData);
+        setToast('✅ Tâche PDF mise à jour!');
+      } else {
+        await createPDFExportJob(pdfJobData);
+        setToast('✅ Tâche PDF planifiée!');
+      }
+
       setTimeout(() => setToast(''), 3000);
       setJobName('');
       setJobType(null);
       setShowPDFModal(false);
+      setEditingJob(null); // Sortir du mode édition
       triggerAutoRefreshWindow();
       await Promise.all([refreshPdfJobs({ silent: true }), refreshPdfRuns({ silent: true })]);
     } catch (e) {
@@ -865,24 +877,34 @@ export default function PlanningPage() {
     const hubName = nameOf(hubObj, '');
     const projectName = nameOf(projectObj, '');
 
+    const jobData = {
+      name: jobName.trim(),
+      hubId: selectedHub,
+      hubName,
+      projectId: selectedProject,
+      projectName,
+      items,
+      scheduleEnabled: true,
+      cronExpression,
+      timezone,
+      notifyOnFailure: notifyOnFailure,
+    };
+
     try {
-      await createPublishJob({
-        name: jobName.trim(),
-        hubId: selectedHub,
-        hubName,
-        projectId: selectedProject,
-        projectName,
-        items,
-        scheduleEnabled: true,
-        cronExpression,
-        timezone,
-        notifyOnFailure: notifyOnFailure,
-      });
-      setToast('✅ Tâche Publish créée!');
+      // Mode édition ou création
+      if (editingJob && editingJob.type === 'publish') {
+        await patchPublishJob(editingJob.id, jobData);
+        setToast('✅ Tâche Publish mise à jour!');
+      } else {
+        await createPublishJob(jobData);
+        setToast('✅ Tâche Publish créée!');
+      }
+      
       setTimeout(() => setToast(''), 3000);
       setJobName('');
       setJobType(null);
       setSelectedItems({});
+      setEditingJob(null); // Sortir du mode édition
       triggerAutoRefreshWindow();
       await Promise.all([
         refreshJobs({ silent: true }),
@@ -928,6 +950,53 @@ export default function PlanningPage() {
     ]);
   }
 
+  async function handleEditPublishJob(job) {
+    // Entrer en mode édition et pré-remplir le formulaire
+    setEditingJob({ ...job, type: 'publish' });
+    setJobType('publish');
+    setJobName(job.name || '');
+    
+    // Pré-sélectionner le hub et projet
+    if (job.hubId) setSelectedHub(job.hubId);
+    if (job.projectId) setSelectedProject(job.projectId);
+    
+    // Pré-sélectionner les modèles
+    if (Array.isArray(job.models)) {
+      const itemsMap = {};
+      job.models.forEach(model => {
+        if (model.urn) {
+          itemsMap[model.urn] = { checked: true, data: model };
+        }
+      });
+      setSelectedItems(itemsMap);
+    }
+    
+    // Configurer l'horaire
+    const cronParts = (job.cronExpression || '0 2 * * *').split(' ');
+    const minute = cronParts[0] || '0';
+    const hour = cronParts[1] || '2';
+    setSelectedHour(`${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`);
+    setCronExpression(job.cronExpression || '0 2 * * *');
+    setTimezone(job.timezone || DEFAULT_TIMEZONE);
+    
+    // Déterminer le type de récurrence
+    const dayOfWeek = cronParts[4];
+    if (dayOfWeek && dayOfWeek !== '*') {
+      setRecurrenceType('weekly');
+      setSelectedDayOfWeek(parseInt(dayOfWeek, 10));
+    } else {
+      setRecurrenceType('daily');
+    }
+    
+    // Notification
+    setNotifyOnFailure(job.notifyOnFailure || false);
+    
+    // Scroller vers le haut du formulaire
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setToast('✏️ Mode édition activé');
+    setTimeout(() => setToast(''), 3000);
+  }
+
   async function handleTogglePdfJob(job) {
     try {
       await patchPDFExportJob(job.id, { scheduleEnabled: !job.scheduleEnabled });
@@ -966,6 +1035,58 @@ export default function PlanningPage() {
       setToast('❌ ' + (e?.message || 'Erreur suppression PDF'));
       setTimeout(() => setToast(''), 3000);
     }
+  }
+
+  async function handleEditPdfJob(job) {
+    // Entrer en mode édition pour PDF et ouvrir le modal
+    setEditingJob({ ...job, type: 'pdf-export' });
+    setJobType('pdf-export');
+    setJobName(job.name || '');
+    
+    // Pré-sélectionner le hub et projet
+    if (job.hubId) setSelectedHub(job.hubId);
+    if (job.projectId) setSelectedProject(job.projectId);
+    
+    // Pré-sélectionner le fichier (si disponible)
+    if (job.fileUrn) {
+      setSelectedItems({
+        [job.fileUrn]: { checked: true, data: { urn: job.fileUrn, name: job.fileName || 'Fichier' } }
+      });
+    }
+    
+    // Configurer les paramètres PDF
+    setPdfSelectionMode(job.selectionMode || 'all');
+    setPdfSelectedSheets(job.selectedSheets || []);
+    setPdfExportMode(job.exportMode || 'individual');
+    setPdfMergedFileName(job.mergedFileName || 'Documents.pdf');
+    
+    // Configurer l'horaire
+    const cronParts = (job.cronExpression || '0 2 * * *').split(' ');
+    const minute = cronParts[0] || '0';
+    const hour = cronParts[1] || '2';
+    setSelectedHour(`${hour.padStart(2, '0')}:${minute.padStart(2, '0')}`);
+    setCronExpression(job.cronExpression || '0 2 * * *');
+    setTimezone(job.timezone || DEFAULT_TIMEZONE);
+    
+    // Déterminer le type de récurrence
+    const dayOfWeek = cronParts[4];
+    if (dayOfWeek && dayOfWeek !== '*') {
+      setRecurrenceType('weekly');
+      setSelectedDayOfWeek(parseInt(dayOfWeek, 10));
+    } else {
+      setRecurrenceType('daily');
+    }
+    
+    // Notification
+    setNotifyOnFailure(job.notifyOnFailure || false);
+    
+    // Ouvrir le modal PDF
+    setShowPDFModal(true);
+    
+    // Scroller vers le haut
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setToast('✏️ Mode édition PDF activé');
+    setTimeout(() => setToast(''), 3000);
   }
 
   React.useEffect(() => {
@@ -1404,6 +1525,55 @@ export default function PlanningPage() {
                 }}
               />
 
+              {/* Bandeau mode édition */}
+              {editingJob && (
+                <div
+                  style={{
+                    padding: 12,
+                    background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(124, 58, 237, 0.1) 100%)',
+                    border: '2px solid rgba(139, 92, 246, 0.3)',
+                    borderRadius: 10,
+                    marginBottom: 16,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ fontSize: 24 }}>✏️</div>
+                  <div>
+                    <div style={{ fontWeight: 600, color: '#6d28d9', fontSize: 14 }}>
+                      Mode édition activé
+                    </div>
+                    <div style={{ fontSize: 12, color: '#7c3aed' }}>
+                      Vous modifiez la tâche "{editingJob.name || 'Sans nom'}"
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEditingJob(null);
+                      setJobType(null);
+                      setJobName('');
+                      setSelectedItems({});
+                      setToast('❌ Édition annulée');
+                      setTimeout(() => setToast(''), 3000);
+                    }}
+                    style={{
+                      marginLeft: 'auto',
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      border: '1px solid rgba(139, 92, 246, 0.3)',
+                      background: 'white',
+                      color: '#7c3aed',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Annuler
+                  </button>
+                </div>
+              )}
+
               {jobType !== null && (
                 <>
                   <div
@@ -1644,7 +1814,7 @@ export default function PlanningPage() {
                       onClick={jobType === 'publish' ? handleCreatePublishJob : handleCreatePDFExportJob}
                       style={{ padding: '12px 24px', flex: 1 }}
                     >
-                      ✅ Créer
+                      {editingJob ? '✏️ Mettre à jour' : '✅ Créer'}
                     </Button>
                   </div>
                 )}
@@ -1737,6 +1907,15 @@ export default function PlanningPage() {
                               🚀 Run Now
                             </Button>
                             <Button
+                              variant="secondary"
+                              onClick={() => handleEditPublishJob(j)}
+                              style={{ padding: '6px 12px', fontSize: 12, background: '#8b5cf6', color: 'white', border: 'none' }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = '#7c3aed'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = '#8b5cf6'}
+                            >
+                              ✏️ Modifier
+                            </Button>
+                            <Button
                               variant="danger"
                               onClick={() => handleDelete(j)}
                               style={{ padding: '6px 12px', fontSize: 12 }}
@@ -1825,6 +2004,15 @@ export default function PlanningPage() {
                               style={{ padding: '6px 12px', fontSize: 12 }}
                             >
                               🚀 Run Now
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={() => handleEditPdfJob(j)}
+                              style={{ padding: '6px 12px', fontSize: 12, background: '#8b5cf6', color: 'white', border: 'none' }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = '#7c3aed'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = '#8b5cf6'}
+                            >
+                              ✏️ Modifier
                             </Button>
                             <Button
                               variant="danger"
@@ -2162,6 +2350,7 @@ export default function PlanningPage() {
               setShowPDFModal(false);
               setJobType(null);
               setJobName('');
+              setEditingJob(null); // Sortir du mode édition
             }}
             onRunNow={handleRunNowPDF}
             onSchedule={handleSchedulePDF}
@@ -2183,6 +2372,7 @@ export default function PlanningPage() {
             defaultTimezone={DEFAULT_TIMEZONE}
             notifyOnFailure={notifyOnFailure}
             setNotifyOnFailure={setNotifyOnFailure}
+            editingJob={editingJob}
           />
         );
       })()}
