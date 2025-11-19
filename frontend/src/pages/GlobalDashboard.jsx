@@ -149,23 +149,10 @@ export default function GlobalDashboard() {
   
   const filteredRuns = React.useMemo(() => getFilteredRuns(allRuns), [allRuns, getFilteredRuns]);
   
-  // Jobs ayant eu au moins 1 run durant la période filtrée
-  const jobsWithRunsInPeriod = React.useMemo(() => {
-    const jobIds = new Set(filteredRuns.map(r => r.jobId));
-    return allJobs.filter(j => jobIds.has(j.id));
-  }, [filteredRuns, allJobs]);
-  
-  // KPIs filtrées selon la période
-  const totalJobs = jobsWithRunsInPeriod.length;
-  const activeJobs = jobsWithRunsInPeriod.filter(j => j.scheduleEnabled).length;
-  
-  // Modèles des jobs publish ayant exécuté durant la période
-  const totalModels = React.useMemo(() => {
-    const publishJobIds = new Set(filteredRuns.map(r => r.jobId));
-    return publishJobs
-      .filter(j => publishJobIds.has(j.id))
-      .reduce((sum, j) => sum + (Array.isArray(j.models) ? j.models.length : 0), 0);
-  }, [filteredRuns, publishJobs]);
+  // KPIs de configuration (statiques - représentent l'état actuel du système)
+  const totalJobs = allJobs.length;
+  const activeJobs = allJobs.filter(j => j.scheduleEnabled).length;
+  const totalModels = publishJobs.reduce((sum, j) => sum + (Array.isArray(j.models) ? j.models.length : 0), 0);
   
   // Nombre de sheets exportées en PDF (stats.uploaded = nombre de sheets, pas de PDFs)
   const totalSheetsExported = React.useMemo(() => {
