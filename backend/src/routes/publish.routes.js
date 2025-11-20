@@ -55,8 +55,19 @@ function normalizeJobInput(body) {
   out.projectId = String(body.projectId || '').trim();
   const rawProjectName = body.projectName;
   out.projectName = rawProjectName == null ? null : String(rawProjectName).trim() || null;
+  
+  // Traiter les items (modèles)
   const items = Array.isArray(body.items) ? body.items : [];
-  out.models = items.filter(Boolean).map(String);
+  
+  // Si items contient des objets {urn, name}, les garder
+  // Sinon, juste convertir en strings
+  out.models = items.filter(Boolean).map(item => {
+    if (typeof item === 'object' && item.urn) {
+      return { urn: String(item.urn), name: item.name || 'Maquette' };
+    }
+    return String(item);
+  });
+  
   out.scheduleEnabled = body.scheduleEnabled !== false;
   out.cronExpression = String(body.cronExpression || '0 2 * * *').trim();
   out.timezone = String(body.timezone || 'UTC').trim();
@@ -80,8 +91,18 @@ function validateJobPayload(p) {
   if (!Array.isArray(p.models) || p.models.length === 0) return 'items (models) requis';
   if (!cron.validate(p.cronExpression)) return 'cronExpression invalide';
   if (!validTz(p.timezone)) return 'timezone invalide';
-  const bad = p.models.find((u) => !validUrn(u));
-  if (bad) return `URN invalide: ${bad}`;
+  
+  // Valider les URNs (qui peuvent être des strings ou des objets {urn, name})
+  const bad = p.models.find((model) => {
+    const urn = typeof model === 'string' ? model : model.urn;
+    return !validUrn(urn);
+  });
+  
+  if (bad) {
+    const badUrn = typeof bad === 'string' ? bad : bad.urn;
+    return `URN invalide: ${badUrn}`;
+  }
+  
   return null;
 }
 

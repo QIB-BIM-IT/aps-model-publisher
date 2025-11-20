@@ -85,36 +85,265 @@ export function PDFExportModal({
   const lastLoadedFileUrnRef = React.useRef(null);
   const loadingRef = React.useRef(false);
 
+  // État pour gérer l'expansion de l'arbre de dossiers
+  const [expandedFolders, setExpandedFolders] = useState(new Set());
+
+  // Clés pour stocker le dossier de destination dans localStorage
+  const STORAGE_KEY = `pdf_export_last_folder_${projectId}`;
+  const STORAGE_PATH_KEY = `pdf_export_last_folder_path_${projectId}`;
+  const STORAGE_FOLDER_OBJ_KEY = `pdf_export_last_folder_obj_${projectId}`;
+
+  // Fonction pour trouver le chemin vers un dossier (tous ses parents)
+  const findFolderPath = React.useCallback((folderId, folders, childrenMap) => {
+    const path = [];
+    
+    // Fonction récursive pour chercher le dossier
+    const findInTree = (currentFolders, currentPath = []) => {
+      for (const folder of currentFolders) {
+        if (folder.id === folderId) {
+          // Trouvé ! Retourner le chemin complet
+          return [...currentPath, folder.id];
+        }
+        
+        // Chercher dans les enfants
+        const children = childrenMap.get(folder.id);
+        if (Array.isArray(children) && children.length > 0) {
+          const result = findInTree(children, [...currentPath, folder.id]);
+          if (result) return result;
+        }
+      }
+      return null;
+    };
+
+    const result = findInTree(folders);
+    return result || [];
+  }, []);
+
+  // Fonction pour auto-expander l'arbre vers un dossier
+  const autoExpandToFolder = React.useCallback((folderPathArray) => {
+    if (!folderPathArray || folderPathArray.length === 0) return;
+    
+    // Enlever le dernier élément (le dossier lui-même, on ne l'expand pas)
+    const pathToExpand = folderPathArray.slice(0, -1);
+    
+    // Charger les enfants de tous les dossiers dans le chemin si nécessaire
+    let needsLoading = false;
+    for (const parentId of pathToExpand) {
+      const kids = childrenMap.get(parentId);
+      if (!kids) {
+        // Les enfants ne sont pas encore chargés, les charger
+        console.log('🔄 Chargement des enfants de:', parentId);
+        onLoadChildren(parentId);
+        needsLoading = true;
+      }
+    }
+    
+    // Si on doit charger des dossiers, attendre un peu avant d'expander
+    const delay = needsLoading ? 800 : 100;
+    
+    setTimeout(() => {
+      console.log('🌳 Expansion effective du chemin:', pathToExpand);
+      setExpandedFolders(new Set(pathToExpand));
+    }, delay);
+  }, [childrenMap, onLoadChildren]);
+
   // Pré-remplir les valeurs en mode édition
   useEffect(() => {
     if (editingJob) {
+      console.log('✏️ Mode édition activé:', editingJob);
+      
       // Pré-remplir le mode et les sheets
       if (editingJob.selectionMode) setSelectionMode(editingJob.selectionMode);
       if (editingJob.exportMode === 'combined') setMerge(true);
       if (editingJob.mergedFileName) setMergedFileName(editingJob.mergedFileName);
       
       // Pré-sélectionner le dossier si possible
-      if (editingJob.folderId && (topFolders || childrenMap)) {
+      if (editingJob.folderId && topFolders) {
         // Rechercher le dossier dans topFolders
         const folder = topFolders?.find(f => f.id === editingJob.folderId);
         if (folder) {
+          console.log('✅ Dossier trouvé dans topFolders (édition):', folder.attributes?.displayName || folder.name);
           setSelectedFolder(folder);
+          const path = findFolderPath(editingJob.folderId, topFolders, childrenMap);
+          if (path.length > 0) {
+            autoExpandToFolder(path);
+          }
         } else {
           // Rechercher dans childrenMap
           const allFolders = Array.from(childrenMap?.values() || []).flat();
           const foundFolder = allFolders.find(f => f.id === editingJob.folderId);
           if (foundFolder) {
+            console.log('✅ Dossier trouvé dans childrenMap (édition):', foundFolder.attributes?.displayName || foundFolder.name);
             setSelectedFolder(foundFolder);
+            const path = findFolderPath(editingJob.folderId, topFolders, childrenMap);
+            if (path.length > 0) {
+              autoExpandToFolder(path);
+            }
+          } else {
+            // Dossier non trouvé dans l'arbre, créer un objet folder temporaire avec les infos du job
+            console.warn('⚠️ Dossier non trouvé dans l\'arbre (édition), création d\'un objet temporaire');
+            const tempFolder = {
+              id: editingJob.folderId,
+              name: editingJob.folderName || 'Dossier',
+              attributes: {
+                displayName: editingJob.folderName || 'Dossier'
+              },
+              type: 'folders'
+            };
+            console.log('📁 Utilisation du dossier temporaire:', tempFolder);
+            setSelectedFolder(tempFolder);
+            
+            // Essayer d'obtenir le chemin depuis localStorage
+            try {
+              const savedPathJson = localStorage.getItem(`pdf_export_last_folder_path_${projectId}`);
+              if (savedPathJson) {
+                const savedPath = JSON.parse(savedPathJson);
+                if (Array.isArray(savedPath) && savedPath.length > 0) {
+                  console.log('🌳 Auto-expansion du chemin (depuis localStorage):', savedPath);
+                  autoExpandToFolder(savedPath);
+                }
+              }
+            } catch (e) {
+              console.warn('Erreur récupération du chemin depuis localStorage:', e);
+            }
           }
         }
       }
     }
-  }, [editingJob, topFolders, childrenMap]);
+  }, [editingJob, topFolders, childrenMap, autoExpandToFolder, findFolderPath, projectId]);
+
+  // Restaurer le dernier dossier sélectionné depuis localStorage (seulement en mode création)
+  useEffect(() => {
+    // Ne pas restaurer si on est en mode édition (editingJob a priorité)
+    if (editingJob || !projectId || !topFolders || topFolders.length === 0) {
+      return;
+    }
+
+    try {
+      const savedFolderId = localStorage.getItem(STORAGE_KEY);
+      const savedPathJson = localStorage.getItem(STORAGE_PATH_KEY);
+      const savedFolderObjJson = localStorage.getItem(STORAGE_FOLDER_OBJ_KEY);
+      
+      console.log('📂 Restauration du dossier:', { savedFolderId, savedPathJson, savedFolderObjJson });
+      
+      if (savedFolderId) {
+        // Rechercher le dossier dans topFolders
+        const folder = topFolders.find(f => f.id === savedFolderId);
+        if (folder) {
+          console.log('✅ Dossier trouvé dans topFolders:', folder.attributes?.displayName || folder.name);
+          setSelectedFolder(folder);
+          // Si on a le chemin sauvegardé, l'utiliser
+          if (savedPathJson) {
+            try {
+              const savedPath = JSON.parse(savedPathJson);
+              if (Array.isArray(savedPath) && savedPath.length > 0) {
+                console.log('🌳 Auto-expansion du chemin:', savedPath);
+                autoExpandToFolder(savedPath);
+              }
+            } catch (e) {
+              console.warn('Erreur parsing du chemin:', e);
+            }
+          }
+          return;
+        }
+
+        // Rechercher dans childrenMap si non trouvé dans topFolders
+        const allFolders = Array.from(childrenMap?.values() || []).flat();
+        const foundFolder = allFolders.find(f => f.id === savedFolderId);
+        if (foundFolder) {
+          console.log('✅ Dossier trouvé dans childrenMap:', foundFolder.attributes?.displayName || foundFolder.name);
+          setSelectedFolder(foundFolder);
+          if (savedPathJson) {
+            try {
+              const savedPath = JSON.parse(savedPathJson);
+              if (Array.isArray(savedPath) && savedPath.length > 0) {
+                console.log('🌳 Auto-expansion du chemin:', savedPath);
+                autoExpandToFolder(savedPath);
+              }
+            } catch (e) {
+              console.warn('Erreur parsing du chemin:', e);
+            }
+          }
+        } else {
+          // Dossier non trouvé dans l'arbre, utiliser l'objet sauvegardé
+          console.warn('⚠️ Dossier non trouvé dans l\'arbre, utilisation de l\'objet sauvegardé');
+          if (savedFolderObjJson) {
+            try {
+              const savedFolderObj = JSON.parse(savedFolderObjJson);
+              console.log('✅ Restauration depuis l\'objet sauvegardé:', savedFolderObj.attributes?.displayName || savedFolderObj.name);
+              setSelectedFolder(savedFolderObj);
+              // Essayer d'auto-expander avec le chemin sauvegardé
+              if (savedPathJson) {
+                try {
+                  const savedPath = JSON.parse(savedPathJson);
+                  if (Array.isArray(savedPath) && savedPath.length > 0) {
+                    console.log('🌳 Auto-expansion du chemin (objet sauvegardé):', savedPath);
+                    autoExpandToFolder(savedPath);
+                  }
+                } catch (e) {
+                  console.warn('Erreur parsing du chemin:', e);
+                }
+              }
+            } catch (e) {
+              console.warn('Erreur parsing de l\'objet dossier:', e);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Erreur lors de la restauration du dossier depuis localStorage:', error);
+    }
+  }, [editingJob, projectId, topFolders, childrenMap, STORAGE_KEY, STORAGE_PATH_KEY, STORAGE_FOLDER_OBJ_KEY, autoExpandToFolder]);
+
+  // Sauvegarder le dossier sélectionné dans localStorage
+  useEffect(() => {
+    if (selectedFolder?.id && projectId && topFolders) {
+      try {
+        localStorage.setItem(STORAGE_KEY, selectedFolder.id);
+        
+        // Sauvegarder l'objet complet du dossier (pour pouvoir le restaurer même si les parents ne sont pas chargés)
+        localStorage.setItem(STORAGE_FOLDER_OBJ_KEY, JSON.stringify({
+          id: selectedFolder.id,
+          name: selectedFolder.name,
+          attributes: selectedFolder.attributes,
+          type: selectedFolder.type
+        }));
+        
+        // Trouver et sauvegarder le chemin
+        const path = findFolderPath(selectedFolder.id, topFolders, childrenMap);
+        if (path.length > 0) {
+          localStorage.setItem(STORAGE_PATH_KEY, JSON.stringify(path));
+        }
+      } catch (error) {
+        console.warn('Erreur lors de la sauvegarde du dossier dans localStorage:', error);
+      }
+    }
+  }, [selectedFolder, projectId, topFolders, childrenMap, STORAGE_KEY, STORAGE_PATH_KEY, STORAGE_FOLDER_OBJ_KEY, findFolderPath]);
 
   const selectedSheets = useMemo(() => {
     if (selectionMode !== 'custom') return [];
     const keySet = new Set(selectedSheetKeys);
-    return availableSheets.filter((sheet) => keySet.has(getSheetKey(sheet)));
+    const filtered = availableSheets.filter((sheet) => keySet.has(getSheetKey(sheet)));
+    
+    // Trier les sheets sélectionnés dans le même ordre que l'affichage
+    // (tri par numéro avec localeCompare numérique, puis par nom)
+    return filtered.sort((a, b) => {
+      const numberA = a?.number || '';
+      const numberB = b?.number || '';
+
+      if (numberA && numberB) {
+        const comparison = numberA.localeCompare(numberB, undefined, { numeric: true });
+        if (comparison !== 0) {
+          return comparison;
+        }
+      } else if (numberA) {
+        return -1;
+      } else if (numberB) {
+        return 1;
+      }
+
+      return (a?.name || '').localeCompare(b?.name || '');
+    });
   }, [selectionMode, selectedSheetKeys, availableSheets]);
 
   const handleLoadSheets = React.useCallback(async () => {
@@ -207,7 +436,8 @@ export function PDFExportModal({
       setSelectedSheetKeys([]);
       setCacheKey(null);
       lastLoadedFileUrnRef.current = null;
-      setSelectedFolder(null);
+      // NE PAS réinitialiser selectedFolder ici - il doit persister entre les sessions
+      // setSelectedFolder(null);
       loadingRef.current = false;
       return;
     }
@@ -273,6 +503,19 @@ export function PDFExportModal({
     isExporting ||
     !selectedFolder ||
     (selectionMode === 'custom' && selectedSheetCount === 0);
+
+  // Debug: Log pour comprendre l'état des boutons
+  React.useEffect(() => {
+    console.log('🔍 État du bouton:', {
+      loadingSheets,
+      isExporting,
+      selectedFolder: selectedFolder?.id,
+      selectedFolderName: selectedFolder?.attributes?.displayName || selectedFolder?.name,
+      selectionMode,
+      selectedSheetCount,
+      isPrimaryDisabled
+    });
+  }, [loadingSheets, isExporting, selectedFolder, selectionMode, selectedSheetCount, isPrimaryDisabled]);
 
   return (
     <div
@@ -587,6 +830,8 @@ export function PDFExportModal({
                   onLoadChildren={onLoadChildren}
                   selectedFolder={selectedFolder}
                   onSelectFolder={setSelectedFolder}
+                  expandedFolders={expandedFolders}
+                  setExpandedFolders={setExpandedFolders}
                 />
               ))
             ) : (
@@ -932,14 +1177,24 @@ export function PDFExportModal({
 }
 
 // Composant FolderTreeNode (même que dans PDFSaveAsModal.jsx)
-function FolderTreeNode({ folder, childrenMap, onLoadChildren, selectedFolder, onSelectFolder }) {
-  const [expanded, setExpanded] = React.useState(false);
+function FolderTreeNode({ folder, childrenMap, onLoadChildren, selectedFolder, onSelectFolder, expandedFolders, setExpandedFolders }) {
   const id = folder.id;
   const kids = childrenMap.get(id) || null;
   const loading = kids === 'loading';
   const folderType = folder?.type || folder?.attributes?.extension?.type || '';
   const isFolder = typeof folderType === 'string' && folderType.includes('folder');
   const isSelected = isFolder && selectedFolder?.id === id;
+  const expanded = expandedFolders.has(id);
+
+  const toggleExpanded = () => {
+    const newExpanded = new Set(expandedFolders);
+    if (expanded) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedFolders(newExpanded);
+  };
 
   return (
     <div>
@@ -966,7 +1221,7 @@ function FolderTreeNode({ folder, childrenMap, onLoadChildren, selectedFolder, o
           <button
             onClick={() => {
               if (!kids) onLoadChildren(id);
-              setExpanded((e) => !e);
+              toggleExpanded();
             }}
             style={{
               cursor: 'pointer',
@@ -1023,6 +1278,8 @@ function FolderTreeNode({ folder, childrenMap, onLoadChildren, selectedFolder, o
                 onLoadChildren={onLoadChildren}
                 selectedFolder={selectedFolder}
                 onSelectFolder={onSelectFolder}
+                expandedFolders={expandedFolders}
+                setExpandedFolders={setExpandedFolders}
               />
             ))}
         </div>

@@ -683,10 +683,31 @@ export default function PlanningPage() {
       return;
     }
 
+    // Fonction pour trier les sheets par numéro puis par nom
+    const sortSheets = (sheets) => {
+      return sheets.slice().sort((a, b) => {
+        const numberA = a?.number || '';
+        const numberB = b?.number || '';
+
+        if (numberA && numberB) {
+          const comparison = numberA.localeCompare(numberB, undefined, { numeric: true });
+          if (comparison !== 0) {
+            return comparison;
+          }
+        } else if (numberA) {
+          return -1;
+        } else if (numberB) {
+          return 1;
+        }
+
+        return (a?.name || '').localeCompare(b?.name || '');
+      });
+    };
+
     const selectedSheetNames =
       config.mode === 'custom'
         ? (config.customSheets || []).map((s) => (typeof s === 'string' ? s : s.name || s)).filter(Boolean)
-        : (config.availableSheets || []).map((s) => (typeof s === 'string' ? s : s.name || s)).filter(Boolean);
+        : sortSheets(config.availableSheets || []).map((s) => (typeof s === 'string' ? s : s.name || s)).filter(Boolean);
 
     if (selectedSheetNames.length === 0) {
       setToast('⚠️ Aucune sheet sélectionnée');
@@ -860,7 +881,12 @@ export default function PlanningPage() {
   }
 
   async function handleCreatePublishJob() {
-    const items = Object.values(selectedItems).map((item) => item.publishUrn);
+    // Convertir selectedItems en array d'objets {urn, name}
+    const items = Object.values(selectedItems).map((item) => ({
+      urn: item.publishUrn || item.data?.urn || item.urn,
+      name: item.name || item.data?.name || nameOf(item, 'Maquette')
+    }));
+    
     if (!selectedHub || !selectedProject || items.length === 0) {
       setToast('⚠️ Sélectionne au moins une maquette');
       setTimeout(() => setToast(''), 3000);
@@ -965,16 +991,29 @@ export default function PlanningPage() {
     if (Array.isArray(job.models) && job.models.length > 0) {
       const itemsMap = {};
       job.models.forEach(model => {
-        // Les modèles sont stockés avec { urn, name } dans la DB
-        // Le formulaire attend { publishUrn, data: { urn, name } }
-        const modelUrn = model.urn || model.publishUrn || model.id;
+        // Les modèles peuvent être stockés de deux façons :
+        // 1. String simple : "urn:..." (c'est le cas actuellement)
+        // 2. Objet : { urn, name }
+        let modelUrn, modelName;
+        
+        if (typeof model === 'string') {
+          // Cas 1 : model est déjà l'URN
+          modelUrn = model;
+          modelName = 'Maquette'; // Nom par défaut car on n'a pas le vrai nom
+        } else {
+          // Cas 2 : model est un objet
+          modelUrn = model.urn || model.publishUrn || model.id;
+          modelName = model.name || 'Maquette';
+        }
+        
         if (modelUrn) {
           itemsMap[modelUrn] = { 
             checked: true, 
             publishUrn: modelUrn, // Utilisé lors de la création du job
+            name: modelName, // Pour que nameOf() le trouve
             data: { 
               urn: modelUrn, 
-              name: model.name || 'Maquette',
+              name: modelName,
               id: modelUrn
             }
           };
@@ -983,7 +1022,9 @@ export default function PlanningPage() {
       setSelectedItems(itemsMap);
       
       // Log pour debugging
-      console.log('[Edit] Modèles pré-sélectionnés:', Object.keys(itemsMap).length);
+      console.log('[Edit Publish] Modèles pré-sélectionnés:', Object.keys(itemsMap).length);
+      console.log('[Edit Publish] Détails des modèles:', itemsMap);
+      console.log('[Edit Publish] Job.models:', job.models);
     }
     
     // Configurer l'horaire
