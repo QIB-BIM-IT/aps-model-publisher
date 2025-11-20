@@ -811,6 +811,38 @@ router.post('/export-from-cache', asyncHandler(async (req, res) => {
 
     logger.info(`[ExportFromCache] ${selectedPdfs.length} PDF(s) sélectionné(s)`);
 
+    // Trier les PDFs dans l'ordre demandé par selectedSheetNames
+    // Créer un Map pour retrouver rapidement l'index d'un nom de sheet
+    const sheetNameToIndex = new Map();
+    selectedSheetNames.forEach((name, index) => {
+      const normalized = stripPdfName(String(name || '').trim());
+      sheetNameToIndex.set(normalized, index);
+      // Aussi stocker le nom original pour correspondance exacte
+      sheetNameToIndex.set(String(name || '').trim(), index);
+    });
+
+    // Trier les PDFs selon l'ordre des sheets demandés
+    const sortedPdfs = selectedPdfs.sort((a, b) => {
+      const nameA = a.name || a.filename || '';
+      const nameB = b.name || b.filename || '';
+      
+      // Nettoyer les noms (supprimer "Feuilles -" etc.)
+      const cleanA = nameA.replace(/^Feuilles\s*[-_]?\s*/i, '').trim();
+      const cleanB = nameB.replace(/^Feuilles\s*[-_]?\s*/i, '').trim();
+      
+      // Normaliser les noms
+      const normA = stripPdfName(nameA);
+      const normB = stripPdfName(nameB);
+      
+      // Trouver les index dans selectedSheetNames
+      const indexA = sheetNameToIndex.get(cleanA) ?? sheetNameToIndex.get(normA) ?? sheetNameToIndex.get(nameA) ?? 999999;
+      const indexB = sheetNameToIndex.get(cleanB) ?? sheetNameToIndex.get(normB) ?? sheetNameToIndex.get(nameB) ?? 999999;
+      
+      return indexA - indexB;
+    });
+
+    logger.info(`[ExportFromCache] PDFs triés dans l'ordre demandé`);
+
     const userToken = await apsAuthService.ensureValidToken(req.userId);
 
     const uploadResults = [];
@@ -822,9 +854,9 @@ router.post('/export-from-cache', asyncHandler(async (req, res) => {
       );
 
       try {
-        logger.info(`[ExportFromCache] Fusion de ${selectedPdfs.length} PDFs...`);
+        logger.info(`[ExportFromCache] Fusion de ${sortedPdfs.length} PDFs...`);
         const mergedBuffer = await pdfUploadService.mergePDFs(
-          selectedPdfs.map((pdf) => pdf.buffer),
+          sortedPdfs.map((pdf) => pdf.buffer),
           sanitizedName
         );
 
@@ -841,7 +873,7 @@ router.post('/export-from-cache', asyncHandler(async (req, res) => {
           success: true,
           itemId: result.itemId,
           versionId: result.versionId,
-          mergedCount: selectedPdfs.length,
+          mergedCount: sortedPdfs.length,
         });
 
         logger.info('[ExportFromCache] ✅ PDF fusionné uploadé');
@@ -853,7 +885,7 @@ router.post('/export-from-cache', asyncHandler(async (req, res) => {
         });
       }
     } else {
-      for (const pdf of selectedPdfs) {
+      for (const pdf of sortedPdfs) {
         const sanitizedName = pdfUploadService.ensurePdfExtension(
           pdfUploadService.sanitizeFileName((pdf.name || '').trim())
         );
@@ -1199,8 +1231,38 @@ router.post('/export-and-save', async (req, res) => {
         }
       });
 
+      // Trier les PDFs matched selon l'ordre des customSheets
+      const sheetIndexMap = new Map();
+      customSheets.forEach((sheet, index) => {
+        if (sheet?.name) {
+          sheetIndexMap.set(sheet.name, index);
+          sheetIndexMap.set(stripPdfName(sheet.name), index);
+        }
+        if (sheet?.number) {
+          sheetIndexMap.set(sanitizeString(sheet.number), index);
+        }
+      });
+
+      matched.sort((a, b) => {
+        const sheetA = a.matchedSheet;
+        const sheetB = b.matchedSheet;
+        
+        const indexA = sheetIndexMap.get(sheetA?.name) ?? sheetIndexMap.get(stripPdfName(sheetA?.name)) ?? 999999;
+        const indexB = sheetIndexMap.get(sheetB?.name) ?? sheetIndexMap.get(stripPdfName(sheetB?.name)) ?? 999999;
+        
+        return indexA - indexB;
+      });
+
       selectedPdfs = matched;
       unmatchedSheets = notMatched;
+    } else {
+      // Mode "all": trier les PDFs par nom de façon naturelle (numérique + alphabétique)
+      selectedPdfs.sort((a, b) => {
+        const nameA = a.originalName || '';
+        const nameB = b.originalName || '';
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+      });
+      logger.info('[ExportAndSave] PDFs triés par ordre naturel (mode "all")');
     }
 
     logger.info(
@@ -1217,6 +1279,7 @@ router.post('/export-and-save', async (req, res) => {
       );
 
       try {
+        logger.info('[ExportAndSave] PDFs triés dans l\'ordre demandé pour la fusion');
         const mergedBuffer = await pdfUploadService.mergePDFs(
           selectedPdfs.map((pdf) => pdf.buffer),
           targetName
