@@ -7,12 +7,14 @@ const cron = require('node-cron');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { PublishJob, PublishRun, User } = require('../models');
 const scheduler = require('../services/scheduler.service');
+const apsAccessService = require('../services/apsAccess.service');
 
 // ✅ Import error handler
 const {
   asyncHandler,
   ValidationError,
   NotFoundError,
+  ForbiddenError,
 } = require('../middleware/errorHandler.middleware');
 
 // ------------- helpers -------------
@@ -194,7 +196,8 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
 }));
 
 router.get('/jobs', asyncHandler(async (req, res) => {
-  const where = { userId: req.userId };
+  // 🆕 Lecture globale : tous les utilisateurs voient toutes les tâches
+  const where = {};
   if (req.query.projectId) where.projectId = String(req.query.projectId);
   if (req.query.hubId) where.hubId = String(req.query.hubId);
   if (String(req.query.active || '').length) {
@@ -215,8 +218,22 @@ router.get('/jobs', asyncHandler(async (req, res) => {
 
   const jobsWithUser = jobs.map((job) => {
     const jobData = job.toJSON();
+    
+    // Normaliser les models pour assurer qu'ils sont tous au format {urn, name}
+    const normalizedModels = (jobData.models || []).map((model) => {
+      if (typeof model === 'string') {
+        // Ancien format : juste l'URN
+        return { urn: model, name: 'Maquette' };
+      } else if (typeof model === 'object' && model.urn) {
+        // Nouveau format : objet avec urn et name
+        return { urn: model.urn, name: model.name || 'Maquette' };
+      }
+      return model;
+    });
+    
     return {
       ...jobData,
+      models: normalizedModels,
       userName: jobData.user?.name || jobData.user?.email || 'Utilisateur inconnu',
     };
   });
@@ -226,8 +243,15 @@ router.get('/jobs', asyncHandler(async (req, res) => {
 
 router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
   const job = await PublishJob.findByPk(req.params.id);
-  if (!job || job.userId !== req.userId) {
+  if (!job) {
     throw new NotFoundError('Job');
+  }
+
+  // 🆕 Vérification d'accès au projet APS (Option B)
+  // L'utilisateur peut modifier s'il a accès au projet dans ACC
+  const hasAccess = await apsAccessService.checkUserProjectAccess(req.userId, job.projectId, job.hubId);
+  if (!hasAccess) {
+    throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
 
   const merged = normalizeJobInput({ ...job.toJSON(), ...req.body });
@@ -263,8 +287,14 @@ router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
 
 router.delete('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
   const job = await PublishJob.findByPk(req.params.id);
-  if (!job || job.userId !== req.userId) {
+  if (!job) {
     throw new NotFoundError('Job');
+  }
+
+  // 🆕 Vérification d'accès au projet APS (Option B)
+  const hasAccess = await apsAccessService.checkUserProjectAccess(req.userId, job.projectId, job.hubId);
+  if (!hasAccess) {
+    throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
 
   scheduler.unscheduleJob(job.id);
@@ -275,8 +305,14 @@ router.delete('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
 
 router.post('/jobs/:id/run', rateLimit, asyncHandler(async (req, res) => {
   const job = await PublishJob.findByPk(req.params.id);
-  if (!job || job.userId !== req.userId) {
+  if (!job) {
     throw new NotFoundError('Job');
+  }
+
+  // 🆕 Vérification d'accès au projet APS
+  const hasAccess = await apsAccessService.checkUserProjectAccess(req.userId, job.projectId, job.hubId);
+  if (!hasAccess) {
+    throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
 
   const { run, alreadyRunning } = await scheduler.runJobNow(job.id, { job });
@@ -292,7 +328,8 @@ router.post('/jobs/:id/run', rateLimit, asyncHandler(async (req, res) => {
 
 // ---------- RUNS (historique) ----------
 router.get('/runs', asyncHandler(async (req, res) => {
-  const where = { userId: req.userId };
+  // 🆕 Lecture globale : tous voient tous les runs
+  const where = {};
   if (req.query.projectId) where.projectId = String(req.query.projectId);
   if (req.query.jobId) where.jobId = String(req.query.jobId);
   if (req.query.status) where.status = String(req.query.status);
@@ -309,12 +346,13 @@ router.get('/runs', asyncHandler(async (req, res) => {
 
 router.get('/jobs/:id/runs', asyncHandler(async (req, res) => {
   const job = await PublishJob.findByPk(req.params.id);
-  if (!job || job.userId !== req.userId) {
+  if (!job) {
     throw new NotFoundError('Job');
   }
 
+  // 🆕 Tous peuvent voir les runs de tous les jobs
   const runs = await PublishRun.findAll({
-    where: { jobId: job.id, userId: req.userId },
+    where: { jobId: job.id },
     order: [['createdAt', 'DESC']],
     limit: Math.min(parseInt(req.query.limit || '50', 10), 200),
   });

@@ -1951,6 +1951,9 @@ export default function PlanningPage() {
                           <div style={{ fontSize: 12, color: '#64748b' }}>
                             {Array.isArray(j.models) ? j.models.length : 0} maquettes • 🕐 {displayTime} • {j.timezone || 'UTC'}
                           </div>
+                          <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
+                            Planifiée par : <span style={{ fontWeight: 500, color: '#475569' }}>{j.userName || 'Utilisateur inconnu'}</span>
+                          </div>
                           <div>
                             <span
                               style={{
@@ -2050,6 +2053,9 @@ export default function PlanningPage() {
                           <div style={{ fontWeight: 600, color: '#1f2937' }}>{j.name || 'Sans nom'}</div>
                           <div style={{ fontSize: 12, color: '#64748b' }}>
                             {j.fileName || j.fileUrn?.slice(0, 8)} • 🕐 {displayTime} • {j.timezone || 'UTC'}
+                          </div>
+                          <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
+                            Planifiée par : <span style={{ fontWeight: 500, color: '#475569' }}>{j.userName || 'Utilisateur inconnu'}</span>
                           </div>
                           <div>
                             <span
