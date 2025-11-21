@@ -45,6 +45,12 @@ class NotFoundError extends AppError {
   }
 }
 
+class ForbiddenError extends AppError {
+  constructor(message = 'Accès refusé') {
+    super(message, 403);
+  }
+}
+
 class ExternalAPIError extends AppError {
   constructor(service, message) {
     super(`Erreur ${service}: ${message}`, 502);
@@ -202,5 +208,6 @@ module.exports = {
   RateLimitError,
   ValidationError,
   NotFoundError,
+  ForbiddenError,
   ExternalAPIError,
 };

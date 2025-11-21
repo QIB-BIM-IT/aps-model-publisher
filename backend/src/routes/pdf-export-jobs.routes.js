@@ -8,11 +8,13 @@ const cron = require('node-cron');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { PDFExportJob, PDFExportRun, User } = require('../models');
 const scheduler = require('../services/scheduler.service');
+const apsAccessService = require('../services/apsAccess.service');
 
 const {
   asyncHandler,
   ValidationError,
   NotFoundError,
+  ForbiddenError,
 } = require('../middleware/errorHandler.middleware');
 
 // ============= HELPERS =============
@@ -166,7 +168,8 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
 }));
 
 router.get('/jobs', asyncHandler(async (req, res) => {
-  const where = { userId: req.userId };
+  // 🆕 Lecture globale : tous les utilisateurs voient toutes les tâches
+  const where = {};
   if (req.query.projectId) where.projectId = String(req.query.projectId);
   if (req.query.status) where.status = String(req.query.status);
   if (String(req.query.active || '').length) {
@@ -198,8 +201,14 @@ router.get('/jobs', asyncHandler(async (req, res) => {
 
 router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
   const job = await PDFExportJob.findByPk(req.params.id);
-  if (!job || job.userId !== req.userId) {
+  if (!job) {
     throw new NotFoundError('Job');
+  }
+
+  // 🆕 Vérification d'accès au projet APS (Option B)
+  const hasAccess = await apsAccessService.checkUserProjectAccess(req.userId, job.projectId);
+  if (!hasAccess) {
+    throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
 
   const merged = normalizeJobInput({ ...job.toJSON(), ...req.body });
@@ -238,8 +247,14 @@ router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
 
 router.delete('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
   const job = await PDFExportJob.findByPk(req.params.id);
-  if (!job || job.userId !== req.userId) {
+  if (!job) {
     throw new NotFoundError('Job');
+  }
+
+  // 🆕 Vérification d'accès au projet APS (Option B)
+  const hasAccess = await apsAccessService.checkUserProjectAccess(req.userId, job.projectId);
+  if (!hasAccess) {
+    throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
 
   scheduler.unscheduleJob(job.id);
@@ -251,8 +266,14 @@ router.delete('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
 
 router.post('/jobs/:id/run', rateLimit, asyncHandler(async (req, res) => {
   const job = await PDFExportJob.findByPk(req.params.id);
-  if (!job || job.userId !== req.userId) {
+  if (!job) {
     throw new NotFoundError('Job');
+  }
+
+  // 🆕 Vérification d'accès au projet APS
+  const hasAccess = await apsAccessService.checkUserProjectAccess(req.userId, job.projectId);
+  if (!hasAccess) {
+    throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
 
   const { run, alreadyRunning } = await scheduler.runJobNow(job.id, { job });
@@ -270,7 +291,8 @@ router.post('/jobs/:id/run', rateLimit, asyncHandler(async (req, res) => {
 // ============= RUNS (HISTORIQUE) =============
 
 router.get('/runs', asyncHandler(async (req, res) => {
-  const where = { userId: req.userId };
+  // 🆕 Lecture globale : tous voient tous les runs
+  const where = {};
   if (req.query.jobId) where.jobId = String(req.query.jobId);
   if (req.query.projectId) where.projectId = String(req.query.projectId);
   if (req.query.status) where.status = String(req.query.status);
@@ -287,12 +309,13 @@ router.get('/runs', asyncHandler(async (req, res) => {
 
 router.get('/jobs/:id/runs', asyncHandler(async (req, res) => {
   const job = await PDFExportJob.findByPk(req.params.id);
-  if (!job || job.userId !== req.userId) {
+  if (!job) {
     throw new NotFoundError('Job');
   }
 
+  // 🆕 Tous peuvent voir les runs de tous les jobs
   const runs = await PDFExportRun.findAll({
-    where: { jobId: job.id, userId: req.userId },
+    where: { jobId: job.id },
     order: [['createdAt', 'DESC']],
     limit: Math.min(parseInt(req.query.limit || '50', 10), 200),
   });

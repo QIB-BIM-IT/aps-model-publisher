@@ -298,4 +298,65 @@ router.post(
   })
 );
 
+// Endpoint pour enrichir les items avec leurs noms depuis l'API APS
+router.post(
+  '/items/enrich',
+  asyncHandler(async (req, res) => {
+    const { projectId, items } = req.body;
+
+    if (!projectId) {
+      throw new ValidationError('projectId requis');
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new ValidationError('items requis (array non vide)');
+    }
+
+    logger.info(`[APS] Enrichissement de ${items.length} item(s)`);
+    const accessToken = await apsAuthService.ensureValidToken(req.userId);
+
+    const cleanProjectId = projectId.replace(/^b\./, '');
+    const baseUrl = `https://developer.api.autodesk.com/data/v1/projects/b.${cleanProjectId}`;
+    const enrichedItems = [];
+
+    for (const item of items) {
+      // Extraire l'URN (qui peut être une string ou un objet {urn, name})
+      const itemUrn = typeof item === 'string' ? item : item.urn;
+      const existingName = typeof item === 'object' && item.name ? item.name : null;
+
+      // Si on a déjà un nom, pas besoin de le récupérer
+      if (existingName && existingName !== 'Maquette') {
+        enrichedItems.push({ urn: itemUrn, name: existingName });
+        continue;
+      }
+
+      try {
+        const url = `${baseUrl}/items?filter[id]=${encodeURIComponent(itemUrn)}`;
+        const response = await axios.get(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 5000,
+        });
+
+        const itemData = response.data.data?.[0];
+        if (itemData) {
+          const name = itemData.attributes?.displayName || 'Maquette';
+          enrichedItems.push({ urn: itemUrn, name });
+          logger.debug(`[APS] Item enrichi: ${name}`);
+        } else {
+          enrichedItems.push({ urn: itemUrn, name: 'Maquette' });
+        }
+      } catch (error) {
+        logger.warn(`[APS] Erreur enrichissement ${itemUrn}: ${error.message}`);
+        enrichedItems.push({ urn: itemUrn, name: existingName || 'Maquette' });
+      }
+    }
+
+    logger.info(`[APS] ${enrichedItems.length} item(s) enrichi(s)`);
+    res.json({
+      success: true,
+      data: enrichedItems,
+    });
+  })
+);
+
 module.exports = router;

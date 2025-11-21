@@ -437,13 +437,17 @@ class APSPublishService {
         logger.debug(`[Publish] ${run.items.length} items à traiter (premiers: ${run.items.slice(0, 5).join(', ')}...)`);
       }
 
-      for (const selectedUrn of run.items) {
+      for (const selectedItem of run.items) {
         try {
+          // Extraire l'URN et le nom depuis l'item (qui peut être soit un string, soit un objet {urn, name})
+          const selectedUrn = typeof selectedItem === 'string' ? selectedItem : selectedItem.urn;
+          const itemName = typeof selectedItem === 'object' && selectedItem.name ? selectedItem.name : selectedUrn;
+          
           if (!ENABLE_REAL) {
             // Mode DRY-RUN pour tests
             await sleep(120);
-            results.push({ item: selectedUrn, status: 'queued' });
-            logger.info(`[Publish][DRY-RUN] run=${run.id} item=${selectedUrn}`);
+            results.push({ item: selectedUrn, name: itemName, status: 'queued' });
+            logger.info(`[Publish][DRY-RUN] run=${run.id} item=${itemName} (${selectedUrn})`);
             continue;
           }
 
@@ -468,6 +472,7 @@ class APSPublishService {
 
           results.push({
             item: selectedUrn,
+            name: itemName,
             resource: resourceUrn,
             status: outcome,
             http,
@@ -476,7 +481,7 @@ class APSPublishService {
 
           if (outcome === 'accepted') {
             logger.info(
-              `[Publish][REAL] ✓ run=${run.id} resource=${resourceUrn} => ${outcome} (HTTP ${http}, region=${formatRegion(
+              `[Publish][REAL] ✓ run=${run.id} item=${itemName} resource=${resourceUrn} => ${outcome} (HTTP ${http}, region=${formatRegion(
                 effectiveRegion
               )})`
             );
@@ -501,18 +506,21 @@ class APSPublishService {
             }, 5000);
           } else {
             logger.warn(
-              `[Publish][REAL] ✗ run=${run.id} resource=${resourceUrn} => ${outcome} (HTTP ${http}, body=${safeBody(body)})`
+              `[Publish][REAL] ✗ run=${run.id} item=${itemName} resource=${resourceUrn} => ${outcome} (HTTP ${http}, body=${safeBody(body)})`
             );
           }
         } catch (e) {
           const message = e?.message || 'Erreur publication inconnue';
+          const selectedUrn = typeof selectedItem === 'string' ? selectedItem : selectedItem.urn;
+          const itemName = typeof selectedItem === 'object' && selectedItem.name ? selectedItem.name : selectedUrn;
           results.push({
             item: selectedUrn,
+            name: itemName,
             status: 'failed',
             message,
             error: 'PUBLISH_ERROR',
           });
-          logger.error(`[Publish] Échec critique item=${selectedUrn}: ${message}`, e.stack);
+          logger.error(`[Publish] Échec critique item=${itemName} (${selectedUrn}): ${message}`, e.stack);
         }
       }
     } catch (e) {
