@@ -205,8 +205,8 @@ router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
     throw new NotFoundError('Job');
   }
 
-  // 🆕 Vérification d'accès au projet APS (méthode directe sans hubId)
-  const hasAccess = await apsAccessService.checkUserProjectAccessDirect(req.userId, job.projectId);
+  // 🆕 Vérification d'accès au projet APS (Option B)
+  const hasAccess = await apsAccessService.checkUserProjectAccess(req.userId, job.projectId);
   if (!hasAccess) {
     throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
@@ -254,8 +254,8 @@ router.delete('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
     throw new NotFoundError('Job');
   }
 
-  // 🆕 Vérification d'accès au projet APS (méthode directe sans hubId)
-  const hasAccess = await apsAccessService.checkUserProjectAccessDirect(req.userId, job.projectId);
+  // 🆕 Vérification d'accès au projet APS (Option B)
+  const hasAccess = await apsAccessService.checkUserProjectAccess(req.userId, job.projectId);
   if (!hasAccess) {
     throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
@@ -273,8 +273,8 @@ router.post('/jobs/:id/run', rateLimit, asyncHandler(async (req, res) => {
     throw new NotFoundError('Job');
   }
 
-  // 🆕 Vérification d'accès au projet APS (méthode directe sans hubId)
-  const hasAccess = await apsAccessService.checkUserProjectAccessDirect(req.userId, job.projectId);
+  // 🆕 Vérification d'accès au projet APS
+  const hasAccess = await apsAccessService.checkUserProjectAccess(req.userId, job.projectId);
   if (!hasAccess) {
     throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
