@@ -125,12 +125,83 @@ class APSAccessService {
   }
 
   /**
+   * Vérifie l'accès à un projet via l'API Data Management (sans hubId requis)
+   * Utilisé pour les jobs PDF où on n'a pas de hubId
+   * @param {string} userId - UUID de l'utilisateur
+   * @param {string} projectId - URN du projet APS
+   * @returns {Promise<boolean>}
+   */
+  async checkUserProjectAccessDirect(userId, projectId) {
+    if (!userId || !projectId) {
+      logger.warn('[APSAccess] userId ou projectId manquant');
+      return false;
+    }
+
+    // Vérifier le cache
+    const cacheKey = `${userId}:${projectId}:direct`;
+    const cached = this.accessCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      logger.debug(`[APSAccess] Cache hit (direct) pour ${cacheKey}: ${cached.hasAccess}`);
+      return cached.hasAccess;
+    }
+
+    try {
+      // Récupérer le token de l'utilisateur
+      const userToken = await apsAuthService.ensureValidToken(userId);
+      
+      // Essayer d'accéder au projet directement via Data Management API
+      const projectIdEncoded = encodeURIComponent(projectId);
+      const url = `https://developer.api.autodesk.com/data/v1/projects/${projectIdEncoded}`;
+      
+      logger.debug(`[APSAccess] Vérification d'accès direct (projectId: ${projectId.substring(0, 20)}...)`);
+      logger.debug(`[APSAccess] URL: ${url}`);
+      
+      const { data } = await axios.get(url, {
+        headers: { Authorization: `Bearer ${userToken}` },
+        timeout: 10000
+      });
+
+      const hasAccess = data && data.data;
+      
+      // Mettre en cache
+      this.accessCache.set(cacheKey, {
+        hasAccess,
+        timestamp: Date.now()
+      });
+
+      logger.info(`[APSAccess] ✓ Utilisateur ${userId.substring(0, 8)}... a accès au projet ${projectId.substring(0, 20)}... (direct)`);
+      return hasAccess;
+
+    } catch (error) {
+      const status = error.response?.status;
+      
+      if (status === 403 || status === 404 || status === 401) {
+        logger.warn(`[APSAccess] ✗ Utilisateur ${userId.substring(0, 8)}... n'a pas accès au projet ${projectId.substring(0, 20)}... (status: ${status}, direct)`);
+        
+        // Cache court pour les erreurs
+        this.accessCache.set(cacheKey, {
+          hasAccess: false,
+          timestamp: Date.now() - (this.CACHE_TTL - 30000)
+        });
+        
+        return false;
+      }
+
+      // Autre erreur (timeout, réseau, etc.)
+      logger.error(`[APSAccess] Erreur technique lors de la vérification d'accès direct: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
    * Invalide le cache pour un utilisateur/projet spécifique
    */
   invalidateCache(userId, projectId) {
     const cacheKey = `${userId}:${projectId}`;
+    const cacheKeyDirect = `${userId}:${projectId}:direct`;
     this.accessCache.delete(cacheKey);
-    logger.debug(`[APSAccess] Cache invalidé pour ${cacheKey}`);
+    this.accessCache.delete(cacheKeyDirect);
+    logger.debug(`[APSAccess] Cache invalidé pour ${cacheKey} et ${cacheKeyDirect}`);
   }
 
   /**
