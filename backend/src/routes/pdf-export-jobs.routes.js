@@ -238,6 +238,9 @@ router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
 
   await job.save();
 
+  // Invalider le cache d'accès après modification réussie
+  apsAccessService.invalidateCache(req.userId, job.projectId);
+
   if (job.scheduleEnabled) scheduler.scheduleJob(job);
   else scheduler.unscheduleJob(job.id);
 

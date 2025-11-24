@@ -46,7 +46,8 @@ class APSAccessService {
       const projectIdEncoded = encodeURIComponent(projectId);
       const url = `https://developer.api.autodesk.com/project/v1/hubs/${hubIdEncoded}/projects/${projectIdEncoded}/topFolders`;
       
-      logger.debug(`[APSAccess] Vérification d'accès: ${url}`);
+      logger.debug(`[APSAccess] Vérification d'accès (userId: ${userId.substring(0, 8)}..., hubId: ${effectiveHubId.substring(0, 20)}..., projectId: ${projectId.substring(0, 20)}...)`);
+      logger.debug(`[APSAccess] URL: ${url}`);
       
       const { data } = await axios.get(url, {
         headers: { Authorization: `Bearer ${userToken}` },
@@ -61,7 +62,7 @@ class APSAccessService {
         timestamp: Date.now()
       });
 
-      logger.info(`[APSAccess] Utilisateur ${userId} ${hasAccess ? 'a accès' : 'n\'a pas accès'} au projet ${projectId}`);
+      logger.info(`[APSAccess] ✓ Utilisateur ${userId.substring(0, 8)}... a accès au projet ${projectId.substring(0, 20)}...`);
       return hasAccess;
 
     } catch (error) {
@@ -69,19 +70,21 @@ class APSAccessService {
       
       if (status === 403 || status === 404 || status === 401) {
         // L'utilisateur n'a pas accès
-        logger.info(`[APSAccess] Utilisateur ${userId} n'a pas accès au projet ${projectId} (status: ${status})`);
+        logger.warn(`[APSAccess] ✗ Utilisateur ${userId.substring(0, 8)}... n'a pas accès au projet ${projectId.substring(0, 20)}... (status: ${status})`);
+        logger.debug(`[APSAccess] Erreur détails: ${error.response?.data ? JSON.stringify(error.response.data).substring(0, 200) : error.message}`);
         
-        // Mettre en cache la non-accessibilité
+        // NE PAS mettre en cache les erreurs 403/404 - elles peuvent être temporaires
+        // On met juste un cache court pour éviter de spammer l'API
         this.accessCache.set(cacheKey, {
           hasAccess: false,
-          timestamp: Date.now()
+          timestamp: Date.now() - (this.CACHE_TTL - 30000) // Cache de seulement 30 secondes pour les erreurs
         });
         
         return false;
       }
 
       // Autre erreur (timeout, réseau, etc.)
-      logger.error(`[APSAccess] Erreur lors de la vérification d'accès: ${error.message}`);
+      logger.error(`[APSAccess] Erreur technique lors de la vérification d'accès: ${error.message}`);
       
       // En cas d'erreur technique, on ne cache pas et on retourne false par sécurité
       return false;
