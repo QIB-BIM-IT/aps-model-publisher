@@ -281,18 +281,31 @@ router.post('/export-with-cache', asyncHandler(async (req, res) => {
   try {
     const userToken = await apsAuthService.ensureValidToken(req.userId);
 
-    const { versionUrn, derivativeUrn } = await resolveModelUrns(
-      fileUrn,
-      projectId,
-      userToken,
-    );
+    // Déterminer quel URN utiliser pour l'export ACC
+    // Si c'est un lineageUrn, on l'envoie directement (l'API ACC Export gère la résolution)
+    const isLineageUrn = fileUrn.toLowerCase().includes('dm.lineage:');
+    let urnForExport = fileUrn;
+    let versionUrn = null;
+    let derivativeUrn = null;
 
-    logger.info(
-      `[ExportWithCache] URNs résolus: version=${versionUrn.substring(0, 60)}...`
-    );
+    if (!isLineageUrn) {
+      // Si ce n'est pas un lineageUrn, résoudre pour obtenir la version
+      const resolved = await resolveModelUrns(fileUrn, projectId, userToken);
+      versionUrn = resolved.versionUrn;
+      derivativeUrn = resolved.derivativeUrn;
+      urnForExport = resolved.versionUrn;
+      logger.info(
+        `[ExportWithCache] URNs résolus: version=${versionUrn.substring(0, 60)}...`
+      );
+    } else {
+      // Pour les lineageUrn, on les envoie directement
+      logger.info(`[ExportWithCache] Utilisation directe du lineageUrn: ${fileUrn}`);
+      versionUrn = fileUrn; // Pour le cache, on utilise le lineageUrn comme clé
+      derivativeUrn = fileUrn;
+    }
 
     const jobId = await accExportService.exportPDFs(
-      [versionUrn],
+      [urnForExport],
       projectId,
       userToken,
       { includeMarkups: true },
@@ -1094,21 +1107,34 @@ router.post('/export-and-save', async (req, res) => {
     let exportVersionUrn = clientResolved.version;
     let exportDerivativeUrn = clientResolved.derivative;
 
-    if (!exportVersionUrn || !exportDerivativeUrn) {
-      const resolved = await resolveModelUrns(fileUrn, projectId, userToken);
-      exportVersionUrn = resolved.versionUrn;
-      exportDerivativeUrn = resolved.derivativeUrn;
-      if (resolved.versionUrn !== fileUrn) {
+    // Déterminer quel URN utiliser pour l'export ACC
+    // Si c'est un lineageUrn, on l'envoie directement (l'API ACC Export gère la résolution vers la dernière version)
+    // Sinon on résout vers la version tip
+    const isLineageUrn = fileUrn.toLowerCase().includes('dm.lineage:');
+    let urnForExport = fileUrn; // Par défaut, utiliser l'URN d'entrée directement
+
+    if (!isLineageUrn) {
+      // Si ce n'est pas un lineageUrn, on doit résoudre pour obtenir la version
+      if (!exportVersionUrn || !exportDerivativeUrn) {
+        const resolved = await resolveModelUrns(fileUrn, projectId, userToken);
+        exportVersionUrn = resolved.versionUrn;
+        exportDerivativeUrn = resolved.derivativeUrn;
+        urnForExport = resolved.versionUrn;
         logger.info(
           `[ExportAndSave] URN converti → version=${resolved.versionUrn.substring(0, 60)}... | derivative=${resolved.derivativeUrn.substring(0, 60)}...`
         );
+      } else {
+        urnForExport = exportVersionUrn;
+        logger.info('[ExportAndSave] URNs résolus fournis par le client utilisés pour l\'export');
       }
     } else {
-      logger.info('[ExportAndSave] URNs résolus fournis par le client utilisés pour l\'export');
+      // Pour les lineageUrn, on les envoie directement à l'API ACC Export
+      // L'API gère automatiquement la résolution vers la dernière version publiée
+      logger.info(`[ExportAndSave] Utilisation directe du lineageUrn: ${fileUrn}`);
     }
 
     const jobId = await accExportService.exportPDFs(
-      [exportVersionUrn],
+      [urnForExport],
       projectId,
       userToken,
       { includeMarkups }
