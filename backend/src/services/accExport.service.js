@@ -62,6 +62,8 @@ class ACCExportService {
 
       if (status.status === 'successful') {
         logger.info('[ACCExport] ✅ Job terminé avec succès');
+        // 🔍 DEBUG: Logger la réponse complète pour voir les détails
+        logger.info(`[ACCExport] 📊 Réponse complète du job: ${JSON.stringify(status, null, 2)}`);
         this.jobProjectMap.delete(jobId);
         return status.result;
       }
@@ -446,8 +448,22 @@ class ACCExportService {
     try {
       const zip = new AdmZip(zipBuffer);
       const entries = zip.getEntries();
+      
+      // 🔍 DEBUG: Logger TOUTES les entrées du ZIP pour diagnostic
+      logger.info(`[ACCExport] 📦 ZIP reçu: ${zipBuffer.length} bytes, ${entries.length} entrée(s) totale(s)`);
+      
+      const allFiles = [];
       const pdfs = [];
+      
       for (const entry of entries) {
+        const entryInfo = {
+          name: entry.entryName,
+          size: entry.header.size,
+          isDir: entry.isDirectory,
+          isPdf: entry.entryName.toLowerCase().endsWith('.pdf'),
+        };
+        allFiles.push(entryInfo);
+        
         if (entry.entryName.toLowerCase().endsWith('.pdf') && !entry.isDirectory) {
           pdfs.push({
             name: path.basename(entry.entryName),
@@ -457,6 +473,23 @@ class ACCExportService {
           });
         }
       }
+      
+      // 🔍 DEBUG: Logger la liste complète des fichiers dans le ZIP
+      logger.info(`[ACCExport] 📋 Contenu du ZIP:`);
+      allFiles.forEach((f, i) => {
+        logger.info(`[ACCExport]   ${i + 1}. ${f.name} (${f.size} bytes) ${f.isPdf ? '✅ PDF' : ''} ${f.isDir ? '📁 DIR' : ''}`);
+      });
+      
+      logger.info(`[ACCExport] 📊 Résumé: ${pdfs.length} PDF(s) extraits sur ${entries.length} fichier(s) total`);
+      
+      // Lister les noms des PDFs extraits
+      if (pdfs.length > 0) {
+        logger.info(`[ACCExport] 📄 PDFs extraits:`);
+        pdfs.forEach((pdf, i) => {
+          logger.info(`[ACCExport]   ${i + 1}. ${pdf.name} (${pdf.size} bytes)`);
+        });
+      }
+      
       return pdfs;
     } catch (error) {
       logger.error(`[ACCExport] Erreur extraction ZIP: ${error.message}`);
