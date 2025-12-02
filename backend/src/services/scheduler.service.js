@@ -5,6 +5,7 @@
 // - logs explicites
 
 const cron = require('node-cron');
+const cronParser = require('cron-parser');
 const logger = require('../config/logger');
 const { PublishJob, PublishRun, PDFExportJob, PDFExportRun, User } = require('../models');
 const apsPublishService = require('./apsPublish.service');
@@ -15,6 +16,50 @@ const emailService = require('./email.service');
 const TASKS = new Map();
 // Set<jobId> des jobs en cours d'exécution pour éviter les overlaps
 const RUNNING = new Set();
+// 🆕 Set<projectId> des projets en cours d'exécution pour éviter les conflits d'accès concurrent
+const RUNNING_PROJECTS = new Set();
+// 🆕 File d'attente par projet: Map<projectId, Array<{jobId, resolve, reject}>>
+const PROJECT_QUEUES = new Map();
+// 🆕 Délai d'attente entre les tentatives de lock projet (ms)
+const PROJECT_LOCK_RETRY_DELAY = 3000;
+const PROJECT_LOCK_MAX_WAIT_MS = 10 * 60 * 1000; // 10 minutes max d'attente dans la file
+
+/**
+ * Calcule la prochaine exécution d'une expression cron avec timezone
+ * @param {string} cronExpression - Expression cron (5 champs)
+ * @param {string} timezone - Timezone (ex: 'America/Montreal', 'UTC')
+ * @returns {Date|null} - Date de la prochaine exécution ou null si erreur
+ */
+function calculateNextRun(cronExpression, timezone = 'UTC') {
+  try {
+    const interval = cronParser.parse(cronExpression, {
+      tz: timezone,
+      currentDate: new Date(),
+    });
+    return interval.next().toDate();
+  } catch (e) {
+    logger.warn(`[Scheduler] Impossible de calculer nextRun pour "${cronExpression}" (tz=${timezone}): ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * Met à jour le champ nextRun d'un job
+ */
+async function updateJobNextRun(job) {
+  if (!job || !job.scheduleEnabled) return;
+  
+  try {
+    const nextRun = calculateNextRun(job.cronExpression, job.timezone || 'UTC');
+    if (nextRun) {
+      job.nextRun = nextRun;
+      await job.save();
+      logger.debug(`[Scheduler] nextRun mis à jour pour job ${job.id}: ${nextRun.toISOString()}`);
+    }
+  } catch (e) {
+    logger.warn(`[Scheduler] Erreur mise à jour nextRun pour job ${job.id}: ${e.message}`);
+  }
+}
 
 function unscheduleJob(jobId) {
   const t = TASKS.get(String(jobId));
@@ -27,7 +72,7 @@ function unscheduleJob(jobId) {
   }
 }
 
-function scheduleJob(job) {
+async function scheduleJob(job) {
   unscheduleJob(job.id);
   if (!job.scheduleEnabled) return;
 
@@ -40,7 +85,11 @@ function scheduleJob(job) {
       { scheduled: true, timezone: job.timezone || 'UTC' }
     );
     TASKS.set(String(job.id), task);
-    logger.info(`[Scheduler] Job ${job.id} planifié (${job.cronExpression} ${job.timezone})`);
+    
+    // 🆕 Calculer et sauvegarder nextRun
+    await updateJobNextRun(job);
+    
+    logger.info(`[Scheduler] Job ${job.id} planifié (${job.cronExpression} ${job.timezone}) - nextRun: ${job.nextRun?.toISOString() || 'N/A'}`);
   } catch (e) {
     logger.error(`[Scheduler] Impossible de planifier job ${job.id}: ${e.message}`);
   }
@@ -58,12 +107,101 @@ function getJobType(job) {
   return null;
 }
 
+/**
+ * 🆕 Tente d'acquérir un lock sur un projet avec système de file d'attente
+ * Si le projet est occupé, le job attend son tour dans la file
+ * @param {string} projectId - ID du projet
+ * @param {string} jobId - ID du job (pour les logs)
+ * @returns {Promise<boolean>} - true si lock acquis, false si timeout
+ */
+async function acquireProjectLock(projectId, jobId = 'unknown') {
+  // Si le projet n'est pas occupé, acquérir le lock immédiatement
+  if (!RUNNING_PROJECTS.has(projectId)) {
+    RUNNING_PROJECTS.add(projectId);
+    logger.debug(`[Scheduler] Lock projet acquis immédiatement: ${projectId} (job=${jobId})`);
+    return true;
+  }
+  
+  // Sinon, ajouter à la file d'attente et attendre
+  logger.info(`[Scheduler] 📋 Job ${jobId} ajouté à la file d'attente pour projet ${projectId}`);
+  
+  // Initialiser la file si nécessaire
+  if (!PROJECT_QUEUES.has(projectId)) {
+    PROJECT_QUEUES.set(projectId, []);
+  }
+  const queue = PROJECT_QUEUES.get(projectId);
+  
+  // Compter la position dans la file
+  const position = queue.length + 1;
+  logger.info(`[Scheduler] 📋 Position dans la file: ${position} (projet=${projectId})`);
+  
+  // Créer une promesse qui sera résolue quand ce sera notre tour
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    
+    const queueEntry = {
+      jobId,
+      resolve: (success) => {
+        // Retirer de la file
+        const idx = queue.indexOf(queueEntry);
+        if (idx !== -1) queue.splice(idx, 1);
+        resolve(success);
+      },
+      startTime,
+    };
+    
+    queue.push(queueEntry);
+    
+    // Timeout de sécurité
+    const timeoutId = setTimeout(() => {
+      logger.warn(`[Scheduler] ⏱️ Timeout file d'attente pour job ${jobId} (projet=${projectId})`);
+      queueEntry.resolve(false);
+    }, PROJECT_LOCK_MAX_WAIT_MS);
+    
+    // Modifier resolve pour annuler le timeout
+    const originalResolve = queueEntry.resolve;
+    queueEntry.resolve = (success) => {
+      clearTimeout(timeoutId);
+      originalResolve(success);
+    };
+  });
+}
+
+/**
+ * 🆕 Libère le lock d'un projet et passe au job suivant dans la file
+ */
+function releaseProjectLock(projectId) {
+  RUNNING_PROJECTS.delete(projectId);
+  logger.debug(`[Scheduler] Lock projet libéré: ${projectId}`);
+  
+  // Vérifier s'il y a des jobs en attente
+  const queue = PROJECT_QUEUES.get(projectId);
+  if (queue && queue.length > 0) {
+    const nextEntry = queue[0];
+    logger.info(`[Scheduler] 📋 Passage au job suivant dans la file: ${nextEntry.jobId} (projet=${projectId}, attente=${Math.round((Date.now() - nextEntry.startTime) / 1000)}s)`);
+    
+    // Acquérir le lock pour le prochain job
+    RUNNING_PROJECTS.add(projectId);
+    nextEntry.resolve(true);
+  }
+}
+
+/**
+ * 🆕 Retourne le nombre de jobs en attente pour un projet
+ */
+function getQueueLength(projectId) {
+  const queue = PROJECT_QUEUES.get(projectId);
+  return queue ? queue.length : 0;
+}
+
 async function runJob(jobId, jobInstance = null, options = {}) {
   const key = String(jobId);
   const skipBegin = options.skipBegin === true;
   let job = jobInstance || options.job || null;
   let run = options.run || null;
   let jobType = null;
+  let projectId = null;
+  let hasProjectLock = false;
 
   if (!skipBegin) {
     if (RUNNING.has(key)) {
@@ -92,8 +230,20 @@ async function runJob(jobId, jobInstance = null, options = {}) {
         RUNNING.delete(key);
         return null;
       }
+      
+      // 🆕 Acquérir un lock sur le projet pour éviter les accès concurrents
+      projectId = job.projectId;
+      if (projectId) {
+        // 🆕 Le job attend son tour dans la file d'attente si le projet est occupé
+        hasProjectLock = await acquireProjectLock(projectId, jobId);
+        if (!hasProjectLock) {
+          logger.warn(`[Scheduler] Job ${jobId} timeout: a attendu trop longtemps dans la file d'attente`);
+          RUNNING.delete(key);
+          return null;
+        }
+      }
 
-      logger.info(`[Scheduler] Exécution job ${jobId} (type=${jobType})`);
+      logger.info(`[Scheduler] Exécution job ${jobId} (type=${jobType}, project=${projectId})`);
 
       job.status = 'running';
       job.lastRun = new Date();
@@ -107,6 +257,7 @@ async function runJob(jobId, jobInstance = null, options = {}) {
       }
     } catch (e) {
       RUNNING.delete(key);
+      if (hasProjectLock && projectId) releaseProjectLock(projectId);
       logger.error(`[Scheduler] Erreur initialisation job ${jobId}: ${e.message}`);
       throw e;
     }
@@ -116,6 +267,9 @@ async function runJob(jobId, jobInstance = null, options = {}) {
       return null;
     }
     jobType = getJobType(job);
+    projectId = job.projectId;
+    // Pour skipBegin, on suppose que le lock projet a déjà été acquis
+    hasProjectLock = projectId ? RUNNING_PROJECTS.has(projectId) : false;
     if (!RUNNING.has(key)) {
       RUNNING.add(key);
     }
@@ -160,6 +314,15 @@ async function runJob(jobId, jobInstance = null, options = {}) {
         durationMs: summary.durationMs,
       },
     ];
+    
+    // 🆕 Mettre à jour nextRun pour la prochaine exécution
+    if (job.scheduleEnabled) {
+      const nextRun = calculateNextRun(job.cronExpression, job.timezone || 'UTC');
+      if (nextRun) {
+        job.nextRun = nextRun;
+      }
+    }
+    
     await job.save();
 
     logger.info(
@@ -218,6 +381,10 @@ async function runJob(jobId, jobInstance = null, options = {}) {
     return run;
   } finally {
     RUNNING.delete(key);
+    // 🆕 Libérer le lock projet
+    if (hasProjectLock && projectId) {
+      releaseProjectLock(projectId);
+    }
   }
 }
 
@@ -244,6 +411,21 @@ async function runJobNow(jobId, options = {}) {
     return { run: null, alreadyRunning: false };
   }
 
+  // 🆕 Acquérir le lock projet avec file d'attente
+  const projectId = job.projectId;
+  let hasProjectLock = false;
+  if (projectId) {
+    const queueLength = getQueueLength(projectId);
+    if (queueLength > 0 || RUNNING_PROJECTS.has(projectId)) {
+      logger.info(`[Scheduler] runJobNow: job ${jobId} attend son tour (${queueLength} job(s) en attente)`);
+    }
+    hasProjectLock = await acquireProjectLock(projectId, jobId);
+    if (!hasProjectLock) {
+      logger.warn(`[Scheduler] runJobNow: timeout, projet ${projectId} occupé trop longtemps`);
+      return { run: null, alreadyRunning: false, projectBusy: true };
+    }
+  }
+
   RUNNING.add(key);
   try {
     job.status = 'running';
@@ -259,6 +441,7 @@ async function runJobNow(jobId, options = {}) {
       run = await apsPublishService.startRun(job);
     }
 
+    // Note: le lock projet sera libéré dans runJob via le finally block
     runJob(jobId, job, { run, skipBegin: true }).catch((e) =>
       logger.error(`[Scheduler] runJobNow error: ${e.message}`)
     );
@@ -266,6 +449,7 @@ async function runJobNow(jobId, options = {}) {
     return { run, alreadyRunning: false };
   } catch (e) {
     RUNNING.delete(key);
+    if (hasProjectLock && projectId) releaseProjectLock(projectId);
     logger.error(`[Scheduler] runJobNow error: ${e.message}`);
     throw e;
   }
@@ -403,4 +587,5 @@ module.exports = {
   scheduleJob,
   unscheduleJob,
   runJobNow,
+  calculateNextRun,  // 🆕 Exporté pour les routes
 };

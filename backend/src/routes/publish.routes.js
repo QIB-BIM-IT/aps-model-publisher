@@ -190,7 +190,7 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
     history: [],
   });
 
-  if (job.scheduleEnabled) scheduler.scheduleJob(job);
+  if (job.scheduleEnabled) await scheduler.scheduleJob(job);
 
   return res.json({ success: true, data: job, realPublishEnabled: ENABLE_REAL });
 }));
@@ -282,7 +282,7 @@ router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
   // Invalider le cache d'accès après modification réussie
   apsAccessService.invalidateCache(req.userId, job.projectId);
 
-  if (job.scheduleEnabled) scheduler.scheduleJob(job);
+  if (job.scheduleEnabled) await scheduler.scheduleJob(job);
   else scheduler.unscheduleJob(job.id);
 
   return res.json({ success: true, data: job });
@@ -318,9 +318,12 @@ router.post('/jobs/:id/run', rateLimit, asyncHandler(async (req, res) => {
     throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
   }
 
-  const { run, alreadyRunning } = await scheduler.runJobNow(job.id, { job });
+  const { run, alreadyRunning, projectBusy } = await scheduler.runJobNow(job.id, { job });
   if (alreadyRunning) {
     throw new ValidationError('Job déjà en cours');
+  }
+  if (projectBusy) {
+    throw new ValidationError('Un autre job est en cours sur ce projet. Veuillez réessayer dans quelques minutes.');
   }
   if (!run) {
     throw new Error('Impossible de lancer le job');
