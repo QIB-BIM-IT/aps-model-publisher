@@ -80,7 +80,19 @@ function classifyPdf(name = '') {
   const normalized = stripPdfName(name);
   const original = name.toLowerCase();
 
+  // 🆕 FIX: Les PDFs de l'API ACC Export qui commencent par "Feuilles-" ou "Sheets-"
+  // sont TOUJOURS des sheets publiées, même s'ils contiennent "vue", "plan", etc.
+  // Ces mots font partie du TITRE de la sheet, pas du type de document
+  const isAccSheetExport = /^feuilles?[-_]/i.test(original) || /^sheets?[-_]/i.test(original);
+  
+  if (isAccSheetExport) {
+    // C'est une sheet exportée depuis ACC, toujours type 'sheet'
+    return 'sheet';
+  }
+
   const isMarkup = /markup|annotation|commentaire/.test(normalized);
+  
+  // Seulement classifier comme view2d si ce n'est PAS une sheet ACC
   const isView =
     /view|vue|coupe|section|elevation|detail/.test(normalized) ||
     /view|vue/.test(original);
@@ -133,15 +145,45 @@ async function resolveModelUrns(fileUrn, projectId, accessToken) {
 
   let versionUrn = null;
   let derivativeUrn = null;
+  let itemUrn = null;
 
+  // 🆕 FIX: Pour les dm.version: URN, on doit d'abord récupérer l'item parent
+  // puis résoudre vers la DERNIÈRE version (tip) au lieu d'utiliser la version stockée
   if (lowerUrn.includes('dm.version:')) {
-    versionUrn = inputUrn;
+    logger.info(`[URNResolve] Version URN détecté: ${inputUrn.substring(0, 60)}... - résolution vers la dernière version`);
+    
+    // Récupérer les détails de cette version pour trouver l'item parent
+    const versionUrl = `${baseUrl}/projects/${encodeURIComponent(cleanProjectId)}/versions/${encodeURIComponent(inputUrn)}`;
+    try {
+      const versionResponse = await axios.get(versionUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      
+      // L'item parent est dans relationships.item.data.id
+      itemUrn = versionResponse.data?.data?.relationships?.item?.data?.id;
+      
+      if (itemUrn) {
+        logger.info(`[URNResolve] Item parent trouvé: ${itemUrn.substring(0, 60)}...`);
+      } else {
+        // Fallback: si pas d'item trouvé, utiliser la version directement (ancien comportement)
+        logger.warn(`[URNResolve] Item parent non trouvé pour ${inputUrn}, utilisation de la version stockée`);
+        versionUrn = inputUrn;
+      }
+    } catch (error) {
+      const status = error?.response?.status;
+      logger.warn(`[URNResolve] Impossible de récupérer l'item parent (${status || 'n/a'}), utilisation de la version stockée`);
+      versionUrn = inputUrn;
+    }
   } else if (lowerUrn.includes('viewing:')) {
     derivativeUrn = inputUrn;
+  } else {
+    // Pour lineage URN ou fs.file URN, c'est notre item
+    itemUrn = inputUrn;
   }
 
-  if (!versionUrn) {
-    const itemUrl = `${baseUrl}/projects/${encodeURIComponent(cleanProjectId)}/items/${encodeURIComponent(inputUrn)}`;
+  // Si on a un itemUrn, résoudre vers la dernière version (tip)
+  if (itemUrn && !versionUrn) {
+    const itemUrl = `${baseUrl}/projects/${encodeURIComponent(cleanProjectId)}/items/${encodeURIComponent(itemUrn)}`;
     let itemResponse;
 
     try {
@@ -152,7 +194,7 @@ async function resolveModelUrns(fileUrn, projectId, accessToken) {
     } catch (error) {
       const status = error?.response?.status;
       const detail = error?.response?.data?.errors?.[0]?.detail || error?.message;
-      logger.error(`[URNResolve] Item lookup failed (${status || 'n/a'}) pour ${inputUrn}: ${detail}`);
+      logger.error(`[URNResolve] Item lookup failed (${status || 'n/a'}) pour ${itemUrn}: ${detail}`);
       throw new Error(`Impossible de récupérer l'item ACC (${status || 'erreur'})`);
     }
 
@@ -165,6 +207,11 @@ async function resolveModelUrns(fileUrn, projectId, accessToken) {
 
     if (!versionUrn) {
       throw new Error("Impossible de déterminer l'URN de version (tip introuvable)");
+    }
+    
+    // Log si la version a changé par rapport à l'input
+    if (lowerUrn.includes('dm.version:') && versionUrn !== inputUrn) {
+      logger.info(`[URNResolve] ✅ Version mise à jour: ancienne=${inputUrn.substring(0, 50)}... → nouvelle=${versionUrn.substring(0, 50)}...`);
     }
   }
 
@@ -262,6 +309,8 @@ async function resolveModelUrns(fileUrn, projectId, accessToken) {
     projectId: cleanProjectId,
     versionUrn,
     derivativeUrn: sanitizedDerivativeUrn,
+    // 🆕 Retourner aussi l'itemUrn (lineage) pour l'API ACC Export
+    itemUrn: itemUrn || inputUrn,
   };
 }
 
@@ -281,18 +330,42 @@ router.post('/export-with-cache', asyncHandler(async (req, res) => {
   try {
     const userToken = await apsAuthService.ensureValidToken(req.userId);
 
-    const { versionUrn, derivativeUrn } = await resolveModelUrns(
-      fileUrn,
-      projectId,
-      userToken,
-    );
+    // 🆕 FIX: L'API ACC Export ne supporte que:
+    // - urn:adsk.wipprod:fs.file:vf.xxx?version=N (versionedFileUrn)
+    // - urn:adsk.wipprod:dm.lineage:xxx (lineageUrn)
+    // Elle ne supporte PAS dm.version: ! On doit donc utiliser le lineageUrn (itemUrn)
+    
+    const isLineageUrn = fileUrn.toLowerCase().includes('dm.lineage:');
+    let urnForExport = fileUrn;
+    let versionUrn = null;
+    let derivativeUrn = null;
+    let itemUrn = null;
 
-    logger.info(
-      `[ExportWithCache] URNs résolus: version=${versionUrn.substring(0, 60)}...`
-    );
+    if (!isLineageUrn) {
+      // Résoudre pour obtenir l'itemUrn (lineage) et la version actuelle
+      const resolved = await resolveModelUrns(fileUrn, projectId, userToken);
+      versionUrn = resolved.versionUrn;
+      derivativeUrn = resolved.derivativeUrn;
+      itemUrn = resolved.itemUrn;
+      
+      // 🆕 IMPORTANT: Utiliser l'itemUrn (lineage) pour l'API ACC Export, pas le versionUrn !
+      // L'API ACC Export gère elle-même la résolution vers la dernière version publiée
+      urnForExport = itemUrn || fileUrn;
+      
+      logger.info(
+        `[ExportWithCache] URNs résolus: item=${itemUrn?.substring(0, 50)}... | version=${versionUrn?.substring(0, 50)}...`
+      );
+      logger.info(`[ExportWithCache] URN utilisé pour ACC Export: ${urnForExport.substring(0, 60)}...`);
+    } else {
+      // Pour les lineageUrn, on les envoie directement
+      logger.info(`[ExportWithCache] Utilisation directe du lineageUrn: ${fileUrn}`);
+      versionUrn = fileUrn;
+      derivativeUrn = fileUrn;
+      itemUrn = fileUrn;
+    }
 
     const jobId = await accExportService.exportPDFs(
-      [versionUrn],
+      [urnForExport],
       projectId,
       userToken,
       { includeMarkups: true },
@@ -331,12 +404,22 @@ router.post('/export-with-cache', asyncHandler(async (req, res) => {
     const extractedPdfs = await accExportService.extractPDFsFromZip(zipBuffer);
     logger.info(`[ExportWithCache] ${extractedPdfs.length} PDF(s) trouvés dans le ZIP`);
 
-    const classifiedPdfs = extractedPdfs.map((pdf) => ({
-      name: pdf.name || pdf.filename,
-      size: pdf.size || pdf.buffer.length,
-      type: classifyPdf(pdf.name || pdf.filename),
-      buffer: pdf.buffer,
-    }));
+    const classifiedPdfs = extractedPdfs.map((pdf) => {
+      const pdfName = pdf.name || pdf.filename;
+      const pdfType = classifyPdf(pdfName);
+      return {
+        name: pdfName,
+        size: pdf.size || pdf.buffer.length,
+        type: pdfType,
+        buffer: pdf.buffer,
+      };
+    });
+
+    // 🔍 DEBUG: Logger chaque PDF avec sa classification
+    logger.info(`[ExportWithCache] 📋 Classification des PDFs:`);
+    classifiedPdfs.forEach((pdf, i) => {
+      logger.info(`[ExportWithCache]   ${i + 1}. "${pdf.name}" → type=${pdf.type} (${pdf.size} bytes)`);
+    });
 
     const cacheKey = `export_${jobId}_${Date.now()}`;
     const pdfCache = global.pdfCache || {};
@@ -357,6 +440,9 @@ router.post('/export-with-cache', asyncHandler(async (req, res) => {
     const views2D = classifiedPdfs.filter((p) => p.type === 'view2d');
     const markups = classifiedPdfs.filter((p) => p.type === 'markup');
     const totalSize = classifiedPdfs.reduce((sum, p) => sum + (p.size || 0), 0);
+    
+    // 🔍 DEBUG: Résumé de la classification
+    logger.info(`[ExportWithCache] 📊 Résumé: ${sheets.length} sheets, ${views2D.length} views2D, ${markups.length} markups sur ${classifiedPdfs.length} total`);
 
     res.json({
       success: true,
@@ -455,22 +541,23 @@ router.post('/export', asyncHandler(async (req, res) => {
   const resolvedUrns = await Promise.all(
     fileUrns.map(async (urn) => {
       const resolved = await resolveModelUrns(urn, projectId, userToken);
-      if (resolved.versionUrn !== urn) {
+      if (resolved.itemUrn !== urn) {
         logger.info(
-          `[PDFExport] URN ${urn.substring(0, 60)}... → version=${resolved.versionUrn.substring(0, 60)}...`
+          `[PDFExport] URN ${urn.substring(0, 60)}... → item=${resolved.itemUrn?.substring(0, 60)}...`
         );
       }
       return resolved;
     })
   );
 
-  const versionUrns = resolvedUrns.map((entry) => entry.versionUrn);
-  logger.info(`[PDFExport] ${versionUrns.length} version(s) prêtes pour export PDF`);
+  // 🆕 FIX: Utiliser itemUrn (lineage) pour l'API ACC Export, pas versionUrn
+  const itemUrns = resolvedUrns.map((entry) => entry.itemUrn || entry.inputUrn);
+  logger.info(`[PDFExport] ${itemUrns.length} item(s) prêts pour export PDF`);
 
-  // Lancer l'export avec les URNs de version résolus
+  // Lancer l'export avec les URNs d'items (lineage) résolus
   const result = await accExportService.exportRevitToPDFs(
     projectId,
-    versionUrns,
+    itemUrns,
     {
       userId: req.userId,
       uploadToACC,
@@ -483,6 +570,7 @@ router.post('/export', asyncHandler(async (req, res) => {
     data: result,
     resolvedUrns: resolvedUrns.map((entry) => ({
       input: entry.inputUrn,
+      item: entry.itemUrn,
       version: entry.versionUrn,
       derivative: entry.derivativeUrn,
     })),
@@ -1093,22 +1181,43 @@ router.post('/export-and-save', async (req, res) => {
     const clientResolved = req.body?.resolvedUrns || {};
     let exportVersionUrn = clientResolved.version;
     let exportDerivativeUrn = clientResolved.derivative;
+    let exportItemUrn = clientResolved.item;
 
-    if (!exportVersionUrn || !exportDerivativeUrn) {
-      const resolved = await resolveModelUrns(fileUrn, projectId, userToken);
-      exportVersionUrn = resolved.versionUrn;
-      exportDerivativeUrn = resolved.derivativeUrn;
-      if (resolved.versionUrn !== fileUrn) {
+    // 🆕 FIX: L'API ACC Export ne supporte que:
+    // - urn:adsk.wipprod:fs.file:vf.xxx?version=N (versionedFileUrn)
+    // - urn:adsk.wipprod:dm.lineage:xxx (lineageUrn)
+    // Elle ne supporte PAS dm.version: ! On doit donc utiliser le lineageUrn (itemUrn)
+    
+    const isLineageUrn = fileUrn.toLowerCase().includes('dm.lineage:');
+    let urnForExport = fileUrn; // Par défaut, utiliser l'URN d'entrée directement
+
+    if (!isLineageUrn) {
+      // Si ce n'est pas un lineageUrn, on doit résoudre pour obtenir l'itemUrn (lineage)
+      if (!exportItemUrn) {
+        const resolved = await resolveModelUrns(fileUrn, projectId, userToken);
+        exportVersionUrn = resolved.versionUrn;
+        exportDerivativeUrn = resolved.derivativeUrn;
+        exportItemUrn = resolved.itemUrn;
+        
+        // 🆕 IMPORTANT: Utiliser l'itemUrn (lineage) pour l'API ACC Export, pas le versionUrn !
+        urnForExport = resolved.itemUrn || fileUrn;
+        
         logger.info(
-          `[ExportAndSave] URN converti → version=${resolved.versionUrn.substring(0, 60)}... | derivative=${resolved.derivativeUrn.substring(0, 60)}...`
+          `[ExportAndSave] URN converti → item=${resolved.itemUrn?.substring(0, 50)}... | version=${resolved.versionUrn?.substring(0, 50)}...`
         );
+        logger.info(`[ExportAndSave] URN utilisé pour ACC Export: ${urnForExport.substring(0, 60)}...`);
+      } else {
+        urnForExport = exportItemUrn;
+        logger.info(`[ExportAndSave] ItemUrn fourni par le client utilisé pour l\'export: ${urnForExport.substring(0, 60)}...`);
       }
     } else {
-      logger.info('[ExportAndSave] URNs résolus fournis par le client utilisés pour l\'export');
+      // Pour les lineageUrn, on les envoie directement à l'API ACC Export
+      // L'API gère automatiquement la résolution vers la dernière version publiée
+      logger.info(`[ExportAndSave] Utilisation directe du lineageUrn: ${fileUrn}`);
     }
 
     const jobId = await accExportService.exportPDFs(
-      [exportVersionUrn],
+      [urnForExport],
       projectId,
       userToken,
       { includeMarkups }

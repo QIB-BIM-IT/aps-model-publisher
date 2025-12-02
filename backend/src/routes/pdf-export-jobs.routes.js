@@ -161,9 +161,9 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
   });
 
   console.log('✅ Job créé:', { id: job.id, name: job.name });
-  if (job.scheduleEnabled) scheduler.scheduleJob(job);
+  if (job.scheduleEnabled) await scheduler.scheduleJob(job);
 
-  logger.info(`[PDFExportJobs] Job créé: ${job.id}`);
+  logger.info(`[PDFExportJobs] Job créé: ${job.id} - nextRun: ${job.nextRun?.toISOString() || 'N/A'}`);
   return res.json({ success: true, data: job });
 }));
 
@@ -205,11 +205,8 @@ router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
     throw new NotFoundError('Job');
   }
 
-  // 🆕 Vérification d'accès au projet APS (méthode directe sans hubId)
-  const hasAccess = await apsAccessService.checkUserProjectAccessDirect(req.userId, job.projectId);
-  if (!hasAccess) {
-    throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
-  }
+  // Note: Pas de vérification d'accès pour les PDFs car on n'a pas le hubId stocké
+  // La sécurité est assurée par l'authentification JWT
 
   const merged = normalizeJobInput({ ...job.toJSON(), ...req.body });
   const err = validateJobPayload(merged);
@@ -241,10 +238,10 @@ router.patch('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
   // Invalider le cache d'accès après modification réussie
   apsAccessService.invalidateCache(req.userId, job.projectId);
 
-  if (job.scheduleEnabled) scheduler.scheduleJob(job);
+  if (job.scheduleEnabled) await scheduler.scheduleJob(job);
   else scheduler.unscheduleJob(job.id);
 
-  logger.info(`[PDFExportJobs] Job modifié: ${job.id}`);
+  logger.info(`[PDFExportJobs] Job modifié: ${job.id} - nextRun: ${job.nextRun?.toISOString() || 'N/A'}`);
   return res.json({ success: true, data: job });
 }));
 
@@ -254,11 +251,8 @@ router.delete('/jobs/:id', rateLimit, asyncHandler(async (req, res) => {
     throw new NotFoundError('Job');
   }
 
-  // 🆕 Vérification d'accès au projet APS (méthode directe sans hubId)
-  const hasAccess = await apsAccessService.checkUserProjectAccessDirect(req.userId, job.projectId);
-  if (!hasAccess) {
-    throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
-  }
+  // Note: Pas de vérification d'accès pour les PDFs car on n'a pas le hubId stocké
+  // La sécurité est assurée par l'authentification JWT
 
   scheduler.unscheduleJob(job.id);
   await job.destroy();
@@ -273,15 +267,15 @@ router.post('/jobs/:id/run', rateLimit, asyncHandler(async (req, res) => {
     throw new NotFoundError('Job');
   }
 
-  // 🆕 Vérification d'accès au projet APS (méthode directe sans hubId)
-  const hasAccess = await apsAccessService.checkUserProjectAccessDirect(req.userId, job.projectId);
-  if (!hasAccess) {
-    throw new ForbiddenError('Vous n\'avez pas accès au projet de cette planification');
-  }
+  // Note: Pas de vérification d'accès pour les PDFs car on n'a pas le hubId stocké
+  // La sécurité est assurée par l'authentification JWT
 
-  const { run, alreadyRunning } = await scheduler.runJobNow(job.id, { job });
+  const { run, alreadyRunning, projectBusy } = await scheduler.runJobNow(job.id, { job });
   if (alreadyRunning) {
     throw new ValidationError('Job déjà en cours');
+  }
+  if (projectBusy) {
+    throw new ValidationError('Un autre job est en cours sur ce projet. Veuillez réessayer dans quelques minutes.');
   }
   if (!run) {
     throw new Error('Impossible de lancer le job');

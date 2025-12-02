@@ -226,48 +226,64 @@ export default function GlobalDashboard() {
     return allJobs
       .filter((j) => j.scheduleEnabled)
       .map((job) => {
-        const cronParts = job.cronExpression?.split(' ') || [];
-        const minute = cronParts[0] || '0';
-        const hour = cronParts[1] || '2';
+        // 🆕 Utiliser nextRun du backend si disponible
+        let nextExecution = job.nextRun ? new Date(job.nextRun) : null;
+        let timeUntilMs = nextExecution ? nextExecution - now : null;
+        
+        // Si nextRun n'est pas disponible, fallback sur le calcul simple
+        if (!nextExecution) {
+          const cronParts = job.cronExpression?.split(' ') || [];
+          const minute = cronParts[0] || '0';
+          const hour = cronParts[1] || '2';
 
-        const isDaily =
-          !minute.includes('*') &&
-          !minute.includes('/') &&
-          !hour.includes('*') &&
-          !hour.includes('/');
+          const isSimpleCron =
+            !minute.includes('*') &&
+            !minute.includes('/') &&
+            !hour.includes('*') &&
+            !hour.includes('/');
 
-        let nextExecution;
-        let timeUntil;
-
-        if (isDaily) {
-          const next = new Date();
-          next.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
-
-          if (next <= now) {
-            next.setDate(next.getDate() + 1);
+          if (isSimpleCron) {
+            const next = new Date();
+            next.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
+            if (next <= now) {
+              next.setDate(next.getDate() + 1);
+            }
+            nextExecution = next;
+            timeUntilMs = next - now;
           }
-
-          nextExecution = next;
-          timeUntil = Math.round((next - now) / (1000 * 60 * 60));
-        } else {
-          nextExecution = null;
-          timeUntil = null;
+        }
+        
+        // 🆕 Calculer timeUntil en format lisible (minutes, heures, jours)
+        let timeUntilFormatted = null;
+        if (timeUntilMs !== null && timeUntilMs > 0) {
+          const minutes = Math.floor(timeUntilMs / (1000 * 60));
+          const hours = Math.floor(minutes / 60);
+          const days = Math.floor(hours / 24);
+          
+          if (days > 0) {
+            timeUntilFormatted = `${days}j ${hours % 24}h`;
+          } else if (hours > 0) {
+            timeUntilFormatted = `${hours}h ${minutes % 60}min`;
+          } else {
+            timeUntilFormatted = `${minutes}min`;
+          }
         }
 
         return {
           ...job,
           nextExecution,
-          timeUntil,
-          isComplexCron: !isDaily,
+          timeUntilMs,
+          timeUntilFormatted,
+          isComplexCron: !nextExecution,
         };
       })
       .sort((a, b) => {
         if (a.isComplexCron && !b.isComplexCron) return 1;
         if (!a.isComplexCron && b.isComplexCron) return -1;
         if (a.isComplexCron && b.isComplexCron) return 0;
-        return a.nextExecution - b.nextExecution;
-      })
-      .slice(0, 5);
+        return (a.nextExecution || 0) - (b.nextExecution || 0);
+      });
+      // 🆕 Ne plus limiter à 5, afficher toutes les tâches avec scroll
   }, [allJobs]);
 
   if (loading) {
@@ -488,13 +504,20 @@ export default function GlobalDashboard() {
         </div>
 
         {/* Prochaines exécutions */}
-        <Card title="⏰ Prochaines exécutions planifiées" style={{ marginBottom: 24 }}>
+        <Card title={`⏰ Prochaines exécutions planifiées (${upcomingJobs.length})`} style={{ marginBottom: 24 }}>
           {upcomingJobs.length === 0 ? (
             <p style={{ color: '#94a3b8', textAlign: 'center', padding: 20 }}>
               Aucune exécution planifiée
             </p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column', 
+              gap: 12,
+              maxHeight: '400px',  // 🆕 Hauteur max avec scroll
+              overflowY: 'auto',
+              paddingRight: upcomingJobs.length > 5 ? 8 : 0,  // Espace pour scrollbar
+            }}>
               {upcomingJobs.map(job => {
                 const cronParts = job.cronExpression?.split(' ') || [];
                 const hour = cronParts[1]?.padStart(2, '0') || '02';
@@ -549,7 +572,7 @@ export default function GlobalDashboard() {
                       {job.isComplexCron ? (
                         <span style={{ fontStyle: 'italic' }}>Variable</span>
                       ) : (
-                        `Dans ${job.timeUntil}h`
+                        `Dans ${job.timeUntilFormatted || '?'}`
                       )}
                     </div>
                     <div style={{ textAlign: 'right' }}>
