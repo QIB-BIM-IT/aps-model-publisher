@@ -1525,6 +1525,8 @@ router.post('/export-and-save', async (req, res) => {
         totalMB: Math.round(totalSizeBytes / 1024 / 1024 * 100) / 100,
         avgPerPdfBytes: extractedPdfs.length > 0 ? Math.round(totalSizeBytes / extractedPdfs.length) : 0,
       },
+      // 🆕 ID de l'export ACC pour les webhooks
+      exportJobId: jobId,
     };
 
     logger.info(

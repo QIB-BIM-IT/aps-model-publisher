@@ -25,6 +25,7 @@ const apsRoutes = require('./routes/aps.routes');
 const publishRoutes = require('./routes/publish.routes');
 const publishDirectRoutes = require('./routes/publish.direct.routes');
 const pdfExportRoutes = require('./routes/pdfExport.routes');
+const webhooksRoutes = require('./routes/webhooks.routes');
 
 const app = express();
 
@@ -54,6 +55,8 @@ app.use('/api/publish', publishRoutes);
 app.use('/api/publish', publishDirectRoutes);
 app.use('/api/pdf-export', pdfExportRoutes);
 app.use('/api/pdf-export', require('./routes/pdf-export-jobs.routes'));
+// 🆕 Webhooks (désactivés par défaut - activer avec WEBHOOKS_ENABLED=true)
+app.use('/api/webhooks', webhooksRoutes);
 
 // -------- 404 handler (doit être AVANT le error handler)
 app.use((req, res, next) => {
