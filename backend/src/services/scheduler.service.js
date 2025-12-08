@@ -233,6 +233,7 @@ async function runJob(jobId, jobInstance = null, options = {}) {
       
       // 🆕 Acquérir un lock sur le projet pour éviter les accès concurrents
       projectId = job.projectId;
+      const queueStartTime = Date.now(); // 🆕 Temps où le job entre dans la file
       if (projectId) {
         // 🆕 Le job attend son tour dans la file d'attente si le projet est occupé
         hasProjectLock = await acquireProjectLock(projectId, jobId);
@@ -242,18 +243,42 @@ async function runJob(jobId, jobInstance = null, options = {}) {
           return null;
         }
       }
+      const queueEndTime = Date.now(); // 🆕 Temps où le job sort de la file (lock acquis)
+      const queueWaitMs = queueEndTime - queueStartTime;
 
-      logger.info(`[Scheduler] Exécution job ${jobId} (type=${jobType}, project=${projectId})`);
+      logger.info(`[Scheduler] Exécution job ${jobId} (type=${jobType}, project=${projectId}, queueWait=${queueWaitMs}ms)`);
 
       job.status = 'running';
       job.lastRun = new Date();
       await job.save();
+
+      // 🆕 Pour les jobs schedulés, capturer le moment prévu d'exécution
+      const scheduledStartTime = job.nextRun ? new Date(job.nextRun) : null;
 
       // Créer le run selon le type
       if (jobType === 'pdf-export') {
         run = await pdfExportSchedulerService.startRun(job);
       } else {
         run = await apsPublishService.startRun(job);
+      }
+      
+      // 🆕 Stocker les métriques de file d'attente et timing dans le run
+      if (run) {
+        run.stats = {
+          ...(run.stats || {}),
+          queueWaitMs: queueWaitMs > 0 ? queueWaitMs : 0,
+        };
+        
+        if (queueWaitMs > 0) {
+          run.stats.queueStartTime = new Date(queueStartTime).toISOString();
+          run.stats.queueEndTime = new Date(queueEndTime).toISOString();
+        }
+        
+        if (scheduledStartTime) {
+          run.stats.scheduledStartTime = scheduledStartTime.toISOString();
+        }
+        
+        await run.save();
       }
     } catch (e) {
       RUNNING.delete(key);

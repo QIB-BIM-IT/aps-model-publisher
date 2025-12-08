@@ -166,6 +166,122 @@ export default function GlobalDashboard() {
   }, [filteredRuns, pdfRuns]);
   
   const totalRunsInPeriod = filteredRuns.length;
+  
+  // 🆕 Métriques de performance par type de job
+  const performanceMetrics = React.useMemo(() => {
+    // Identifier les runs publish vs PDF
+    const completedRuns = filteredRuns.filter(r => 
+      r.status === 'success' || r.status === 'partial' || r.status === 'completed'
+    );
+    
+    const publishRunsFiltered = completedRuns.filter(r => {
+      // Si jobType est défini, l'utiliser
+      if (r.jobType === 'publish') return true;
+      // Sinon, vérifier si c'est dans publishRuns
+      return publishRuns.some(pr => pr.id === r.id);
+    });
+    
+    const pdfRunsFiltered = completedRuns.filter(r => {
+      // Si jobType est défini, l'utiliser
+      if (r.jobType === 'pdf-export') return true;
+      // Sinon, vérifier si c'est dans pdfRuns
+      return pdfRuns.some(pr => pr.id === r.id);
+    });
+    
+    // Calculer temps moyen pour publish
+    const publishDurations = publishRunsFiltered.map(r => {
+      // 🆕 TODO: Quand webhooks seront actifs, utiliser webhookEndTime - startedAt
+      // Pour l'instant, utiliser durationMs ou endedAt - startedAt
+      if (r.stats?.webhookEndTime) {
+        return new Date(r.stats.webhookEndTime) - new Date(r.startedAt);
+      }
+      return r.stats?.durationMs || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
+    }).filter(d => d > 0);
+    
+    // Calculer temps moyen pour PDF
+    const pdfDurations = pdfRunsFiltered.map(r => {
+      // 🆕 TODO: Quand webhooks seront actifs, utiliser webhookEndTime - startedAt
+      if (r.stats?.webhookEndTime) {
+        return new Date(r.stats.webhookEndTime) - new Date(r.startedAt);
+      }
+      return r.stats?.durationMs || r.stats?.timing?.totalMs || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
+    }).filter(d => d > 0);
+    
+    // 🆕 Autres métriques intéressantes
+    const avgSheetsPerRun = pdfRunsFiltered.length > 0 
+      ? Math.round(pdfRunsFiltered.reduce((sum, r) => sum + (r.stats?.sheetCount || 0), 0) / pdfRunsFiltered.length)
+      : 0;
+    
+    const avgModelsPerRun = publishRunsFiltered.length > 0
+      ? Math.round(publishRunsFiltered.reduce((sum, r) => sum + (r.stats?.okCount || r.stats?.uploaded || 0), 0) / publishRunsFiltered.length)
+      : 0;
+    
+    // Jobs en file d'attente (si on a cette info dans les stats)
+    const queuedJobs = allJobs.filter(j => {
+      // 🆕 TODO: Ajouter un champ queuePosition dans les jobs quand ils sont en file
+      return j.status === 'queued' || j.status === 'waiting';
+    }).length;
+    
+    // 🆕 Fréquence d'exécution (jobs/jour)
+    const getDaysInPeriod = () => {
+      const now = Date.now();
+      const filters = {
+        day: 1,
+        week: 7,
+        month: 30,
+        year: 365,
+        forever: null,
+      };
+      return filters[timeFilter] || null;
+    };
+    
+    const daysInPeriod = getDaysInPeriod();
+    const executionFrequency = daysInPeriod && daysInPeriod > 0
+      ? Math.round((completedRuns.length / daysInPeriod) * 10) / 10
+      : null;
+    
+    // 🆕 Temps d'attente moyen dans la file
+    // Utiliser queueWaitMs directement si disponible, sinon calculer
+    const queueWaitTimes = completedRuns
+      .map(r => {
+        // Priorité 1: Utiliser queueWaitMs directement (déjà calculé par le backend)
+        if (r.stats?.queueWaitMs && r.stats.queueWaitMs > 0) {
+          return r.stats.queueWaitMs;
+        }
+        // Priorité 2: Calculer depuis queueStartTime et queueEndTime
+        if (r.stats?.queueStartTime && r.stats?.queueEndTime) {
+          return new Date(r.stats.queueEndTime) - new Date(r.stats.queueStartTime);
+        }
+        // Priorité 3: Calculer depuis scheduledStartTime (pour jobs schedulés)
+        if (r.stats?.scheduledStartTime && r.startedAt) {
+          const waitTime = new Date(r.startedAt) - new Date(r.stats.scheduledStartTime);
+          // Ne compter que les attentes positives (pas les jobs en avance)
+          return waitTime > 0 ? waitTime : 0;
+        }
+        return null;
+      })
+      .filter(t => t !== null && t > 0);
+    
+    const avgQueueWaitMs = queueWaitTimes.length > 0
+      ? Math.round(queueWaitTimes.reduce((a, b) => a + b, 0) / queueWaitTimes.length)
+      : 0;
+    
+    return {
+      avgPublishMs: publishDurations.length > 0 
+        ? Math.round(publishDurations.reduce((a, b) => a + b, 0) / publishDurations.length)
+        : 0,
+      avgPdfMs: pdfDurations.length > 0
+        ? Math.round(pdfDurations.reduce((a, b) => a + b, 0) / pdfDurations.length)
+        : 0,
+      avgSheetsPerRun,
+      avgModelsPerRun,
+      queuedJobs,
+      executionFrequency,
+      avgQueueWaitMs,
+      publishRunsCount: publishRunsFiltered.length,
+      pdfRunsCount: pdfRunsFiltered.length,
+    };
+  }, [filteredRuns, publishRuns, pdfRuns, allJobs, timeFilter]);
 
   const hourlyData = React.useMemo(() => {
     const hours = {};
@@ -437,6 +553,200 @@ export default function GlobalDashboard() {
           <KPICard icon="📄" label="Sheets exportées (PDF)" value={totalSheetsExported} color="#10b981" />
           <KPICard icon="🚀" label={`Exécutions (${timeFilter === 'day' ? '24h' : timeFilter === 'week' ? '7j' : timeFilter === 'month' ? '30j' : timeFilter === 'year' ? '365j' : 'Total'})`} value={totalRunsInPeriod} color="#f59e0b" />
         </div>
+
+        {/* 🆕 Métriques de Performance */}
+        <Card title="⚡ Temps de traitement moyen" style={{ marginBottom: 24 }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: 20,
+          }}>
+            {/* Temps moyen Publish */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 20,
+              border: '1px solid rgba(59, 130, 246, 0.2)',
+            }}>
+              <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>🚀 Publish (temps réel)</div>
+              <div style={{ fontSize: 32, fontWeight: 700, color: '#60a5fa', marginBottom: 4 }}>
+                {performanceMetrics.avgPublishMs > 60000 
+                  ? `${Math.round(performanceMetrics.avgPublishMs / 60000)}min ${Math.round((performanceMetrics.avgPublishMs % 60000) / 1000)}s` 
+                  : performanceMetrics.avgPublishMs > 0
+                  ? `${Math.round(performanceMetrics.avgPublishMs / 1000)}s`
+                  : 'N/A'}
+              </div>
+              {performanceMetrics.publishRunsCount > 0 && (
+                <div style={{ fontSize: 11, color: '#64748b' }}>
+                  Basé sur {performanceMetrics.publishRunsCount} exécution{performanceMetrics.publishRunsCount > 1 ? 's' : ''}
+                </div>
+              )}
+              {performanceMetrics.publishRunsCount === 0 && filteredRuns.length > 0 && (
+                <div style={{ fontSize: 11, color: '#fbbf24', fontStyle: 'italic' }}>
+                  ⏳ Données disponibles après prochaine exécution
+                </div>
+              )}
+            </div>
+            
+            {/* Temps moyen PDF */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 20,
+              border: '1px solid rgba(16, 185, 129, 0.2)',
+            }}>
+              <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>📄 PDF Export (temps réel)</div>
+              <div style={{ fontSize: 32, fontWeight: 700, color: '#34d399', marginBottom: 4 }}>
+                {performanceMetrics.avgPdfMs > 60000 
+                  ? `${Math.round(performanceMetrics.avgPdfMs / 60000)}min ${Math.round((performanceMetrics.avgPdfMs % 60000) / 1000)}s` 
+                  : performanceMetrics.avgPdfMs > 0
+                  ? `${Math.round(performanceMetrics.avgPdfMs / 1000)}s`
+                  : 'N/A'}
+              </div>
+              {performanceMetrics.pdfRunsCount > 0 && (
+                <div style={{ fontSize: 11, color: '#64748b' }}>
+                  Basé sur {performanceMetrics.pdfRunsCount} exécution{performanceMetrics.pdfRunsCount > 1 ? 's' : ''}
+                </div>
+              )}
+              {performanceMetrics.pdfRunsCount === 0 && filteredRuns.length > 0 && (
+                <div style={{ fontSize: 11, color: '#fbbf24', fontStyle: 'italic' }}>
+                  ⏳ Données disponibles après prochaine exécution
+                </div>
+              )}
+            </div>
+          </div>
+          
+          {performanceMetrics.publishRunsCount === 0 && performanceMetrics.pdfRunsCount === 0 && filteredRuns.length > 0 && (
+            <div style={{ 
+              marginTop: 16, 
+              padding: '12px 16px', 
+              background: 'rgba(251, 191, 36, 0.1)', 
+              borderRadius: 8,
+              fontSize: 12,
+              color: '#fbbf24',
+              textAlign: 'center'
+            }}>
+              ℹ️ Les temps réels (incluant webhooks) seront disponibles une fois sur Azure avec les webhooks activés
+            </div>
+          )}
+        </Card>
+
+        {/* 🆕 KPIs supplémentaires */}
+        <Card title="📊 Métriques de productivité" style={{ marginBottom: 24 }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: 16,
+          }}>
+            {/* Moyenne sheets par exécution PDF */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 16,
+              border: '1px solid rgba(16, 185, 129, 0.2)',
+            }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>📄 Sheets/exécution PDF</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#34d399' }}>
+                {performanceMetrics.avgSheetsPerRun > 0 ? performanceMetrics.avgSheetsPerRun : 'N/A'}
+              </div>
+              {performanceMetrics.pdfRunsCount > 0 && (
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                  {performanceMetrics.pdfRunsCount} exécution{performanceMetrics.pdfRunsCount > 1 ? 's' : ''}
+                </div>
+              )}
+            </div>
+            
+            {/* Moyenne modèles par exécution Publish */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 16,
+              border: '1px solid rgba(59, 130, 246, 0.2)',
+            }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>🚀 Modèles/exécution Publish</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#60a5fa' }}>
+                {performanceMetrics.avgModelsPerRun > 0 ? performanceMetrics.avgModelsPerRun : 'N/A'}
+              </div>
+              {performanceMetrics.publishRunsCount > 0 && (
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                  {performanceMetrics.publishRunsCount} exécution{performanceMetrics.publishRunsCount > 1 ? 's' : ''}
+                </div>
+              )}
+            </div>
+            
+            {/* Jobs en file d'attente */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 16,
+              border: '1px solid rgba(245, 158, 11, 0.2)',
+            }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>⏳ Jobs en file</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#fbbf24' }}>
+                {performanceMetrics.queuedJobs}
+              </div>
+              <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                {performanceMetrics.queuedJobs === 0 ? 'Aucune attente' : 'En attente'}
+              </div>
+            </div>
+            
+            {/* Fréquence d'exécution */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(139, 92, 246, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 16,
+              border: '1px solid rgba(139, 92, 246, 0.2)',
+            }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>📈 Fréquence (jobs/jour)</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#a78bfa' }}>
+                {performanceMetrics.executionFrequency !== null 
+                  ? performanceMetrics.executionFrequency.toFixed(1)
+                  : 'N/A'}
+              </div>
+              {performanceMetrics.executionFrequency !== null && (
+                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                  {timeFilter === 'day' ? 'Aujourd\'hui' : timeFilter === 'week' ? 'Cette semaine' : timeFilter === 'month' ? 'Ce mois' : timeFilter === 'year' ? 'Cette année' : 'Total'}
+                </div>
+              )}
+            </div>
+            
+            {/* Temps d'attente moyen dans la file */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.15) 0%, rgba(236, 72, 153, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 16,
+              border: '1px solid rgba(236, 72, 153, 0.2)',
+            }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>⏱️ Attente file (avg)</div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#f472b6' }}>
+                {performanceMetrics.avgQueueWaitMs > 0
+                  ? performanceMetrics.avgQueueWaitMs > 60000
+                    ? `${Math.round(performanceMetrics.avgQueueWaitMs / 60000)}min`
+                    : `${Math.round(performanceMetrics.avgQueueWaitMs / 1000)}s`
+                  : '0s'}
+              </div>
+              <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                {performanceMetrics.avgQueueWaitMs === 0 
+                  ? 'Aucune attente mesurée' 
+                  : 'Avec webhooks'}
+              </div>
+            </div>
+          </div>
+          
+          {performanceMetrics.avgQueueWaitMs === 0 && (
+            <div style={{ 
+              marginTop: 12, 
+              padding: '8px 12px', 
+              background: 'rgba(59, 130, 246, 0.1)', 
+              borderRadius: 8,
+              fontSize: 11,
+              color: '#60a5fa',
+              textAlign: 'center'
+            }}>
+              ℹ️ Le temps d'attente dans la file sera mesuré automatiquement avec les webhooks
+            </div>
+          )}
+        </Card>
 
         {/* Graphiques */}
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24, marginBottom: 24 }}>
