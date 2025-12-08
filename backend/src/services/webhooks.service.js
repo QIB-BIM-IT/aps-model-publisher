@@ -166,7 +166,9 @@ class WebhooksService {
         if (!run) {
           const recentRuns = await PDFExportRun.findAll({
             where: {
-              status: ['success', 'partial', 'failed'],
+              status: {
+                [Op.in]: ['success', 'partial', 'failed'],
+              },
               startedAt: {
                 [Op.gte]: new Date(Date.now() - 24 * 60 * 60 * 1000),
               },
