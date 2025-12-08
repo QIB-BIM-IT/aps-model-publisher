@@ -118,6 +118,8 @@ class PDFExportSchedulerService {
         // 🆕 Métriques détaillées
         timing: data.timing || null,
         size: data.size || null,
+        // 🆕 ID de l'export ACC pour les webhooks
+        exportJobId: data.exportJobId || null,
       };
     } catch (e) {
       logger.error(`[PDFExportScheduler] Erreur exécution: ${e.message}`);
@@ -157,6 +159,8 @@ class PDFExportSchedulerService {
       // 🆕 Métriques détaillées
       timing: summary.timing || null,
       size: summary.size || null,
+      // 🆕 ID de l'export ACC pour les webhooks
+      exportJobId: summary.exportJobId || null,
     };
 
     if (summary.message) {
