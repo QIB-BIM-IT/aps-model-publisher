@@ -107,13 +107,17 @@ class PDFExportSchedulerService {
 
       const durationMs = Date.now() - started;
 
+      // 🆕 Inclure les métriques détaillées si disponibles
       return {
         results: data.results || [],
         uploaded: data.uploaded || 0,
         failed: data.failed || 0,
-        sheetCount: data.sheetCount || data.uploaded || 0, // Nombre réel de sheets
+        sheetCount: data.sheetCount || data.uploaded || 0,
         errors: data.errors || [],
         durationMs,
+        // 🆕 Métriques détaillées
+        timing: data.timing || null,
+        size: data.size || null,
       };
     } catch (e) {
       logger.error(`[PDFExportScheduler] Erreur exécution: ${e.message}`);
@@ -150,6 +154,9 @@ class PDFExportSchedulerService {
       failed,
       sheetCount, // Nombre de sheets exportées (peut être > uploaded en mode combined)
       total: uploaded + failed,
+      // 🆕 Métriques détaillées
+      timing: summary.timing || null,
+      size: summary.size || null,
     };
 
     if (summary.message) {

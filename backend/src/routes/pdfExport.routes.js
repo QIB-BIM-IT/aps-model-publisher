@@ -1172,6 +1172,21 @@ router.post('/export-and-save', async (req, res) => {
     const includeViews2D = filters.includeViews2D !== false;
     const includeMarkups = filters.includeMarkups !== false;
 
+    // 🆕 Métriques de temps détaillées
+    const timing = {
+      startTime: Date.now(),
+      resolveStart: null,
+      resolveEnd: null,
+      exportStart: null,
+      exportEnd: null,
+      downloadStart: null,
+      downloadEnd: null,
+      processStart: null,
+      processEnd: null,
+      uploadStart: null,
+      uploadEnd: null,
+    };
+
     logger.info(
       `[ExportAndSave] Démarrage export + upload pour: ${fileUrn} (filters: sheets=${includeSheets}, views=${includeViews2D}, markups=${includeMarkups}, mode=${selectionMode}, exportMode=${exportMode})`
     );
@@ -1194,7 +1209,10 @@ router.post('/export-and-save', async (req, res) => {
     if (!isLineageUrn) {
       // Si ce n'est pas un lineageUrn, on doit résoudre pour obtenir l'itemUrn (lineage)
       if (!exportItemUrn) {
+        timing.resolveStart = Date.now();
         const resolved = await resolveModelUrns(fileUrn, projectId, userToken);
+        timing.resolveEnd = Date.now();
+        
         exportVersionUrn = resolved.versionUrn;
         exportDerivativeUrn = resolved.derivativeUrn;
         exportItemUrn = resolved.itemUrn;
@@ -1216,6 +1234,7 @@ router.post('/export-and-save', async (req, res) => {
       logger.info(`[ExportAndSave] Utilisation directe du lineageUrn: ${fileUrn}`);
     }
 
+    timing.exportStart = Date.now();
     const jobId = await accExportService.exportPDFs(
       [urnForExport],
       projectId,
@@ -1224,6 +1243,7 @@ router.post('/export-and-save', async (req, res) => {
     );
 
     const jobResult = await accExportService.waitForJobCompletion(jobId, userToken);
+    timing.exportEnd = Date.now();
 
     const jobStatus = jobResult?.status;
     if (jobStatus && jobStatus !== 'successful' && jobStatus !== 'partialSuccess') {
@@ -1237,7 +1257,11 @@ router.post('/export-and-save', async (req, res) => {
       throw new Error('Export terminé mais aucune URL de téléchargement trouvée');
     }
 
+    timing.downloadStart = Date.now();
     const zipBuffer = await accExportService.downloadZip(signedUrl);
+    timing.downloadEnd = Date.now();
+    
+    timing.processStart = Date.now();
     const extractedPdfs = await accExportService.extractPDFsFromZip(zipBuffer);
 
     logger.info(`[ExportAndSave] ✅ ${extractedPdfs.length} PDF(s) extraits`);
@@ -1378,7 +1402,10 @@ router.post('/export-and-save', async (req, res) => {
       `[ExportAndSave] PDFs retenus pour upload: ${selectedPdfs.length}/${filteredPdfs.length} (extraits=${extractedPdfs.length})`
     );
 
+    timing.processEnd = Date.now();
+    
     logger.info('[ExportAndSave] 2/2 - Upload sur ACC...');
+    timing.uploadStart = Date.now();
     const uploadResults = [];
     const uploadErrors = [];
 
@@ -1445,12 +1472,27 @@ router.post('/export-and-save', async (req, res) => {
       }
     }
 
+    timing.uploadEnd = Date.now();
+    
     // Calculer le nombre réel de sheets exportées
     // Mode individual: 1 PDF = 1 sheet, donc sheetCount = uploaded
     // Mode combined: additionner les mergedCount de chaque résultat
     const sheetCount = exportMode === 'combined'
       ? uploadResults.reduce((sum, r) => sum + (r.mergedCount || 1), 0)
       : uploadResults.length;
+
+    // 🆕 Calculer les métriques de temps détaillées
+    const timingStats = {
+      totalMs: timing.uploadEnd - timing.startTime,
+      resolveMs: timing.resolveEnd && timing.resolveStart ? timing.resolveEnd - timing.resolveStart : 0,
+      exportMs: timing.exportEnd && timing.exportStart ? timing.exportEnd - timing.exportStart : 0,
+      downloadMs: timing.downloadEnd && timing.downloadStart ? timing.downloadEnd - timing.downloadStart : 0,
+      processMs: timing.processEnd && timing.processStart ? timing.processEnd - timing.processStart : 0,
+      uploadMs: timing.uploadEnd && timing.uploadStart ? timing.uploadEnd - timing.uploadStart : 0,
+    };
+    
+    // Calculer la taille totale des PDFs
+    const totalSizeBytes = extractedPdfs.reduce((sum, pdf) => sum + (pdf.size || pdf.buffer?.length || 0), 0);
 
     const response = {
       success: uploadResults.length > 0 && uploadErrors.length === 0,
@@ -1476,10 +1518,20 @@ router.post('/export-and-save', async (req, res) => {
         derivative: exportDerivativeUrn,
         providedByClient: Boolean(clientResolved.version && clientResolved.derivative),
       },
+      // 🆕 Métriques de temps et taille
+      timing: timingStats,
+      size: {
+        totalBytes: totalSizeBytes,
+        totalMB: Math.round(totalSizeBytes / 1024 / 1024 * 100) / 100,
+        avgPerPdfBytes: extractedPdfs.length > 0 ? Math.round(totalSizeBytes / extractedPdfs.length) : 0,
+      },
     };
 
     logger.info(
-      `[ExportAndSave] ✅ Terminé: uploaded=${uploadResults.length}, failed=${uploadErrors.length}, processed=${filteredPdfs.length}`
+      `[ExportAndSave] ✅ Terminé: uploaded=${uploadResults.length}, failed=${uploadErrors.length}, processed=${filteredPdfs.length}, totalTime=${timingStats.totalMs}ms`
+    );
+    logger.info(
+      `[ExportAndSave] 📊 Timing: resolve=${timingStats.resolveMs}ms, export=${timingStats.exportMs}ms, download=${timingStats.downloadMs}ms, process=${timingStats.processMs}ms, upload=${timingStats.uploadMs}ms`
     );
 
     res.json(response);
