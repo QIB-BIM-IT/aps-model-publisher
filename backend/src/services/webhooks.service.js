@@ -107,13 +107,18 @@ class WebhooksService {
         };
         
         // Calculer le temps réel total (depuis le début jusqu'à la publication réelle)
+        let realDurationMs = null;
         if (run.startedAt) {
-          const realDurationMs = new Date(eventTime) - new Date(run.startedAt);
+          realDurationMs = new Date(eventTime) - new Date(run.startedAt);
           run.stats.realDurationMs = realDurationMs;
         }
         
         await run.save();
-        logger.info(`[Webhooks] ✅ Run ${run.id} mis à jour avec temps réel: ${run.stats.realDurationMs}ms`);
+        if (realDurationMs !== null) {
+          logger.info(`[Webhooks] ✅ Run ${run.id} mis à jour avec temps réel: ${realDurationMs}ms`);
+        } else {
+          logger.info(`[Webhooks] ✅ Run ${run.id} mis à jour (startedAt manquant, temps réel non calculé)`);
+        }
       }
     } catch (error) {
       logger.error(`[Webhooks] Erreur traitement événement publish: ${error.message}`);
@@ -161,7 +166,9 @@ class WebhooksService {
         if (!run) {
           const recentRuns = await PDFExportRun.findAll({
             where: {
-              status: ['success', 'partial', 'failed'],
+              status: {
+                [Op.in]: ['success', 'partial', 'failed'],
+              },
               startedAt: {
                 [Op.gte]: new Date(Date.now() - 24 * 60 * 60 * 1000),
               },
@@ -196,13 +203,19 @@ class WebhooksService {
           webhookReceived: true,
         };
         
+        // Calculer le temps réel total (depuis le début jusqu'à l'export réel)
+        let realDurationMs = null;
         if (run.startedAt) {
-          const realDurationMs = new Date(eventTime) - new Date(run.startedAt);
+          realDurationMs = new Date(eventTime) - new Date(run.startedAt);
           run.stats.realDurationMs = realDurationMs;
         }
         
         await run.save();
-        logger.info(`[Webhooks] ✅ Run ${run.id} mis à jour avec temps réel: ${run.stats.realDurationMs}ms`);
+        if (realDurationMs !== null) {
+          logger.info(`[Webhooks] ✅ Run ${run.id} mis à jour avec temps réel: ${realDurationMs}ms`);
+        } else {
+          logger.info(`[Webhooks] ✅ Run ${run.id} mis à jour (startedAt manquant, temps réel non calculé)`);
+        }
       }
     } catch (error) {
       logger.error(`[Webhooks] Erreur traitement événement PDF: ${error.message}`);
