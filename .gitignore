@@ -28,6 +28,8 @@ Thumbs.db
 # Build outputs
 dist/
 build/
+frontend/dist/
+frontend/node_modules/
 
 # Azure
 .azure/
@@ -41,4 +43,3 @@ temp/
 # IIS/Azure specific
 iisnode/
 web.config.backup
-

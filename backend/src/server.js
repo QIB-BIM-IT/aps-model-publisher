@@ -2,6 +2,7 @@
 require('dotenv').config();
 
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -62,6 +63,19 @@ app.use('/api/publish', publishRoutes);
 app.use('/api/publish', publishDirectRoutes);
 app.use('/api/pdf-export', pdfExportRoutes);
 app.use('/api/pdf-export', require('./routes/pdf-export-jobs.routes'));
+
+// -------- Serve React frontend in production
+if (process.env.NODE_ENV === 'production') {
+  const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+  app.use(express.static(frontendDistPath));
+
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    return res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+}
 
 // -------- 404 handler (doit être AVANT le error handler)
 app.use((req, res, next) => {
