@@ -1,8 +1,12 @@
 {
  "name": "aps-model-publisher-backend",
  "version": "1.0.0",
- "description": "Backend pour la publication automatique de modÃ¨les APS/ACC",
+ "description": "Backend pour la publication automatique de modèles APS/ACC",
  "main": "src/server.js",
+ "engines": {
+  "node": ">=18.0.0",
+  "npm": ">=9.0.0"
+ },
  "scripts": {
   "start": "node src/server.js",
   "dev": "nodemon src/server.js",
