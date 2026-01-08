@@ -11,7 +11,7 @@
     "install:backend": "cd backend && npm cache clean --force && npm install --prefer-online",
     "install:frontend": "cd frontend && npm install",
     "build:frontend": "cd frontend && npm run build",
-    "build": "echo 'Building frontend...' && cd frontend && npm install && npm run build",
+    "build": "echo 'Building frontend...' && cd frontend && npm run build",
     "start": "node backend/src/server.js",
     "postinstall": "npm run install:backend && npm run install:frontend && npm run build"
   }
