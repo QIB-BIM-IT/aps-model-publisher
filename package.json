@@ -8,7 +8,7 @@
     "npm": ">=9.0.0"
   },
   "scripts": {
-    "install:backend": "cd backend && npm install",
+    "install:backend": "cd backend && npm cache clean --force && npm install --prefer-online",
     "install:frontend": "cd frontend && npm install",
     "build:frontend": "cd frontend && npm run build",
     "build": "echo 'Building frontend...' && cd frontend && npm install && npm run build",
