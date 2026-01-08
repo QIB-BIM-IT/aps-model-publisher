@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
-package-lock.json
+# Ignore root package-lock only, keep backend/frontend locks
+/package-lock.json
 
 # Environment variables
 .env
