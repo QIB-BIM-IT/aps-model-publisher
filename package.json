@@ -14,9 +14,5 @@
     "build": "echo 'Building frontend...' && cd frontend && npm install && npm run build",
     "start": "node backend/src/server.js",
     "postinstall": "npm run install:backend && npm run install:frontend && npm run build"
-  },
-  "dependencies": {
-    "pdf-lib": "^1.17.1",
-    "pdf-merge": "^1.2.0"
   }
 }
