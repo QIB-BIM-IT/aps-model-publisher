@@ -1,0 +1,10 @@
+Name = qib-publisher-db
+Type = Azure Database for PostgreSQL flexible server
+#Login
+Administrator login = QIBdbAdmin
+Password = Lilyana_2018
+#Connection string
+JDBC
+jdbc:postgresql://qib-publisher-db.postgres.database.azure.com:5432/postgres?user=QIBdbAdmin&password={your_password}&sslmode=require
+Node.js
+var conn= new Client({host:"qib-publisher-db.postgres.database.azure.com", user:"QIBdbAdmin", password:"Lilyana_2018", database:"postgres", port:5432, ssl:{ca:fs.readFileSync("{ca-cert filename}")}});
