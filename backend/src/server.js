@@ -1,6 +1,5 @@
 // src/server.js
 require('dotenv').config();
-
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -8,9 +7,9 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
-
 const logger = require('./config/logger');
 const { connectDB } = require('./config/database');
+
 // ✅ Import du error handler
 const {
   errorHandler,
@@ -48,8 +47,6 @@ app.get('/health', (req, res) => {
 });
 
 // 🆕 Webhooks route (AVANT express.json() pour préserver le body brut pour signature HMAC)
-// ⚠️ IMPORTANT: Cette route doit être enregistrée AVANT express.json() car elle a besoin
-// du body brut (Buffer) pour vérifier la signature HMAC-SHA256
 app.use('/api/webhooks', webhooksRoutes);
 
 // -------- Middlewares de parsing (APRÈS la route webhook)
@@ -68,7 +65,6 @@ app.use('/api/pdf-export', require('./routes/pdf-export-jobs.routes'));
 if (process.env.NODE_ENV === 'production') {
   const frontendDistPath = path.join(__dirname, '../../frontend/dist');
   app.use(express.static(frontendDistPath));
-
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) {
       return next();
@@ -115,6 +111,7 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
     process.on('SIGINT', () => graceful('SIGINT'));
   } catch (e) {
     logger.error(`❌ Erreur de démarrage: ${e.message}`);
+    logger.error('Stack trace:', e.stack);
     process.exit(1);
   }
 })();
