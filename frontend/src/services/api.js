@@ -1,23 +1,29 @@
 import axios from 'axios';
 
-// Détecter automatiquement l'environnement basé sur l'URL du navigateur
-// Si on est sur localhost, utiliser localhost:3000 pour l'API
-// Sinon (production), utiliser le même domaine (URL relative)
-const isLocalhost = typeof window !== 'undefined' && 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-
-const API_URL = import.meta.env.VITE_API_URL || 
-  (isLocalhost ? 'http://localhost:3000' : '');
-
-// Fonction helper pour obtenir l'URL de base de l'API
+// Fonction pour obtenir l'URL de base de l'API
 function getApiBaseUrl() {
+  // Si variable d'environnement définie, l'utiliser
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL;
   }
-  // En production sur Azure, utiliser l'origin actuel
-  // En local, utiliser localhost:3000
-  return isLocalhost ? 'http://localhost:3000' : window.location.origin;
+  
+  // Détection automatique basée sur l'URL actuelle
+  const hostname = window.location.hostname;
+  
+  // En développement local (localhost ou 127.0.0.1)
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'http://localhost:3000';
+  }
+  
+  // En production (Azure ou autre), utiliser le même domaine
+  return window.location.origin;
 }
+
+// URL de base pour axios (URL relative en production)
+const API_URL = import.meta.env.VITE_API_URL || 
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+    ? 'http://localhost:3000' 
+    : '');
 
 export function getToken() { return localStorage.getItem('jwt_token') || ''; }
 export function setToken(t) { if (t) localStorage.setItem('jwt_token', t); }
@@ -38,8 +44,19 @@ export async function me() {
 export async function startLogin(opts = {}) {
   const redirect = window.location.origin + '/callback';
   const force = opts.forceLogin ? '&force=login' : '';
+  
+  // DEBUG: Afficher les valeurs pour diagnostic
+  const apiBase = getApiBaseUrl();
+  console.log('🔍 DEBUG startLogin:');
+  console.log('  - hostname:', window.location.hostname);
+  console.log('  - origin:', window.location.origin);
+  console.log('  - getApiBaseUrl():', apiBase);
+  console.log('  - VITE_API_URL:', import.meta.env.VITE_API_URL);
+  
   // Utiliser getApiBaseUrl() pour construire l'URL complète du login
-  const loginUrl = `${getApiBaseUrl()}/api/auth/login?redirect=${encodeURIComponent(redirect)}${force}`;
+  const loginUrl = `${apiBase}/api/auth/login?redirect=${encodeURIComponent(redirect)}${force}`;
+  console.log('  - loginUrl finale:', loginUrl);
+  
   window.location.href = loginUrl;
 }
 
