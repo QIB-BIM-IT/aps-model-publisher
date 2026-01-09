@@ -1,9 +1,23 @@
 import axios from 'axios';
 
-// En production sur Azure, utiliser URL relative (même domaine que le frontend)
-// En développement local, utiliser localhost:3000
+// Détecter automatiquement l'environnement basé sur l'URL du navigateur
+// Si on est sur localhost, utiliser localhost:3000 pour l'API
+// Sinon (production), utiliser le même domaine (URL relative)
+const isLocalhost = typeof window !== 'undefined' && 
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
 const API_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000');
+  (isLocalhost ? 'http://localhost:3000' : '');
+
+// Fonction helper pour obtenir l'URL de base de l'API
+function getApiBaseUrl() {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  // En production sur Azure, utiliser l'origin actuel
+  // En local, utiliser localhost:3000
+  return isLocalhost ? 'http://localhost:3000' : window.location.origin;
+}
 
 export function getToken() { return localStorage.getItem('jwt_token') || ''; }
 export function setToken(t) { if (t) localStorage.setItem('jwt_token', t); }
@@ -24,7 +38,9 @@ export async function me() {
 export async function startLogin(opts = {}) {
   const redirect = window.location.origin + '/callback';
   const force = opts.forceLogin ? '&force=login' : '';
-  window.location.href = `${API_URL}/api/auth/login?redirect=${encodeURIComponent(redirect)}${force}`;
+  // Utiliser getApiBaseUrl() pour construire l'URL complète du login
+  const loginUrl = `${getApiBaseUrl()}/api/auth/login?redirect=${encodeURIComponent(redirect)}${force}`;
+  window.location.href = loginUrl;
 }
 
 // ----- APS -----
