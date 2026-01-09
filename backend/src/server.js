@@ -11,13 +11,13 @@ const logger = require('./config/logger');
 const { connectDB } = require('./config/database');
 
 // ✅ Import du error handler
-const {
-  errorHandler,
+//const {
+//  errorHandler,
 //  setupGlobalErrorHandlers,
-} = require('./middleware/errorHandler.middleware');
+//} = require('./middleware/errorHandler.middleware');
 
 // ✅ Setup handlers globaux (doit être fait avant tout le reste)
-setupGlobalErrorHandlers();
+//setupGlobalErrorHandlers();
 
 // Routes
 const authRoutes = require('./routes/auth.routes');
@@ -81,7 +81,7 @@ app.use((req, res, next) => {
 });
 
 // -------- ✅ Error handler centralisé (doit être le DERNIER middleware)
-app.use(errorHandler);
+//app.use(errorHandler);
 
 // -------- Bootstrap
 const PORT = parseInt(process.env.PORT || '3000', 10);
