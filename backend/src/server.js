@@ -13,7 +13,7 @@ const { connectDB } = require('./config/database');
 // ✅ Import du error handler
 const {
   errorHandler,
-  setupGlobalErrorHandlers,
+//  setupGlobalErrorHandlers,
 } = require('./middleware/errorHandler.middleware');
 
 // ✅ Setup handlers globaux (doit être fait avant tout le reste)
