@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+// En production sur Azure, utiliser URL relative (même domaine que le frontend)
+// En développement local, utiliser localhost:3000
+const API_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.MODE === 'production' ? '' : 'http://localhost:3000');
 
 export function getToken() { return localStorage.getItem('jwt_token') || ''; }
 export function setToken(t) { if (t) localStorage.setItem('jwt_token', t); }
