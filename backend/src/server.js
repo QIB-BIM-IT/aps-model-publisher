@@ -65,7 +65,9 @@ app.use('/api/pdf-export', require('./routes/pdf-export-jobs.routes'));
 if (process.env.NODE_ENV === 'production') {
   const frontendDistPath = path.join(__dirname, '../../frontend/dist');
   app.use(express.static(frontendDistPath));
-  app.get('*', (req, res, next) => {
+  
+  // ✅ Nouvelle syntaxe Express 5 pour catch-all route
+  app.get('/(.*)', (req, res, next) => {
     if (req.path.startsWith('/api')) {
       return next();
     }
