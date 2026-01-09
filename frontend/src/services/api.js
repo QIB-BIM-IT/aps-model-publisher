@@ -2,16 +2,20 @@ import axios from 'axios';
 
 // Fonction pour obtenir l'URL de base de l'API
 function getApiBaseUrl() {
-  // Si variable d'environnement définie, l'utiliser
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
-  }
-  
-  // Détection automatique basée sur l'URL actuelle
   const hostname = window.location.hostname;
   
+  // Ignorer VITE_API_URL s'il pointe vers localhost mais qu'on est en production
+  const envApiUrl = import.meta.env.VITE_API_URL;
+  const isEnvLocalhost = envApiUrl && envApiUrl.includes('localhost');
+  const isCurrentLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+  
+  // Si la variable d'env est définie ET cohérente avec l'environnement actuel, l'utiliser
+  if (envApiUrl && !isEnvLocalhost) {
+    return envApiUrl;
+  }
+  
   // En développement local (localhost ou 127.0.0.1)
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+  if (isCurrentLocalhost) {
     return 'http://localhost:3000';
   }
   
@@ -20,10 +24,8 @@ function getApiBaseUrl() {
 }
 
 // URL de base pour axios (URL relative en production)
-const API_URL = import.meta.env.VITE_API_URL || 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-    ? 'http://localhost:3000' 
-    : '');
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_URL = isLocalhost ? 'http://localhost:3000' : '';
 
 export function getToken() { return localStorage.getItem('jwt_token') || ''; }
 export function setToken(t) { if (t) localStorage.setItem('jwt_token', t); }
