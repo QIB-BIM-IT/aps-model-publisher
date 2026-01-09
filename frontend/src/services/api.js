@@ -46,19 +46,8 @@ export async function me() {
 export async function startLogin(opts = {}) {
   const redirect = window.location.origin + '/callback';
   const force = opts.forceLogin ? '&force=login' : '';
-  
-  // DEBUG: Afficher les valeurs pour diagnostic
   const apiBase = getApiBaseUrl();
-  console.log('🔍 DEBUG startLogin:');
-  console.log('  - hostname:', window.location.hostname);
-  console.log('  - origin:', window.location.origin);
-  console.log('  - getApiBaseUrl():', apiBase);
-  console.log('  - VITE_API_URL:', import.meta.env.VITE_API_URL);
-  
-  // Utiliser getApiBaseUrl() pour construire l'URL complète du login
   const loginUrl = `${apiBase}/api/auth/login?redirect=${encodeURIComponent(redirect)}${force}`;
-  console.log('  - loginUrl finale:', loginUrl);
-  
   window.location.href = loginUrl;
 }
 
