@@ -932,6 +932,7 @@ export default function GlobalDashboard() {
                     <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Nom</th>
                     <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Type</th>
                     <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Projet</th>
+                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Utilisateur</th>
                     <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Heure</th>
                     <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Timezone</th>
                     <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1' }}>Status</th>
@@ -943,6 +944,68 @@ export default function GlobalDashboard() {
                     const hour = cronParts[1]?.padStart(2, '0') || '02';
                     const minute = cronParts[0]?.padStart(2, '0') || '00';
                     const isPublish = publishJobs.some(j => j.id === job.id);
+                    
+                    // Trouver le dernier run pour ce job
+                    const jobRuns = allRuns.filter(r => r.jobId === job.id);
+                    const lastRun = jobRuns.length > 0 
+                      ? jobRuns.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+                      : null;
+                    
+                    // Déterminer si le status est en erreur
+                    const isError = lastRun && ['failed', 'error', 'timeout'].includes(lastRun.status);
+                    const isPartial = lastRun && lastRun.status === 'partial';
+                    const isRunning = job.status === 'running';
+                    const isSuccess = lastRun && ['success', 'completed'].includes(lastRun.status);
+
+                    // Couleurs du status basées sur le dernier run
+                    const getStatusStyle = () => {
+                      if (!job.scheduleEnabled) {
+                        return {
+                          background: 'rgba(156, 163, 175, 0.25)',
+                          color: '#94a3b8',
+                          border: '1px solid rgba(156, 163, 175, 0.3)'
+                        };
+                      }
+                      if (isRunning) {
+                        return {
+                          background: 'rgba(251, 146, 60, 0.25)',
+                          color: '#fb923c',
+                          border: '1px solid rgba(251, 146, 60, 0.4)'
+                        };
+                      }
+                      if (isError) {
+                        return {
+                          background: 'rgba(239, 68, 68, 0.25)',
+                          color: '#f87171',
+                          border: '1px solid rgba(239, 68, 68, 0.4)'
+                        };
+                      }
+                      if (isPartial) {
+                        return {
+                          background: 'rgba(245, 158, 11, 0.25)',
+                          color: '#fbbf24',
+                          border: '1px solid rgba(245, 158, 11, 0.4)'
+                        };
+                      }
+                      // Par défaut (idle ou success)
+                      return {
+                        background: 'rgba(34, 197, 94, 0.25)',
+                        color: '#4ade80',
+                        border: '1px solid rgba(34, 197, 94, 0.4)'
+                      };
+                    };
+
+                    // Texte du status
+                    const getStatusText = () => {
+                      if (!job.scheduleEnabled) return 'Pausé';
+                      if (isRunning) return 'running';
+                      if (isError) return `❌ ${lastRun.status}`;
+                      if (isPartial) return '⚠️ partial';
+                      if (isSuccess) return '✅ success';
+                      return job.status || 'idle';
+                    };
+
+                    const statusStyle = getStatusStyle();
 
                     return (
                       <tr
@@ -980,6 +1043,12 @@ export default function GlobalDashboard() {
                         <td style={{ padding: '12px 16px', fontSize: 13, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
                           {job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`}
                         </td>
+                        <td style={{ padding: '12px 16px', fontSize: 13, color: '#94a3b8', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 14 }}>👤</span>
+                            {job.userName || 'Inconnu'}
+                          </span>
+                        </td>
                         <td style={{ padding: '12px 16px', textAlign: 'center', fontSize: 14, fontWeight: 500, fontFamily: 'monospace', color: '#60a5fa', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
                           🕐 {hour}:{minute}
                         </td>
@@ -992,17 +1061,9 @@ export default function GlobalDashboard() {
                             borderRadius: 8,
                             fontSize: 12,
                             fontWeight: 600,
-                            background: job.scheduleEnabled
-                              ? (job.status === 'running' ? 'rgba(251, 146, 60, 0.25)' : 'rgba(34, 197, 94, 0.25)')
-                              : 'rgba(156, 163, 175, 0.25)',
-                            color: job.scheduleEnabled
-                              ? (job.status === 'running' ? '#fb923c' : '#4ade80')
-                              : '#94a3b8',
-                            border: `1px solid ${job.scheduleEnabled
-                              ? (job.status === 'running' ? 'rgba(251, 146, 60, 0.4)' : 'rgba(34, 197, 94, 0.4)')
-                              : 'rgba(156, 163, 175, 0.3)'}`
+                            ...statusStyle
                           }}>
-                            {!job.scheduleEnabled ? 'Pausé' : (job.status || 'idle')}
+                            {getStatusText()}
                           </span>
                         </td>
                       </tr>
