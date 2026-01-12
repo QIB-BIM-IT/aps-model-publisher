@@ -6,6 +6,9 @@ const logger = require('../config/logger');
 const apsAuthService = require('./apsAuth.service');
 const { PDFExportRun } = require('../models');
 
+// Timeout global pour les exports PDF (défaut: 10 minutes)
+const PDF_EXPORT_TIMEOUT_MS = parseInt(process.env.PDF_EXPORT_TIMEOUT_MS || '600000', 10);
+
 class PDFExportSchedulerService {
   /**
    * Crée un run initial pour l'exécution
@@ -75,6 +78,10 @@ class PDFExportSchedulerService {
       
       logger.debug(`[PDFExportScheduler] Appel interne vers ${url} avec userId=${run.userId}`);
       
+      // Timeout pour éviter de bloquer indéfiniment
+      const timeoutMs = PDF_EXPORT_TIMEOUT_MS;
+      logger.info(`[PDFExportScheduler] Timeout configuré: ${timeoutMs}ms (${Math.round(timeoutMs/60000)} min)`);
+      
       const response = await axios.post(
         url,
         payload,
@@ -85,8 +92,8 @@ class PDFExportSchedulerService {
             'x-internal-request': 'true',
             'x-user-id': String(run.userId),
           },
-          // S'assurer que les headers sont bien envoyés
-          validateStatus: () => true, // Ne pas throw sur les erreurs HTTP
+          timeout: timeoutMs, // ← IMPORTANT: timeout pour ne pas bloquer
+          validateStatus: () => true,
         }
       );
       
@@ -122,6 +129,12 @@ class PDFExportSchedulerService {
         exportJobId: data.exportJobId || null,
       };
     } catch (e) {
+      // Gestion spécifique des erreurs de timeout
+      if (e.code === 'ECONNABORTED' || e.message?.includes('timeout')) {
+        const timeoutMin = Math.round(PDF_EXPORT_TIMEOUT_MS / 60000);
+        logger.error(`[PDFExportScheduler] ⏱️ TIMEOUT après ${timeoutMin} minutes pour run=${run.id}`);
+        throw new Error(`Export PDF timeout après ${timeoutMin} minutes. Le fichier est peut-être trop volumineux.`);
+      }
       logger.error(`[PDFExportScheduler] Erreur exécution: ${e.message}`);
       throw e;
     }
