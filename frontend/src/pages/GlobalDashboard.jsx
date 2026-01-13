@@ -216,15 +216,16 @@ export default function GlobalDashboard() {
       ? Math.round(publishRunsFiltered.reduce((sum, r) => sum + (r.stats?.okCount || r.stats?.uploaded || 0), 0) / publishRunsFiltered.length)
       : 0;
     
-    // Jobs en file d'attente (si on a cette info dans les stats)
-    const queuedJobs = allJobs.filter(j => {
-      // 🆕 TODO: Ajouter un champ queuePosition dans les jobs quand ils sont en file
-      return j.status === 'queued' || j.status === 'waiting';
-    }).length;
+    // Jobs actuellement en cours d'exécution
+    const runningJobs = allJobs.filter(j => j.status === 'running').length;
+    
+    // Runs échoués dans la période
+    const failedRuns = filteredRuns.filter(r => 
+      r.status === 'failed' || r.status === 'error' || r.status === 'timeout'
+    ).length;
     
     // 🆕 Fréquence d'exécution (jobs/jour)
     const getDaysInPeriod = () => {
-      const now = Date.now();
       const filters = {
         day: 1,
         week: 7,
@@ -235,36 +236,26 @@ export default function GlobalDashboard() {
       return filters[timeFilter] || null;
     };
     
-    const daysInPeriod = getDaysInPeriod();
+    let daysInPeriod = getDaysInPeriod();
+    
+    // Pour "forever", calculer le nombre de jours depuis le premier run
+    if (timeFilter === 'forever' && filteredRuns.length > 0) {
+      const sortedRuns = [...filteredRuns].sort((a, b) => 
+        new Date(a.createdAt) - new Date(b.createdAt)
+      );
+      const firstRunDate = new Date(sortedRuns[0].createdAt);
+      const daysSinceFirst = Math.max(1, Math.ceil((Date.now() - firstRunDate) / (24 * 60 * 60 * 1000)));
+      daysInPeriod = daysSinceFirst;
+    }
+    
     const executionFrequency = daysInPeriod && daysInPeriod > 0
-      ? Math.round((completedRuns.length / daysInPeriod) * 10) / 10
-      : null;
-    
-    // 🆕 Temps d'attente moyen dans la file
-    // Utiliser queueWaitMs directement si disponible, sinon calculer
-    const queueWaitTimes = completedRuns
-      .map(r => {
-        // Priorité 1: Utiliser queueWaitMs directement (déjà calculé par le backend)
-        if (r.stats?.queueWaitMs && r.stats.queueWaitMs > 0) {
-          return r.stats.queueWaitMs;
-        }
-        // Priorité 2: Calculer depuis queueStartTime et queueEndTime
-        if (r.stats?.queueStartTime && r.stats?.queueEndTime) {
-          return new Date(r.stats.queueEndTime) - new Date(r.stats.queueStartTime);
-        }
-        // Priorité 3: Calculer depuis scheduledStartTime (pour jobs schedulés)
-        if (r.stats?.scheduledStartTime && r.startedAt) {
-          const waitTime = new Date(r.startedAt) - new Date(r.stats.scheduledStartTime);
-          // Ne compter que les attentes positives (pas les jobs en avance)
-          return waitTime > 0 ? waitTime : 0;
-        }
-        return null;
-      })
-      .filter(t => t !== null && t > 0);
-    
-    const avgQueueWaitMs = queueWaitTimes.length > 0
-      ? Math.round(queueWaitTimes.reduce((a, b) => a + b, 0) / queueWaitTimes.length)
+      ? Math.round((filteredRuns.length / daysInPeriod) * 10) / 10
       : 0;
+    
+    // Taux de succès (%)
+    const successRate = filteredRuns.length > 0
+      ? Math.round(((filteredRuns.length - failedRuns) / filteredRuns.length) * 100)
+      : 100;
     
     return {
       avgPublishMs: publishDurations.length > 0 
@@ -275,9 +266,10 @@ export default function GlobalDashboard() {
         : 0,
       avgSheetsPerRun,
       avgModelsPerRun,
-      queuedJobs,
+      runningJobs,
+      failedRuns,
       executionFrequency,
-      avgQueueWaitMs,
+      successRate,
       publishRunsCount: publishRunsFiltered.length,
       pdfRunsCount: pdfRunsFiltered.length,
     };
@@ -320,12 +312,33 @@ export default function GlobalDashboard() {
       if (run.status === 'running') {
         // Pour les runs en cours, estimer basé sur les items
         const items = run.items || [];
-        runningFiles += items.length;
-      } else {
-        // Pour les runs terminés, utiliser les stats
+        runningFiles += items.length || 1; // Au moins 1 si pas d'items
+      } else if (run.status === 'failed' || run.status === 'error' || run.status === 'timeout') {
+        // 🔴 Run en erreur - compter comme échec même sans stats détaillées
         const stats = run.stats || {};
-        successFiles += stats.okCount || stats.uploaded || 0;
-        failedFiles += stats.failCount || stats.failed || 0;
+        const failCount = stats.failCount || stats.failed || 0;
+        const okCount = stats.okCount || stats.uploaded || 0;
+        
+        // Si aucune stat, compter au moins 1 fichier échoué
+        if (failCount === 0 && okCount === 0) {
+          failedFiles += 1;
+        } else {
+          successFiles += okCount;
+          failedFiles += failCount;
+        }
+      } else {
+        // Pour les runs terminés (success, partial, completed)
+        const stats = run.stats || {};
+        const okCount = stats.okCount || stats.uploaded || 0;
+        const failCount = stats.failCount || stats.failed || 0;
+        
+        successFiles += okCount;
+        failedFiles += failCount;
+        
+        // Si run "partial" ou "success" mais avec 0 fichiers réussis, quelque chose ne va pas
+        if (run.status === 'partial' && failCount === 0 && okCount === 0) {
+          failedFiles += 1; // Compter comme échec
+        }
       }
     });
     
@@ -674,19 +687,19 @@ export default function GlobalDashboard() {
               )}
             </div>
             
-            {/* Jobs en file d'attente */}
+            {/* Jobs en cours d'exécution */}
             <div style={{
               background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%)',
               borderRadius: 12,
               padding: 16,
               border: '1px solid rgba(245, 158, 11, 0.2)',
             }}>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>⏳ Jobs en file</div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>🔄 Jobs en cours</div>
               <div style={{ fontSize: 28, fontWeight: 700, color: '#fbbf24' }}>
-                {performanceMetrics.queuedJobs}
+                {performanceMetrics.runningJobs}
               </div>
               <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
-                {performanceMetrics.queuedJobs === 0 ? 'Aucune attente' : 'En attente'}
+                {performanceMetrics.runningJobs === 0 ? 'Aucun en cours' : 'En exécution'}
               </div>
             </div>
             
@@ -699,53 +712,45 @@ export default function GlobalDashboard() {
             }}>
               <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>📈 Fréquence (jobs/jour)</div>
               <div style={{ fontSize: 28, fontWeight: 700, color: '#a78bfa' }}>
-                {performanceMetrics.executionFrequency !== null 
-                  ? performanceMetrics.executionFrequency.toFixed(1)
-                  : 'N/A'}
-              </div>
-              {performanceMetrics.executionFrequency !== null && (
-                <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
-                  {timeFilter === 'day' ? 'Aujourd\'hui' : timeFilter === 'week' ? 'Cette semaine' : timeFilter === 'month' ? 'Ce mois' : timeFilter === 'year' ? 'Cette année' : 'Total'}
-                </div>
-              )}
-            </div>
-            
-            {/* Temps d'attente moyen dans la file */}
-            <div style={{
-              background: 'linear-gradient(135deg, rgba(236, 72, 153, 0.15) 0%, rgba(236, 72, 153, 0.05) 100%)',
-              borderRadius: 12,
-              padding: 16,
-              border: '1px solid rgba(236, 72, 153, 0.2)',
-            }}>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>⏱️ Attente file (avg)</div>
-              <div style={{ fontSize: 28, fontWeight: 700, color: '#f472b6' }}>
-                {performanceMetrics.avgQueueWaitMs > 0
-                  ? performanceMetrics.avgQueueWaitMs > 60000
-                    ? `${Math.round(performanceMetrics.avgQueueWaitMs / 60000)}min`
-                    : `${Math.round(performanceMetrics.avgQueueWaitMs / 1000)}s`
-                  : '0s'}
+                {performanceMetrics.executionFrequency.toFixed(1)}
               </div>
               <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
-                {performanceMetrics.avgQueueWaitMs === 0 
-                  ? 'Aucune attente mesurée' 
-                  : 'Avec webhooks'}
+                {timeFilter === 'day' ? 'Aujourd\'hui' : timeFilter === 'week' ? 'Cette semaine' : timeFilter === 'month' ? 'Ce mois' : timeFilter === 'year' ? 'Cette année' : 'Depuis le début'}
+              </div>
+            </div>
+            
+            {/* Taux de succès */}
+            <div style={{
+              background: performanceMetrics.successRate >= 90 
+                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%)'
+                : performanceMetrics.successRate >= 70
+                  ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(245, 158, 11, 0.05) 100%)'
+                  : 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 16,
+              border: performanceMetrics.successRate >= 90 
+                ? '1px solid rgba(16, 185, 129, 0.2)'
+                : performanceMetrics.successRate >= 70
+                  ? '1px solid rgba(245, 158, 11, 0.2)'
+                  : '1px solid rgba(239, 68, 68, 0.2)',
+            }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>✅ Taux de succès</div>
+              <div style={{ 
+                fontSize: 28, 
+                fontWeight: 700, 
+                color: performanceMetrics.successRate >= 90 
+                  ? '#34d399' 
+                  : performanceMetrics.successRate >= 70 
+                    ? '#fbbf24' 
+                    : '#f87171' 
+              }}>
+                {performanceMetrics.successRate}%
+              </div>
+              <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                {performanceMetrics.failedRuns} échec{performanceMetrics.failedRuns > 1 ? 's' : ''} / {filteredRuns.length} runs
               </div>
             </div>
           </div>
-          
-          {performanceMetrics.avgQueueWaitMs === 0 && (
-            <div style={{ 
-              marginTop: 12, 
-              padding: '8px 12px', 
-              background: 'rgba(59, 130, 246, 0.1)', 
-              borderRadius: 8,
-              fontSize: 11,
-              color: '#60a5fa',
-              textAlign: 'center'
-            }}>
-              ℹ️ Le temps d'attente dans la file sera mesuré automatiquement avec les webhooks
-            </div>
-          )}
         </Card>
 
         {/* Graphiques */}
