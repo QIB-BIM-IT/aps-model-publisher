@@ -8,6 +8,8 @@ const { authenticateToken } = require('../middleware/auth.middleware');
 const { PublishJob, PublishRun, User } = require('../models');
 const scheduler = require('../services/scheduler.service');
 const apsAccessService = require('../services/apsAccess.service');
+const webhookRegistrationService = require('../services/webhookRegistration.service');
+const apsAuthService = require('../services/apsAuth.service');
 
 // ✅ Import error handler
 const {
@@ -192,7 +194,27 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
 
   if (job.scheduleEnabled) await scheduler.scheduleJob(job);
 
-  return res.json({ success: true, data: job, realPublishEnabled: ENABLE_REAL });
+  // 🆕 Créer automatiquement le webhook pour ce projet (si webhooks activés)
+  let webhookCreated = false;
+  try {
+    if (webhookRegistrationService.isConfigured()) {
+      const accessToken = await apsAuthService.ensureValidToken(user.id);
+      const webhook = await webhookRegistrationService.ensureProjectWebhook(
+        accessToken,
+        payload.projectId,
+        payload.hubId
+      );
+      webhookCreated = !!webhook;
+      if (webhookCreated) {
+        logger.info(`[Publish] Webhook automatiquement créé/vérifié pour projet ${payload.projectId}`);
+      }
+    }
+  } catch (webhookError) {
+    // Ne pas bloquer la création du job si le webhook échoue
+    logger.warn(`[Publish] Impossible de créer le webhook: ${webhookError.message}`);
+  }
+
+  return res.json({ success: true, data: job, realPublishEnabled: ENABLE_REAL, webhookCreated });
 }));
 
 router.get('/jobs', asyncHandler(async (req, res) => {

@@ -9,6 +9,8 @@ const logger = require('../config/logger');
 const { apsConfig } = require('../config/aps.config');
 const { PublishRun, PDFExportRun } = require('../models');
 
+// Note: Op est importé de Sequelize pour les requêtes avec opérateurs (gte, lte, etc.)
+
 class WebhooksService {
   constructor() {
     this.secret = apsConfig.webhooks.secret;
@@ -52,74 +54,112 @@ class WebhooksService {
   }
 
   /**
-   * Traite un événement webhook de publication
+   * Traite un événement webhook dm.version.added (nouvelle version créée)
+   * Format Autodesk Data Management:
+   * {
+   *   hook: { event: "dm.version.added", ... },
+   *   payload: { project: "b.xxx", lineageUrn: "urn:...", versionUrn: "urn:...", name: "file.rvt" }
+   * }
    * @param {object} event - Événement reçu
    * @returns {Promise<void>}
    */
   async handlePublishEvent(event) {
     try {
-      const { payload } = event;
+      const { payload, hook } = event;
+      const eventTime = new Date().toISOString();
       
-      // Identifier le run concerné
-      // Les webhooks Autodesk incluent généralement un identifiant de job/run
-      const runId = payload?.runId || payload?.jobId || payload?.id;
-      const projectId = payload?.projectId;
-      const itemId = payload?.itemId || payload?.versionId;
+      // Extraire les infos du webhook Autodesk Data Management
+      const projectId = payload?.project || payload?.projectId;
+      const lineageUrn = payload?.lineageUrn;
+      const versionUrn = payload?.versionUrn || payload?.resourceUrn;
+      const fileName = payload?.name;
+      const eventType = hook?.event || payload?.eventType || 'dm.version.added';
       
-      if (!runId && !projectId) {
-        logger.warn('[Webhooks] Événement publish sans runId ou projectId');
+      logger.info(`[Webhooks] 📨 dm.version.added reçu: project=${projectId}, file=${fileName}`);
+      logger.debug(`[Webhooks] lineageUrn=${lineageUrn}, versionUrn=${versionUrn}`);
+      
+      if (!projectId) {
+        logger.warn('[Webhooks] Événement sans projectId, ignoré');
         return;
       }
 
-      // Chercher le run correspondant
-      let run = null;
-      if (runId) {
-        run = await PublishRun.findByPk(runId);
-      } else if (projectId && itemId) {
-        // Chercher par projet et item
-        run = await PublishRun.findOne({
-          where: {
-            projectId,
-            status: 'running',
+      // Chercher les runs récents pour ce projet qui sont en cours ou récemment terminés
+      // (dernière heure - pour capturer le temps réel même si le run est déjà marqué completed)
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      
+      const recentRuns = await PublishRun.findAll({
+        where: {
+          projectId,
+          startedAt: {
+            [Op.gte]: oneHourAgo,
           },
-          order: [['startedAt', 'DESC']],
-        });
-      }
+        },
+        order: [['startedAt', 'DESC']],
+        limit: 10,
+      });
 
-      if (!run) {
-        logger.warn(`[Webhooks] Run introuvable pour événement publish: runId=${runId}, projectId=${projectId}`);
+      if (recentRuns.length === 0) {
+        logger.debug(`[Webhooks] Aucun run récent pour projet ${projectId}, webhook ignoré`);
         return;
       }
 
-      // Mettre à jour le run avec les informations du webhook
-      const eventType = payload?.eventType || payload?.type || 'unknown';
-      const eventTime = payload?.timestamp || payload?.time || new Date().toISOString();
-      
-      logger.info(`[Webhooks] 📨 Événement publish reçu: type=${eventType}, runId=${run.id}`);
-
-      // Mettre à jour les stats avec le temps réel (quand le document est vraiment publié)
-      if (eventType === 'version.created' || eventType === 'item.published' || eventType === 'publish.completed') {
-        run.stats = {
-          ...(run.stats || {}),
-          webhookEndTime: eventTime,
-          webhookEventType: eventType,
-          webhookReceived: true,
-        };
+      // Chercher le run qui contient ce modèle (par lineageUrn)
+      let matchedRun = null;
+      for (const run of recentRuns) {
+        const items = run.items || [];
+        // Vérifier si un des items correspond au lineageUrn
+        const hasItem = items.some(item => {
+          const itemUrn = typeof item === 'string' ? item : item.urn;
+          // Comparer les URNs (peuvent être légèrement différents)
+          return itemUrn && lineageUrn && (
+            itemUrn.includes(lineageUrn) || 
+            lineageUrn.includes(itemUrn) ||
+            itemUrn === lineageUrn
+          );
+        });
         
-        // Calculer le temps réel total (depuis le début jusqu'à la publication réelle)
-        let realDurationMs = null;
-        if (run.startedAt) {
-          realDurationMs = new Date(eventTime) - new Date(run.startedAt);
-          run.stats.realDurationMs = realDurationMs;
-        }
-        
-        await run.save();
-        if (realDurationMs !== null) {
-          logger.info(`[Webhooks] ✅ Run ${run.id} mis à jour avec temps réel: ${realDurationMs}ms`);
-        } else {
-          logger.info(`[Webhooks] ✅ Run ${run.id} mis à jour (startedAt manquant, temps réel non calculé)`);
+        if (hasItem) {
+          matchedRun = run;
+          break;
         }
       }
+
+      // Si pas de match exact, utiliser le run le plus récent en cours
+      if (!matchedRun) {
+        matchedRun = recentRuns.find(r => r.status === 'running') || recentRuns[0];
+        logger.debug(`[Webhooks] Pas de match exact, utilisation du run ${matchedRun.id}`);
+      }
+
+      // Mettre à jour le run avec le temps réel
+      const stats = matchedRun.stats || {};
+      const webhookEvents = stats.webhookEvents || [];
+      
+      // Ajouter cet événement à la liste
+      webhookEvents.push({
+        type: eventType,
+        time: eventTime,
+        fileName,
+        lineageUrn,
+        versionUrn,
+      });
+
+      matchedRun.stats = {
+        ...stats,
+        webhookEndTime: eventTime,
+        webhookEventType: eventType,
+        webhookReceived: true,
+        webhookEvents,
+        lastWebhookFile: fileName,
+      };
+      
+      // Calculer le temps réel total
+      if (matchedRun.startedAt) {
+        const realDurationMs = new Date(eventTime) - new Date(matchedRun.startedAt);
+        matchedRun.stats.realDurationMs = realDurationMs;
+        logger.info(`[Webhooks] ✅ Run ${matchedRun.id} mis à jour: ${fileName} publié en ${Math.round(realDurationMs/1000)}s`);
+      }
+      
+      await matchedRun.save();
     } catch (error) {
       logger.error(`[Webhooks] Erreur traitement événement publish: ${error.message}`);
       throw error;
@@ -229,19 +269,32 @@ class WebhooksService {
    * @returns {Promise<void>}
    */
   async handleEvent(event) {
-    const { payload } = event;
-    const eventType = payload?.eventType || payload?.type || payload?.event || 'unknown';
-    const resourceType = payload?.resourceType || payload?.resource || 'unknown';
+    const { payload, hook } = event;
+    
+    // Format Autodesk Data Management: hook.event = "dm.version.added"
+    const hookEvent = hook?.event || '';
+    const eventType = payload?.eventType || payload?.type || payload?.event || hookEvent || 'unknown';
+    const resourceType = payload?.resourceType || payload?.resource || hook?.system || 'unknown';
 
-    logger.info(`[Webhooks] 📨 Événement reçu: type=${eventType}, resource=${resourceType}`);
+    logger.info(`[Webhooks] 📨 Événement reçu: hookEvent=${hookEvent}, type=${eventType}, resource=${resourceType}`);
 
     // Router vers le bon handler selon le type
-    if (resourceType.includes('publish') || resourceType.includes('version') || resourceType.includes('item')) {
+    // dm.version.added = nouvelle version créée (publication de modèle)
+    if (hookEvent.includes('dm.version') || hookEvent.includes('dm.item') || 
+        eventType.includes('version') || eventType.includes('item') ||
+        resourceType.includes('publish') || resourceType.includes('version')) {
       await this.handlePublishEvent(event);
-    } else if (resourceType.includes('pdf') || resourceType.includes('export')) {
+    } else if (resourceType.includes('pdf') || resourceType.includes('export') ||
+               eventType.includes('pdf') || eventType.includes('export')) {
       await this.handlePDFExportEvent(event);
     } else {
-      logger.warn(`[Webhooks] Type d'événement non géré: ${eventType} (resource=${resourceType})`);
+      // Par défaut, essayer de traiter comme publish si c'est un événement data management
+      if (hookEvent.startsWith('dm.') || resourceType === 'data') {
+        logger.info(`[Webhooks] Événement data management, traitement comme publish`);
+        await this.handlePublishEvent(event);
+      } else {
+        logger.warn(`[Webhooks] Type d'événement non géré: ${eventType} (hook=${hookEvent}, resource=${resourceType})`);
+      }
     }
   }
 

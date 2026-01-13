@@ -10,6 +10,7 @@ const PublishJob = require('./PublishJob');
 const PublishRun = require('./PublishRun');
 const PDFExportJob = require('./PDFExportJob');
 const PDFExportRun = require('./PDFExportRun');
+const WebhookRegistration = require('./WebhookRegistration');
 
 // ========== PUBLISH JOBS ASSOCIATIONS ==========
 PublishJob.belongsTo(User, {
@@ -104,4 +105,5 @@ module.exports = {
   PublishRun,
   PDFExportJob,
   PDFExportRun,
+  WebhookRegistration,
 };

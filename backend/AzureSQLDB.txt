@@ -8,3 +8,5 @@ JDBC
 jdbc:postgresql://qib-publisher-db.postgres.database.azure.com:5432/postgres?user=QIBdbAdmin&password={your_password}&sslmode=require
 Node.js
 var conn= new Client({host:"qib-publisher-db.postgres.database.azure.com", user:"QIBdbAdmin", password:"Lilyana_2018", database:"postgres", port:5432, ssl:{ca:fs.readFileSync("{ca-cert filename}")}});
+
+WEBHOOK_SECRET = k9Jm2Pq7Xw4Lf8Nt6Bv3Zc1Rg5Hs0Ya

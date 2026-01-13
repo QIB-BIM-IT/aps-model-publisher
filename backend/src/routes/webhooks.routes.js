@@ -6,6 +6,9 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../config/logger');
 const webhooksService = require('../services/webhooks.service');
+const webhookRegistrationService = require('../services/webhookRegistration.service');
+const apsAuthService = require('../services/apsAuth.service');
+const { authenticateToken } = require('../middleware/auth.middleware');
 const {
   asyncHandler,
   ValidationError,
@@ -130,6 +133,91 @@ router.post('/test', asyncHandler(async (req, res) => {
       message: error.message,
     });
   }
+}));
+
+// ========== ROUTES AUTHENTIFIÉES (gestion des webhooks) ==========
+
+/**
+ * GET /api/webhooks/registrations
+ * Liste tous les webhooks enregistrés
+ */
+router.get('/registrations', authenticateToken, asyncHandler(async (req, res) => {
+  const { projectId } = req.query;
+  const webhooks = await webhookRegistrationService.listWebhooks(projectId || null);
+  
+  res.json({
+    success: true,
+    data: webhooks,
+    configured: webhookRegistrationService.isConfigured(),
+  });
+}));
+
+/**
+ * POST /api/webhooks/registrations/sync
+ * Synchronise les webhooks existants côté Autodesk avec notre base
+ */
+router.post('/registrations/sync', authenticateToken, asyncHandler(async (req, res) => {
+  if (!webhookRegistrationService.isConfigured()) {
+    throw new ValidationError('Webhooks non configurés. Définissez WEBHOOKS_ENABLED, WEBHOOK_SECRET et WEBHOOK_CALLBACK_URL');
+  }
+
+  const accessToken = await apsAuthService.ensureValidToken(req.userId);
+  const { projectId } = req.body;
+  
+  await webhookRegistrationService.syncExistingWebhooks(accessToken, projectId || null);
+  const webhooks = await webhookRegistrationService.listWebhooks(projectId || null);
+  
+  res.json({
+    success: true,
+    message: 'Synchronisation terminée',
+    data: webhooks,
+  });
+}));
+
+/**
+ * POST /api/webhooks/registrations/project
+ * Créer manuellement un webhook pour un projet
+ */
+router.post('/registrations/project', authenticateToken, asyncHandler(async (req, res) => {
+  if (!webhookRegistrationService.isConfigured()) {
+    throw new ValidationError('Webhooks non configurés. Définissez WEBHOOKS_ENABLED, WEBHOOK_SECRET et WEBHOOK_CALLBACK_URL');
+  }
+
+  const { projectId, hubId } = req.body;
+  if (!projectId) {
+    throw new ValidationError('projectId requis');
+  }
+
+  const accessToken = await apsAuthService.ensureValidToken(req.userId);
+  const webhook = await webhookRegistrationService.ensureProjectWebhook(accessToken, projectId, hubId);
+  
+  if (!webhook) {
+    throw new ValidationError('Impossible de créer le webhook');
+  }
+
+  res.json({
+    success: true,
+    message: 'Webhook créé',
+    data: webhook,
+  });
+}));
+
+/**
+ * DELETE /api/webhooks/registrations/:id
+ * Supprimer un webhook
+ */
+router.delete('/registrations/:id', authenticateToken, asyncHandler(async (req, res) => {
+  const accessToken = await apsAuthService.ensureValidToken(req.userId);
+  const deleted = await webhookRegistrationService.deleteWebhook(accessToken, req.params.id);
+  
+  if (!deleted) {
+    throw new ValidationError('Webhook introuvable');
+  }
+
+  res.json({
+    success: true,
+    message: 'Webhook supprimé',
+  });
 }));
 
 module.exports = router;
