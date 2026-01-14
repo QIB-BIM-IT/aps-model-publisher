@@ -26,6 +26,7 @@ const publishRoutes = require('./routes/publish.routes');
 const publishDirectRoutes = require('./routes/publish.direct.routes');
 const pdfExportRoutes = require('./routes/pdfExport.routes');
 const webhooksRoutes = require('./routes/webhooks.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const app = express();
 
@@ -60,6 +61,7 @@ app.use('/api/publish', publishRoutes);
 app.use('/api/publish', publishDirectRoutes);
 app.use('/api/pdf-export', pdfExportRoutes);
 app.use('/api/pdf-export', require('./routes/pdf-export-jobs.routes'));
+app.use('/api/admin', adminRoutes);
 
 // -------- Serve React frontend in production
 if (process.env.NODE_ENV === 'production') {
