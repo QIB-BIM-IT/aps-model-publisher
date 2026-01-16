@@ -28,6 +28,9 @@ const pdfExportRoutes = require('./routes/pdfExport.routes');
 const webhooksRoutes = require('./routes/webhooks.routes');
 const adminRoutes = require('./routes/admin.routes');
 
+// 🆕 Scheduler pour les jobs planifiés
+const scheduler = require('./services/scheduler.service');
+
 const app = express();
 
 // -------- Middlewares globaux
@@ -95,6 +98,10 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
     const alter = String(process.env.DB_SYNC_ALTER || 'false').toLowerCase() === 'true';
     await connectDB(alter);
     logger.info(`Synchronisation Sequelize terminée (alter=${alter})`);
+
+    // 🆕 Initialiser le scheduler pour charger tous les jobs planifiés
+    await scheduler.init();
+    logger.info(`✅ Scheduler initialisé`);
 
     const server = app.listen(PORT, () => {
       logger.info(`🚀 Serveur démarré sur le port ${PORT}`);
