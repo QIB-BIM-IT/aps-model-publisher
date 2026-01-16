@@ -49,14 +49,13 @@ const logger = winston.createLogger({
   transports: [fileRotateTransport, errorFileRotateTransport],
 });
 
-// Ajouter la console en dÃ©veloppement
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(
-    new winston.transports.Console({
-      format: consoleFormat,
-    })
-  );
-}
+// 🆕 Toujours ajouter la console pour voir les logs dans Azure Log Stream
+// En production Azure, les logs console sont capturés par Log Stream
+logger.add(
+  new winston.transports.Console({
+    format: consoleFormat,
+  })
+);
 
 // CrÃ©er des mÃ©thodes simplifiÃ©es (fallbacks)
 logger.debug = logger.debug || function (message) { this.log('debug', message); };
