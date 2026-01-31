@@ -17,7 +17,8 @@ const ENABLE_REAL = String(process.env.ENABLE_REAL_PUBLISH || 'false').toLowerCa
 const ITEM_TIMEOUT_MS = parseInt(process.env.PUBLISH_ITEM_TIMEOUT_MS || '120000', 10);
 const PUBLISH_COMMAND = String(process.env.PUBLISH_COMMAND || 'PublishModel');
 
-const REGIONS = ['us', 'eu'];
+// Régions supportées : US, EU (EMEA), APAC (Australie/Asie), CA (Canada)
+const REGIONS = ['us', 'eu', 'apac', 'ca'];
 
 function apiBase() {
   return apsConfig?.apis?.baseUrl || 'https://developer.api.autodesk.com';

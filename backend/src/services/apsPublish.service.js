@@ -27,9 +27,9 @@ const MAX_RETRIES = Math.max(0, parseInt(process.env.PUBLISH_MAX_RETRIES || '2',
 const RETRY_BASE_MS = Math.max(100, parseInt(process.env.PUBLISH_RETRY_BASE_MS || '500', 10));
 const PUBLISH_COMMAND = String(process.env.PUBLISH_COMMAND || 'PublishModel'); // PublishModel | PublishWithoutLinks
 
-// Liste des régions supportées par Data Management v2. Les modèles C4R sont
-// actuellement provisionnés soit aux US soit sur l'instance EMEA.
-const REGIONS = ['us', 'emea']; // ordre d'essai
+// Liste des régions supportées par Data Management v2.
+// US = États-Unis, EMEA = Europe/Moyen-Orient/Afrique, APAC = Asie-Pacifique, CA = Canada
+const REGIONS = ['us', 'emea', 'apac', 'ca']; // ordre d'essai
 const REGION_LABELS = REGIONS.map((r) => r.toUpperCase());
 const REGION_LIST_LOG = REGION_LABELS.join('/');
 
@@ -67,14 +67,14 @@ function cleanId(id) {
 
 // — Reconnaissance des URN ———————————————––
 
-/** lineage item URN ? ex: urn:adsk.wipprod:dm.lineage:xxxxx */
+/** lineage item URN ? ex: urn:adsk.wipprod:dm.lineage:xxxxx (toutes régions: wipprod, wipemea, wipca, wipaus) */
 function isLineageUrn(urn) {
-  return /^urn:adsk\.wipprod:dm\.lineage:[A-Za-z0-9-_]+$/i.test(String(urn));
+  return /^urn:adsk\.wip(prod|emea|ca|aus):dm\.lineage:[A-Za-z0-9-_]+$/i.test(String(urn));
 }
 
-/** version URN ? ex: urn:adsk.wipprod:fs.file:vf.<id>?version=<n> */
+/** version URN ? ex: urn:adsk.wipprod:fs.file:vf.<id>?version=<n> (toutes régions) */
 function isVersionUrn(urn) {
-  return /^urn:adsk\.wipprod:fs\.file:vf\.[^?]+(\?|\&)version=\d+$/i.test(String(urn));
+  return /^urn:adsk\.wip(prod|emea|ca|aus):fs\.file:vf\.[^?]+(\?|\&)version=\d+$/i.test(String(urn));
 }
 
 // — Détection de région et vérification d’existence ————————
@@ -106,10 +106,17 @@ async function detectProjectRegion(projectId, accessToken) {
       let detectedRegion = attributes?.extension?.data?.region;
 
       if (!detectedRegion) {
-        // Fallback: essayer de déterminer depuis le hub
-        const hubId = resp?.data?.data?.relationships?.hub?.data?.id;
-        if (hubId && hubId.includes('.eu.')) {
+        // Fallback: essayer de déterminer depuis le hub ou d'autres attributs
+        const hubId = resp?.data?.data?.relationships?.hub?.data?.id || '';
+        const projectName = attributes?.name || '';
+        
+        // Détecter la région depuis le hubId ou d'autres indicateurs
+        if (hubId.includes('.eu.') || hubId.includes('.emea.')) {
           detectedRegion = 'emea';
+        } else if (hubId.includes('.ca.') || projectName.toLowerCase().includes('canada')) {
+          detectedRegion = 'ca';
+        } else if (hubId.includes('.apac.') || hubId.includes('.aus.')) {
+          detectedRegion = 'apac';
         } else {
           detectedRegion = 'us'; // Par défaut US
         }

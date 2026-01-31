@@ -22,19 +22,19 @@ const {
 // ------------- helpers -------------
 const ENABLE_REAL = String(process.env.ENABLE_REAL_PUBLISH || 'false').toLowerCase() === 'true';
 
-const VALID_URN_PREFIXES = [
-  'urn:adsk.wipprod:dm.lineage:',
-  'urn:adsk.wipprod:fs.file:vf.',
+// URN valides pour toutes les régions APS/ACC :
+// - US (wipprod), EMEA (wipemea), Canada (wipca), APAC/AUS (wipaus)
+const VALID_URN_PATTERNS = [
+  // Lineage URNs (items)
+  /^urn:adsk\.wip(prod|emea|ca|aus):dm\.lineage:[A-Za-z0-9_-]+$/i,
+  // Versioned file URNs
+  /^urn:adsk\.wip(prod|emea|ca|aus):fs\.file:vf\.[A-Za-z0-9_-]+/i,
 ];
 
 function validUrn(u) {
   const value = String(u || '').trim();
   if (!value) return false;
-  const lowerValue = value.toLowerCase();
-  return VALID_URN_PREFIXES.some((prefix) => {
-    if (!lowerValue.startsWith(prefix)) return false;
-    return value.length > prefix.length;
-  });
+  return VALID_URN_PATTERNS.some((pattern) => pattern.test(value));
 }
 
 let KNOWN_TZ = null;
