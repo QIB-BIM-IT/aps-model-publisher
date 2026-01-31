@@ -69,13 +69,14 @@ function cleanId(id) {
 
 /** lineage item URN ? ex: urn:adsk.wipprod:dm.lineage:xxxxx (toutes régions) */
 function isLineageUrn(urn) {
-  // Régions: prod (US), emea, can, gbr, deu, jpn, ind, aus
-  return /^urn:adsk\.wip(prod|emea|can|gbr|deu|jpn|ind|aus):dm\.lineage:[A-Za-z0-9-_]+$/i.test(String(urn));
+  // Accepte tous les préfixes wip* (wipprod, wipemea, wips7bwc pour Canada, etc.)
+  return /^urn:adsk\.wip[a-z0-9]+:dm\.lineage:[A-Za-z0-9-_]+$/i.test(String(urn));
 }
 
 /** version URN ? ex: urn:adsk.wipprod:fs.file:vf.<id>?version=<n> (toutes régions) */
 function isVersionUrn(urn) {
-  return /^urn:adsk\.wip(prod|emea|can|gbr|deu|jpn|ind|aus):fs\.file:vf\.[^?]+(\?|\&)version=\d+$/i.test(String(urn));
+  // Accepte tous les préfixes wip*
+  return /^urn:adsk\.wip[a-z0-9]+:fs\.file:vf\.[^?]+(\?|\&)version=\d+$/i.test(String(urn));
 }
 
 // — Détection de région et vérification d’existence ————————

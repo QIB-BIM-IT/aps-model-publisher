@@ -23,12 +23,13 @@ const {
 const ENABLE_REAL = String(process.env.ENABLE_REAL_PUBLISH || 'false').toLowerCase() === 'true';
 
 // URN valides pour toutes les régions APS/ACC :
-// US (wipprod), CAN (wipcan), EMEA (wipemea), GBR (wipgbr), DEU (wipdeu), JPN (wipjpn), IND (wipind), AUS (wipaus)
+// Les préfixes URN varient selon les régions (wipprod, wipemea, wips7bwc pour Canada, etc.)
+// On accepte tout préfixe commençant par "wip" suivi de caractères alphanumériques
 const VALID_URN_PATTERNS = [
-  // Lineage URNs (items)
-  /^urn:adsk\.wip(prod|emea|can|gbr|deu|jpn|ind|aus):dm\.lineage:[A-Za-z0-9_-]+$/i,
-  // Versioned file URNs
-  /^urn:adsk\.wip(prod|emea|can|gbr|deu|jpn|ind|aus):fs\.file:vf\.[A-Za-z0-9_-]+/i,
+  // Lineage URNs (items) - accepte tous les préfixes wip*
+  /^urn:adsk\.wip[a-z0-9]+:dm\.lineage:[A-Za-z0-9_-]+$/i,
+  // Versioned file URNs - accepte tous les préfixes wip*
+  /^urn:adsk\.wip[a-z0-9]+:fs\.file:vf\.[A-Za-z0-9_-]+/i,
 ];
 
 function validUrn(u) {
