@@ -28,8 +28,8 @@ const RETRY_BASE_MS = Math.max(100, parseInt(process.env.PUBLISH_RETRY_BASE_MS |
 const PUBLISH_COMMAND = String(process.env.PUBLISH_COMMAND || 'PublishModel'); // PublishModel | PublishWithoutLinks
 
 // Liste des régions supportées par Data Management v2.
-// US = États-Unis, EMEA = Europe/Moyen-Orient/Afrique, APAC = Asie-Pacifique, CA = Canada
-const REGIONS = ['us', 'emea', 'apac', 'ca']; // ordre d'essai
+// US = États-Unis, CAN = Canada, EMEA = Europe, GBR = UK, DEU = Allemagne, JPN = Japon, IND = Inde, AUS = Australie
+const REGIONS = ['us', 'can', 'emea', 'gbr', 'deu', 'jpn', 'ind', 'aus']; // ordre d'essai
 const REGION_LABELS = REGIONS.map((r) => r.toUpperCase());
 const REGION_LIST_LOG = REGION_LABELS.join('/');
 
@@ -67,14 +67,15 @@ function cleanId(id) {
 
 // — Reconnaissance des URN ———————————————––
 
-/** lineage item URN ? ex: urn:adsk.wipprod:dm.lineage:xxxxx (toutes régions: wipprod, wipemea, wipca, wipaus) */
+/** lineage item URN ? ex: urn:adsk.wipprod:dm.lineage:xxxxx (toutes régions) */
 function isLineageUrn(urn) {
-  return /^urn:adsk\.wip(prod|emea|ca|aus):dm\.lineage:[A-Za-z0-9-_]+$/i.test(String(urn));
+  // Régions: prod (US), emea, can, gbr, deu, jpn, ind, aus
+  return /^urn:adsk\.wip(prod|emea|can|gbr|deu|jpn|ind|aus):dm\.lineage:[A-Za-z0-9-_]+$/i.test(String(urn));
 }
 
 /** version URN ? ex: urn:adsk.wipprod:fs.file:vf.<id>?version=<n> (toutes régions) */
 function isVersionUrn(urn) {
-  return /^urn:adsk\.wip(prod|emea|ca|aus):fs\.file:vf\.[^?]+(\?|\&)version=\d+$/i.test(String(urn));
+  return /^urn:adsk\.wip(prod|emea|can|gbr|deu|jpn|ind|aus):fs\.file:vf\.[^?]+(\?|\&)version=\d+$/i.test(String(urn));
 }
 
 // — Détection de région et vérification d’existence ————————
@@ -113,10 +114,18 @@ async function detectProjectRegion(projectId, accessToken) {
         // Détecter la région depuis le hubId ou d'autres indicateurs
         if (hubId.includes('.eu.') || hubId.includes('.emea.')) {
           detectedRegion = 'emea';
-        } else if (hubId.includes('.ca.') || projectName.toLowerCase().includes('canada')) {
-          detectedRegion = 'ca';
-        } else if (hubId.includes('.apac.') || hubId.includes('.aus.')) {
-          detectedRegion = 'apac';
+        } else if (hubId.includes('.can.') || hubId.includes('.ca.') || projectName.toLowerCase().includes('canada')) {
+          detectedRegion = 'can';
+        } else if (hubId.includes('.aus.')) {
+          detectedRegion = 'aus';
+        } else if (hubId.includes('.gbr.') || hubId.includes('.uk.')) {
+          detectedRegion = 'gbr';
+        } else if (hubId.includes('.deu.') || hubId.includes('.de.')) {
+          detectedRegion = 'deu';
+        } else if (hubId.includes('.jpn.') || hubId.includes('.jp.')) {
+          detectedRegion = 'jpn';
+        } else if (hubId.includes('.ind.') || hubId.includes('.in.')) {
+          detectedRegion = 'ind';
         } else {
           detectedRegion = 'us'; // Par défaut US
         }

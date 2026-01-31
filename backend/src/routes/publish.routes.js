@@ -23,12 +23,12 @@ const {
 const ENABLE_REAL = String(process.env.ENABLE_REAL_PUBLISH || 'false').toLowerCase() === 'true';
 
 // URN valides pour toutes les régions APS/ACC :
-// - US (wipprod), EMEA (wipemea), Canada (wipca), APAC/AUS (wipaus)
+// US (wipprod), CAN (wipcan), EMEA (wipemea), GBR (wipgbr), DEU (wipdeu), JPN (wipjpn), IND (wipind), AUS (wipaus)
 const VALID_URN_PATTERNS = [
   // Lineage URNs (items)
-  /^urn:adsk\.wip(prod|emea|ca|aus):dm\.lineage:[A-Za-z0-9_-]+$/i,
+  /^urn:adsk\.wip(prod|emea|can|gbr|deu|jpn|ind|aus):dm\.lineage:[A-Za-z0-9_-]+$/i,
   // Versioned file URNs
-  /^urn:adsk\.wip(prod|emea|ca|aus):fs\.file:vf\.[A-Za-z0-9_-]+/i,
+  /^urn:adsk\.wip(prod|emea|can|gbr|deu|jpn|ind|aus):fs\.file:vf\.[A-Za-z0-9_-]+/i,
 ];
 
 function validUrn(u) {
