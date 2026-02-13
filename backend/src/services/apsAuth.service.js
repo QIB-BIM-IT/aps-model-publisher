@@ -1,4 +1,4 @@
-﻿// src/services/apsAuth.service.js
+// src/services/apsAuth.service.js
 const axios = require('axios');
 const qs = require('querystring');
 const { apsConfig } = require('../config/aps.config');
@@ -6,6 +6,9 @@ const logger = require('../config/logger');
 const User = require('../models/User');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Buffer avant expiration : refresh 5 minutes AVANT l'expiration réelle
+const TOKEN_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
 class APSAuthService {
   constructor() {
@@ -16,6 +19,8 @@ class APSAuthService {
         .split(/\s+/)
         .filter(Boolean),
     };
+    // Mutex par userId pour éviter les refresh concurrents
+    this._refreshLocks = new Map();
   }
 
   // ======== 3-LEGGED ========
@@ -83,9 +88,47 @@ class APSAuthService {
     }
   }
 
+  // ======== Token validation helpers ========
+
   /**
-   * Retourne un access_token Autodesk valide à partir d’un **userId UUID**.
+   * Vérifie si le token est expiré ou sur le point d'expirer (buffer de 5 min)
+   */
+  _isTokenExpiredOrSoon(user) {
+    if (!user.accessToken || !user.tokenExpiresAt) return true;
+    // Refresh 5 minutes AVANT l'expiration réelle pour éviter les erreurs en plein appel API
+    return new Date() >= new Date(new Date(user.tokenExpiresAt).getTime() - TOKEN_EXPIRY_BUFFER_MS);
+  }
+
+  /**
+   * Mutex simple par userId : évite que 2 jobs ne refreshent le même token en parallèle
+   * (le refresh_token Autodesk est à usage unique — si 2 jobs refresh en même temps, le 2e échoue)
+   */
+  async _acquireRefreshLock(userId) {
+    const maxWait = 30000; // 30 secondes max d'attente
+    const start = Date.now();
+    while (this._refreshLocks.has(userId)) {
+      if (Date.now() - start > maxWait) {
+        logger.warn(`[APSAuth] Timeout lock refresh pour userId=${userId.substring(0, 8)}..., forçage`);
+        this._refreshLocks.delete(userId);
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    this._refreshLocks.set(userId, Date.now());
+  }
+
+  _releaseRefreshLock(userId) {
+    this._refreshLocks.delete(userId);
+  }
+
+  /**
+   * Retourne un access_token Autodesk valide à partir d'un **userId UUID**.
    * Si on lui passe directement un **access_token** (chaîne non UUID), il le renvoie tel quel.
+   *
+   * Améliorations :
+   * - Buffer de 5 min avant expiration (refresh proactif)
+   * - Mutex pour éviter les refresh concurrents (refresh_token Autodesk est à usage unique)
+   * - Retry : si le refresh échoue, recharge le user depuis la DB au cas où un autre thread a déjà rafraîchi
    */
   async ensureValidToken(userIdOrToken) {
     // 1) Si on nous passe déjà un access_token (pas un UUID), on le renvoie.
@@ -93,22 +136,78 @@ class APSAuthService {
       return userIdOrToken; // c'est déjà un access_token
     }
 
-    // 2) Flux standard par UUID utilisateur.
-    const user = await User.findByPk(userIdOrToken);
+    const userId = userIdOrToken;
+
+    // 2) Charger l'utilisateur
+    let user = await User.findByPk(userId);
     if (!user) throw new Error('Utilisateur introuvable');
 
-    if (!user.accessToken || user.isTokenExpired()) {
-      if (!user.refreshToken) throw new Error('Refresh token manquant');
-      const refreshed = await this.refreshToken(user.refreshToken);
-      await user.updateTokens(
-        refreshed.access_token,
-        refreshed.refresh_token || user.refreshToken,
-        refreshed.expires_in
-      );
-      return refreshed.access_token;
+    // 3) Si le token est encore valide (avec buffer de 5 min), le retourner directement
+    if (!this._isTokenExpiredOrSoon(user)) {
+      return user.accessToken;
     }
 
-    return user.accessToken;
+    // 4) Le token est expiré ou va expirer bientôt : on doit refresh
+    logger.info(`[APSAuth] Token expiré/bientôt expiré pour ${user.name || userId.substring(0, 8)}, refresh nécessaire`);
+
+    // Acquérir le lock pour éviter les refresh concurrents
+    await this._acquireRefreshLock(userId);
+
+    try {
+      // Re-charger le user depuis la DB : un autre thread a peut-être déjà refreshé pendant qu'on attendait le lock
+      user = await User.findByPk(userId);
+      if (!user) throw new Error('Utilisateur introuvable après lock');
+
+      // Re-vérifier : le token a-t-il été rafraîchi par un autre thread entre-temps ?
+      if (!this._isTokenExpiredOrSoon(user)) {
+        logger.info(`[APSAuth] Token déjà rafraîchi par un autre thread pour ${user.name || userId.substring(0, 8)}`);
+        return user.accessToken;
+      }
+
+      if (!user.refreshToken) {
+        throw new Error(
+          `Refresh token manquant pour ${user.name || user.email || userId.substring(0, 8)} — l'utilisateur doit se reconnecter`
+        );
+      }
+
+      // Tenter le refresh
+      try {
+        const refreshed = await this.refreshToken(user.refreshToken);
+        await user.updateTokens(
+          refreshed.access_token,
+          refreshed.refresh_token || user.refreshToken,
+          refreshed.expires_in
+        );
+        logger.info(
+          `[APSAuth] Token rafraîchi avec succès pour ${user.name || userId.substring(0, 8)}, expire dans ${refreshed.expires_in}s`
+        );
+        return refreshed.access_token;
+      } catch (refreshError) {
+        // Le refresh a échoué — peut-être que le refresh_token a déjà été utilisé par un autre process/instance
+        logger.warn(
+          `[APSAuth] Refresh échoué pour ${user.name || userId.substring(0, 8)}: ${refreshError.message}`
+        );
+
+        // Dernière chance : recharger le user, une autre instance Azure a peut-être rafraîchi le token en DB
+        user = await User.findByPk(userId);
+        if (user && user.accessToken && !this._isTokenExpiredOrSoon(user)) {
+          logger.info(
+            `[APSAuth] Token trouvé valide après rechargement DB pour ${user.name || userId.substring(0, 8)}`
+          );
+          return user.accessToken;
+        }
+
+        // Échec complet : le refresh_token est invalide ou expiré
+        const lastLogin = user?.lastLogin ? new Date(user.lastLogin).toISOString() : 'jamais';
+        throw new Error(
+          `Impossible de rafraîchir le token Autodesk pour ${user?.name || user?.email || userId.substring(0, 8)}. ` +
+          `Dernière connexion: ${lastLogin}. ` +
+          `L'utilisateur doit se reconnecter à l'application.`
+        );
+      }
+    } finally {
+      this._releaseRefreshLock(userId);
+    }
   }
 
   async createOrUpdateUser(profile, tokens) {
