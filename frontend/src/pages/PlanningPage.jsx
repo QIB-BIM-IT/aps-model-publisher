@@ -636,29 +636,44 @@ export default function PlanningPage() {
           preselectHubApplied.current = true;
         } else if (!preSelectHub && preSelectProject) {
           // Pas de hub pré-sélectionné mais un projet oui : chercher le hub qui contient ce projet
-          // Commencer avec le premier hub pour ne pas bloquer l'UI
-          setSelectedHub(idOf(data[0]));
-          
-          // Chercher le bon hub en arrière-plan
-          (async () => {
-            let foundHub = null;
-            for (const hub of data) {
-              try {
-                const projects = await fetchProjects(idOf(hub));
-                if (projects.some((p) => idOf(p) === preSelectProject)) {
-                  foundHub = idOf(hub);
-                  break;
-                }
-              } catch (e) {
-                // Continuer avec le hub suivant si erreur
-                console.warn(`Erreur lors de la recherche du projet dans le hub ${idOf(hub)}:`, e);
+          // Ne PAS sélectionner un hub par défaut tant qu'on cherche
+          let foundHub = null;
+          for (const hub of data) {
+            try {
+              const projects = await fetchProjects(idOf(hub));
+              if (projects.some((p) => idOf(p) === preSelectProject)) {
+                foundHub = idOf(hub);
+                break;
               }
+            } catch (e) {
+              console.warn(`Erreur lors de la recherche du projet dans le hub ${idOf(hub)}:`, e);
             }
-            if (foundHub) {
-              setSelectedHub(foundHub);
-              preselectHubApplied.current = true;
+          }
+          if (foundHub) {
+            setSelectedHub(foundHub);
+            preselectHubApplied.current = true;
+          } else {
+            // Projet non trouvé dans aucun hub = l'utilisateur n'a pas accès
+            console.warn(`Projet ${preSelectProject} non trouvé dans les hubs de l'utilisateur`);
+            setSelectedHub(idOf(data[0])); // Sélectionner le premier hub quand même
+            setHasProjectAccess(false);
+            // Charger les jobs/runs du projet via notre API (pas besoin d'accès ACC)
+            try {
+              const [pubJobs, pdfJobs, pubRuns, pdfRuns] = await Promise.all([
+                getPublishJobs({ projectId: preSelectProject }),
+                getPDFExportJobs({ projectId: preSelectProject }),
+                getRuns({ projectId: preSelectProject, limit: 50 }),
+                getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
+              ]);
+              setJobs(Array.isArray(pubJobs) ? pubJobs : []);
+              setPdfExportJobs(Array.isArray(pdfJobs) ? pdfJobs : []);
+              publishRunsRef.current = Array.isArray(pubRuns) ? pubRuns : [];
+              pdfRunsRef.current = Array.isArray(pdfRuns) ? pdfRuns : [];
+              setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current));
+            } catch (e2) {
+              console.warn('Erreur chargement jobs pour projet inaccessible:', e2);
             }
-          })();
+          }
         } else {
           // Aucune pré-sélection : premier hub
           setSelectedHub(idOf(data[0]));
@@ -1649,6 +1664,36 @@ export default function PlanningPage() {
             }}
           >
             ⚠️ {error}
+          </div>
+        )}
+
+        {/* Bandeau accès refusé (affiché quand on arrive d'un clic dashboard sur un projet non accessible) */}
+        {hasProjectAccess === false && preSelectProject && (
+          <div
+            style={{
+              padding: '20px 24px',
+              background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(239, 68, 68, 0.06) 100%)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              borderRadius: 14,
+              marginBottom: 24,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 16,
+              backdropFilter: 'blur(10px)',
+              boxShadow: '0 4px 16px rgba(239, 68, 68, 0.1)',
+            }}
+          >
+            <span style={{ fontSize: 36 }}>🔒</span>
+            <div>
+              <div style={{ fontWeight: 700, color: '#fca5a5', fontSize: 16, marginBottom: 4 }}>
+                Vous n'avez pas accès à ce projet ACC
+              </div>
+              <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.5 }}>
+                Le projet de cette tâche planifiée n'est pas accessible avec votre compte Autodesk.
+                Vous pouvez consulter les tâches et l'historique ci-dessous en lecture seule.
+                Contactez l'administrateur du projet pour obtenir l'accès.
+              </div>
+            </div>
           </div>
         )}
 
