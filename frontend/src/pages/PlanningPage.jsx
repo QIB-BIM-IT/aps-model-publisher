@@ -579,6 +579,9 @@ export default function PlanningPage() {
   const [loadingProjects, setLoadingProjects] = React.useState(false);
   const [loadingTop, setLoadingTop] = React.useState(false);
 
+  // Accès au projet ACC : null = pas encore vérifié, true = accès OK, false = pas accès (403)
+  const [hasProjectAccess, setHasProjectAccess] = React.useState(null);
+
   const [selectedHour, setSelectedHour] = React.useState('02:00');
   const [cronExpression, setCronExpression] = React.useState('0 2 * * *');
   const [timezone, setTimezone] = React.useState(DEFAULT_TIMEZONE);
@@ -681,6 +684,7 @@ export default function PlanningPage() {
     setRuns([]);
     publishRunsRef.current = [];
     pdfRunsRef.current = [];
+    setHasProjectAccess(null);
   }, []);
 
   async function loadProjects(hubId) {
@@ -725,6 +729,7 @@ export default function PlanningPage() {
       pdfRunsRef.current = [];
       setJobType(null);
       setJobName('');
+      setHasProjectAccess(null);
       return;
     }
     setLoadingTop(true);
@@ -736,9 +741,21 @@ export default function PlanningPage() {
     try {
       const data = await fetchTopFolders(hubId, projectId);
       setTopFolders(data);
+      setHasProjectAccess(true);
       await Promise.all([refreshJobs(), refreshRuns(), refreshPdfJobs(), refreshPdfRuns()]);
     } catch (e) {
-      setError(e?.message || 'Erreur dossiers');
+      const status = e?.response?.status || e?.status;
+      const msg = e?.message || '';
+      if (status === 403 || status === 500 && (msg.includes('403') || msg.includes('BIM360DM_ERROR'))) {
+        // L'utilisateur n'a pas accès à ce projet ACC
+        setHasProjectAccess(false);
+        setTopFolders([]);
+        // Charger quand même les jobs et l'historique (ils sont accessibles via notre API)
+        await Promise.all([refreshJobs(), refreshRuns(), refreshPdfJobs(), refreshPdfRuns()]);
+      } else {
+        setError(e?.message || 'Erreur dossiers');
+        setHasProjectAccess(true); // Autre erreur, pas un problème d'accès
+      }
     } finally {
       setLoadingTop(false);
     }
@@ -1749,6 +1766,27 @@ export default function PlanningPage() {
             <p style={{ color: '#6b7280' }}>Sélectionne un projet</p>
           ) : loadingTop ? (
             <p style={{ color: '#6b7280' }}>Chargement...</p>
+          ) : hasProjectAccess === false ? (
+            <div style={{
+              padding: '20px 24px',
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+            }}>
+              <span style={{ fontSize: 28 }}>🔒</span>
+              <div>
+                <div style={{ fontWeight: 600, color: '#ef4444', marginBottom: 4 }}>
+                  Vous n'avez pas accès à ce projet ACC
+                </div>
+                <div style={{ fontSize: 13, color: '#94a3b8' }}>
+                  Vous pouvez consulter les planifications et l'historique ci-dessous, mais vous ne pouvez pas naviguer dans les fichiers ni modifier les tâches.
+                  Contactez l'administrateur du projet pour obtenir l'accès.
+                </div>
+              </div>
+            </div>
           ) : topFolders.length === 0 ? (
             <p style={{ color: '#9ca3af' }}>Aucun dossier</p>
           ) : (
@@ -2173,39 +2211,45 @@ export default function PlanningPage() {
                               {statusLabel}
                             </span>
                           </div>
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            <Button
-                              variant="secondary"
-                              onClick={() => handleToggleActive(j)}
-                              style={{ padding: '6px 12px', fontSize: 12 }}
-                            >
-                              {j.scheduleEnabled ? '⏸️ Pause' : '▶️ Activer'}
-                            </Button>
-                            <Button
-                              variant="primary"
-                              onClick={() => handleRunNow(j)}
-                              disabled={j.status === 'running'}
-                              style={{ padding: '6px 12px', fontSize: 12 }}
-                            >
-                              🚀 Run Now
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              onClick={() => handleEditPublishJob(j)}
-                              style={{ padding: '6px 12px', fontSize: 12, background: '#8b5cf6', color: 'white', border: 'none' }}
-                              onMouseEnter={(e) => e.currentTarget.style.background = '#7c3aed'}
-                              onMouseLeave={(e) => e.currentTarget.style.background = '#8b5cf6'}
-                            >
-                              ✏️ Modifier
-                            </Button>
-                            <Button
-                              variant="danger"
-                              onClick={() => handleDelete(j)}
-                              style={{ padding: '6px 12px', fontSize: 12 }}
-                            >
-                              🗑️ Supprimer
-                            </Button>
-                          </div>
+                          {hasProjectAccess === false ? (
+                            <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                              🔒 Lecture seule — pas d'accès au projet
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleToggleActive(j)}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                {j.scheduleEnabled ? '⏸️ Pause' : '▶️ Activer'}
+                              </Button>
+                              <Button
+                                variant="primary"
+                                onClick={() => handleRunNow(j)}
+                                disabled={j.status === 'running'}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                🚀 Run Now
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleEditPublishJob(j)}
+                                style={{ padding: '6px 12px', fontSize: 12, background: '#8b5cf6', color: 'white', border: 'none' }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#7c3aed'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#8b5cf6'}
+                              >
+                                ✏️ Modifier
+                              </Button>
+                              <Button
+                                variant="danger"
+                                onClick={() => handleDelete(j)}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                🗑️ Supprimer
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2276,38 +2320,44 @@ export default function PlanningPage() {
                               {statusLabel}
                             </span>
                           </div>
-                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                            <Button
-                              variant="secondary"
-                              onClick={() => handleTogglePdfJob(j)}
-                              style={{ padding: '6px 12px', fontSize: 12 }}
-                            >
-                              {j.scheduleEnabled ? '⏸️ Pause' : '▶️ Activer'}
-                            </Button>
-                            <Button
-                              onClick={() => handleRunPdfJob(j)}
-                              disabled={j.status === 'running'}
-                              style={{ padding: '6px 12px', fontSize: 12 }}
-                            >
-                              🚀 Run Now
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              onClick={() => handleEditPdfJob(j)}
-                              style={{ padding: '6px 12px', fontSize: 12, background: '#8b5cf6', color: 'white', border: 'none' }}
-                              onMouseEnter={(e) => e.currentTarget.style.background = '#7c3aed'}
-                              onMouseLeave={(e) => e.currentTarget.style.background = '#8b5cf6'}
-                            >
-                              ✏️ Modifier
-                            </Button>
-                            <Button
-                              variant="danger"
-                              onClick={() => handleDeletePdfJob(j)}
-                              style={{ padding: '6px 12px', fontSize: 12 }}
-                            >
-                              🗑️ Supprimer
-                            </Button>
-                          </div>
+                          {hasProjectAccess === false ? (
+                            <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                              🔒 Lecture seule — pas d'accès au projet
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleTogglePdfJob(j)}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                {j.scheduleEnabled ? '⏸️ Pause' : '▶️ Activer'}
+                              </Button>
+                              <Button
+                                onClick={() => handleRunPdfJob(j)}
+                                disabled={j.status === 'running'}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                🚀 Run Now
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleEditPdfJob(j)}
+                                style={{ padding: '6px 12px', fontSize: 12, background: '#8b5cf6', color: 'white', border: 'none' }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#7c3aed'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = '#8b5cf6'}
+                              >
+                                ✏️ Modifier
+                              </Button>
+                              <Button
+                                variant="danger"
+                                onClick={() => handleDeletePdfJob(j)}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                🗑️ Supprimer
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
