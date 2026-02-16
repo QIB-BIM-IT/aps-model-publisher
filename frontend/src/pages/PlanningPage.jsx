@@ -720,6 +720,28 @@ export default function PlanningPage() {
         if (preSelectProject && data.some((project) => idOf(project) === preSelectProject)) {
           setSelectedProject(preSelectProject);
           preselectProjectApplied.current = true;
+        } else if (preSelectProject && !data.some((project) => idOf(project) === preSelectProject)) {
+          // Le projet pré-sélectionné n'est PAS dans la liste = l'utilisateur n'a pas accès
+          console.warn(`Projet ${preSelectProject} non trouvé dans la liste des projets accessibles`);
+          setHasProjectAccess(false);
+          setSelectedProject(''); // Ne pas sélectionner un autre projet
+          setTopFolders([]);
+          // Charger les jobs/runs du projet inaccessible via notre API
+          try {
+            const [pubJobs, pdfJobs, pubRuns, pdfRuns] = await Promise.all([
+              getPublishJobs({ projectId: preSelectProject }),
+              getPDFExportJobs({ projectId: preSelectProject }),
+              getRuns({ projectId: preSelectProject, limit: 50 }),
+              getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
+            ]);
+            setJobs(Array.isArray(pubJobs) ? pubJobs : []);
+            setPdfExportJobs(Array.isArray(pdfJobs) ? pdfJobs : []);
+            publishRunsRef.current = Array.isArray(pubRuns) ? pubRuns : [];
+            pdfRunsRef.current = Array.isArray(pdfRuns) ? pdfRuns : [];
+            setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current));
+          } catch (e2) {
+            console.warn('Erreur chargement jobs pour projet inaccessible:', e2);
+          }
         } else {
           setSelectedProject(idOf(data[0]));
         }
@@ -1807,11 +1829,7 @@ export default function PlanningPage() {
 
         {/* Arbre fichiers */}
         <Card title="📂 Fichiers du projet" style={{ marginBottom: 24 }}>
-          {!selectedProject ? (
-            <p style={{ color: '#6b7280' }}>Sélectionne un projet</p>
-          ) : loadingTop ? (
-            <p style={{ color: '#6b7280' }}>Chargement...</p>
-          ) : hasProjectAccess === false ? (
+          {hasProjectAccess === false ? (
             <div style={{
               padding: '20px 24px',
               background: 'rgba(239, 68, 68, 0.08)',
@@ -1832,6 +1850,10 @@ export default function PlanningPage() {
                 </div>
               </div>
             </div>
+          ) : !selectedProject ? (
+            <p style={{ color: '#6b7280' }}>Sélectionne un projet</p>
+          ) : loadingTop ? (
+            <p style={{ color: '#6b7280' }}>Chargement...</p>
           ) : topFolders.length === 0 ? (
             <p style={{ color: '#9ca3af' }}>Aucun dossier</p>
           ) : (
@@ -2188,7 +2210,7 @@ export default function PlanningPage() {
 
         {/* Jobs */}
         <Card id="jobs-section" title="⚙️ Tâches du projet" style={{ marginBottom: 24 }}>
-          {!selectedProject ? (
+          {!selectedProject && hasProjectAccess !== false ? (
             <p style={{ color: '#9ca3af' }}>Sélectionne un projet</p>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
@@ -2415,7 +2437,7 @@ export default function PlanningPage() {
 
         {/* Historique */}
         <Card title="📊 Historique des publications">
-          {!selectedProject ? (
+          {!selectedProject && hasProjectAccess !== false ? (
             <p style={{ color: '#9ca3af' }}>Sélectionne un projet</p>
           ) : loadingRuns ? (
             <p style={{ color: '#6b7280' }}>Chargement...</p>
