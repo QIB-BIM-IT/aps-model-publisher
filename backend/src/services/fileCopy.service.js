@@ -159,11 +159,12 @@ class FileCopyService {
       }
       logger.info(`[FileCopy] Step 4a OK - signed download URL obtained (status=${signedDownloadResp.data?.status})`);
 
-      // 4b: Get signed upload URL for destination
+      // 4b: Get signed upload URL for destination (minutesExpiration is a query param, not body)
       const signedUploadUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(destBucket)}/objects/${encodeURIComponent(destObjectKey)}/signeds3upload`;
       logger.info(`[FileCopy] Step 4b - Getting signed upload URL: bucket=${destBucket} key=${destObjectKey}`);
-      const signedUploadResp = await axios.post(signedUploadUrl, { minutesExpiration: 10 }, {
+      const signedUploadResp = await axios.post(signedUploadUrl, {}, {
         headers: { ...authHeader, 'Content-Type': 'application/json' },
+        params: { minutesExpiration: 10 },
       });
       const uploadUrl = signedUploadResp.data?.urls?.[0];
       const uploadKey = signedUploadResp.data?.uploadKey;
