@@ -140,41 +140,78 @@ class FileCopyService {
     if (!destBucket || !destObjectKey) throw new Error(`Step 3: Format targetStorageId invalide: ${targetStorageId}`);
     logger.info(`[FileCopy] Step 3 OK - dest: bucket=${destBucket} key=${destObjectKey} targetStorageId=${targetStorageId}`);
 
-    // Step 4: Transfer binary via direct OSS download/upload
-    // Note: signed S3 URLs are NOT supported for BIM360/ACC WIP bucket objects
-    logger.info(`[FileCopy] Step 4 - Transfer binary via OSS direct download/upload`);
+    // Step 4: Transfer binary via signed S3 URLs (required since legacy OSS endpoints are deprecated)
+    logger.info(`[FileCopy] Step 4 - Transfer binary via signed S3 URLs`);
     try {
       const authHeader = { Authorization: `Bearer ${accessToken}` };
 
-      // 4a: Download source object from OSS
-      const sourceOssUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(sourceBucket)}/objects/${encodeURIComponent(sourceObjectKey)}`;
-      logger.info(`[FileCopy] Step 4a - Downloading from: ${sourceOssUrl}`);
-      const downloadResp = await axios.get(sourceOssUrl, {
+      // 4a: Get signed download URL for source
+      const signedDownloadUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(sourceBucket)}/objects/${encodeURIComponent(sourceObjectKey)}/signeds3download`;
+      logger.info(`[FileCopy] Step 4a - Getting signed download URL: bucket=${sourceBucket} key=${sourceObjectKey}`);
+      const signedDownloadResp = await axios.get(signedDownloadUrl, {
         headers: authHeader,
+        params: { minutesExpiration: 10 },
+      });
+      const downloadUrl = signedDownloadResp.data?.url;
+      if (!downloadUrl) {
+        logger.error(`[FileCopy] Step 4a - Response: ${JSON.stringify(signedDownloadResp.data).substring(0, 500)}`);
+        throw new Error('Step 4a: Signed download URL introuvable dans la réponse');
+      }
+      logger.info(`[FileCopy] Step 4a OK - signed download URL obtained (status=${signedDownloadResp.data?.status})`);
+
+      // 4b: Get signed upload URL for destination
+      const signedUploadUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(destBucket)}/objects/${encodeURIComponent(destObjectKey)}/signeds3upload`;
+      logger.info(`[FileCopy] Step 4b - Getting signed upload URL: bucket=${destBucket} key=${destObjectKey}`);
+      const signedUploadResp = await axios.post(signedUploadUrl, { minutesExpiration: 10 }, {
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+      });
+      const uploadUrl = signedUploadResp.data?.urls?.[0];
+      const uploadKey = signedUploadResp.data?.uploadKey;
+      if (!uploadUrl || !uploadKey) {
+        logger.error(`[FileCopy] Step 4b - Response: ${JSON.stringify(signedUploadResp.data).substring(0, 500)}`);
+        throw new Error('Step 4b: Signed upload URL ou uploadKey introuvable');
+      }
+      logger.info(`[FileCopy] Step 4b OK - signed upload URL obtained (uploadKey=${uploadKey.substring(0, 20)}...)`);
+
+      // 4c: Download content from signed S3 URL (no auth header needed)
+      logger.info(`[FileCopy] Step 4c - Downloading binary from S3...`);
+      const downloadResp = await axios.get(downloadUrl, {
         responseType: 'arraybuffer',
         maxContentLength: Infinity,
         maxRedirects: 5,
       });
       const contentLength = downloadResp.data.length;
-      logger.info(`[FileCopy] Step 4a OK - downloaded ${(contentLength / 1024 / 1024).toFixed(2)} MB`);
+      logger.info(`[FileCopy] Step 4c OK - downloaded ${(contentLength / 1024 / 1024).toFixed(2)} MB`);
 
-      // 4b: Upload to destination object in OSS
-      const destOssUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(destBucket)}/objects/${encodeURIComponent(destObjectKey)}`;
-      logger.info(`[FileCopy] Step 4b - Uploading to: ${destOssUrl}`);
-      await axios.put(destOssUrl, downloadResp.data, {
+      // 4d: Upload content to signed S3 URL (no auth header needed)
+      logger.info(`[FileCopy] Step 4d - Uploading ${(contentLength / 1024 / 1024).toFixed(2)} MB to S3...`);
+      await axios.put(uploadUrl, downloadResp.data, {
         headers: {
-          ...authHeader,
           'Content-Type': 'application/octet-stream',
           'Content-Length': contentLength,
         },
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       });
-      logger.info(`[FileCopy] Step 4b OK - uploaded ${(contentLength / 1024 / 1024).toFixed(2)} MB to destination`);
+      logger.info(`[FileCopy] Step 4d OK - uploaded to S3`);
+
+      // 4e: Complete the upload (tell APS the upload is done)
+      logger.info(`[FileCopy] Step 4e - Completing upload...`);
+      await axios.post(signedUploadUrl, { uploadKey }, {
+        headers: { ...authHeader, 'Content-Type': 'application/json' },
+      });
+      logger.info(`[FileCopy] Step 4e OK - upload finalized`);
     } catch (e) {
       const status = e.response?.status || 'unknown';
-      const body = JSON.stringify(e.response?.data || {}).substring(0, 300);
-      throw new Error(`Step 4 échoué (OSS transfer) HTTP ${status}: ${e.message} - ${body}`);
+      let body = '';
+      if (e.response?.data) {
+        if (Buffer.isBuffer(e.response.data) || e.response.data instanceof ArrayBuffer) {
+          body = Buffer.from(e.response.data).toString('utf8').substring(0, 300);
+        } else {
+          body = JSON.stringify(e.response.data).substring(0, 300);
+        }
+      }
+      throw new Error(`Step 4 échoué HTTP ${status}: ${e.message} - ${body}`);
     }
 
     // Step 5: Create item or new version in destination
