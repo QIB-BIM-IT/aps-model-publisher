@@ -1581,15 +1581,16 @@ export default function PlanningPage() {
     }
 
     try {
-      const selectedFolder = topFolders.find((f) => idOf(f) === selectedFile);
+      const firstItem = Object.values(selectedItems)[0];
+      const parentFolderRef = firstItem?.relationships?.parent?.data?.id || '';
       await createCopyJob({
         name: jobName || 'Copie de fichiers',
         hubId: selectedHub,
         hubName: hubs.find((h) => idOf(h) === selectedHub)?.attributes?.name || '',
         projectId: selectedProject,
         projectName: projects.find((p) => idOf(p) === selectedProject)?.attributes?.name || '',
-        sourceFolderId: selectedFolder ? idOf(selectedFolder) : '',
-        sourceFolderName: selectedFolder ? nameOf(selectedFolder) : '',
+        sourceFolderId: parentFolderRef || 'unknown',
+        sourceFolderName: '',
         files: selectedFileUrns,
         destinationProjectId: copyDestProjectId || selectedProject,
         destinationProjectName: '',
