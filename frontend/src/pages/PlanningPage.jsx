@@ -261,28 +261,76 @@ function ModelDetailsTooltip({ results, items }) {
   );
 }
 
-function RevitIcon() {
+const FILE_TYPE_CONFIG = {
+  rvt:  { label: 'R',   bg: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', shadow: 'rgba(37,99,235,0.3)' },
+  rfa:  { label: 'R',   bg: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', shadow: 'rgba(59,130,246,0.3)' },
+  rte:  { label: 'R',   bg: 'linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%)', shadow: 'rgba(96,165,250,0.3)' },
+  dwg:  { label: 'DW',  bg: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)', shadow: 'rgba(220,38,38,0.3)' },
+  dxf:  { label: 'DX',  bg: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)', shadow: 'rgba(239,68,68,0.3)' },
+  dwf:  { label: 'DW',  bg: 'linear-gradient(135deg, #f87171 0%, #ef4444 100%)', shadow: 'rgba(248,113,113,0.3)' },
+  ifc:  { label: 'IFC', bg: 'linear-gradient(135deg, #059669 0%, #047857 100%)', shadow: 'rgba(5,150,105,0.3)' },
+  nwc:  { label: 'NW',  bg: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', shadow: 'rgba(245,158,11,0.3)' },
+  nwd:  { label: 'NW',  bg: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', shadow: 'rgba(245,158,11,0.3)' },
+  nwf:  { label: 'NW',  bg: 'linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%)', shadow: 'rgba(251,191,36,0.3)' },
+  pdf:  { label: 'PDF', bg: 'linear-gradient(135deg, #dc2626 0%, #991b1b 100%)', shadow: 'rgba(220,38,38,0.3)' },
+  xlsx: { label: 'XL',  bg: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)', shadow: 'rgba(22,163,74,0.3)' },
+  xls:  { label: 'XL',  bg: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)', shadow: 'rgba(22,163,74,0.3)' },
+  csv:  { label: 'CSV', bg: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', shadow: 'rgba(34,197,94,0.3)' },
+  docx: { label: 'W',   bg: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)', shadow: 'rgba(37,99,235,0.3)' },
+  doc:  { label: 'W',   bg: 'linear-gradient(135deg, #2563eb 0%, #1e40af 100%)', shadow: 'rgba(37,99,235,0.3)' },
+  pptx: { label: 'PP',  bg: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)', shadow: 'rgba(234,88,12,0.3)' },
+  png:  { label: 'IMG', bg: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)', shadow: 'rgba(139,92,246,0.3)' },
+  jpg:  { label: 'IMG', bg: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)', shadow: 'rgba(139,92,246,0.3)' },
+  jpeg: { label: 'IMG', bg: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)', shadow: 'rgba(139,92,246,0.3)' },
+  zip:  { label: 'ZIP', bg: 'linear-gradient(135deg, #64748b 0%, #475569 100%)', shadow: 'rgba(100,116,139,0.3)' },
+  dwfx: { label: 'DW',  bg: 'linear-gradient(135deg, #f87171 0%, #ef4444 100%)', shadow: 'rgba(248,113,113,0.3)' },
+  '3dm': { label: '3D', bg: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)', shadow: 'rgba(14,165,233,0.3)' },
+  skp:  { label: 'SK',  bg: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)', shadow: 'rgba(14,165,233,0.3)' },
+  fbx:  { label: 'FBX', bg: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)', shadow: 'rgba(6,182,212,0.3)' },
+  sat:  { label: 'SAT', bg: 'linear-gradient(135deg, #64748b 0%, #475569 100%)', shadow: 'rgba(100,116,139,0.3)' },
+  stp:  { label: 'STP', bg: 'linear-gradient(135deg, #64748b 0%, #475569 100%)', shadow: 'rgba(100,116,139,0.3)' },
+  step: { label: 'STP', bg: 'linear-gradient(135deg, #64748b 0%, #475569 100%)', shadow: 'rgba(100,116,139,0.3)' },
+  igs:  { label: 'IGS', bg: 'linear-gradient(135deg, #64748b 0%, #475569 100%)', shadow: 'rgba(100,116,139,0.3)' },
+};
+
+const DEFAULT_FILE_CONFIG = { label: '?', bg: 'linear-gradient(135deg, #94a3b8 0%, #64748b 100%)', shadow: 'rgba(148,163,184,0.3)' };
+
+function getFileIcon(ext) {
+  const cfg = FILE_TYPE_CONFIG[ext] || FILE_TYPE_CONFIG[ext?.toLowerCase()] || null;
+  if (!cfg) return '📄';
+  const map = { R: '🏗️', DW: '📐', IFC: '🏢', NW: '🔍', PDF: '📕', XL: '📊', CSV: '📊', W: '📝', PP: '📎', IMG: '🖼️', ZIP: '📦', '3D': '🧊', SK: '🧊', FBX: '🧊', STP: '⚙️', SAT: '⚙️', IGS: '⚙️' };
+  return map[cfg.label] || '📄';
+}
+
+function FileIcon({ ext }) {
+  const cfg = FILE_TYPE_CONFIG[ext] || FILE_TYPE_CONFIG[ext?.toLowerCase()] || DEFAULT_FILE_CONFIG;
   return (
     <span
       style={{
         display: 'inline-flex',
-        width: 20,
+        minWidth: 20,
         height: 20,
         borderRadius: 4,
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: 12,
+        fontSize: cfg.label.length > 2 ? 8 : cfg.label.length > 1 ? 9 : 12,
         fontWeight: 700,
         marginRight: 8,
-        background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+        padding: '0 3px',
+        background: cfg.bg,
         color: 'white',
         lineHeight: 1,
-        boxShadow: '0 2px 4px rgba(37,99,235,0.3)',
+        boxShadow: `0 2px 4px ${cfg.shadow}`,
+        letterSpacing: '-0.5px',
       }}
     >
-      R
+      {cfg.label}
     </span>
   );
+}
+
+function RevitIcon() {
+  return <FileIcon ext="rvt" />;
 }
 
 function mergeRuns(publishList = [], pdfList = [], copyList = []) {
@@ -386,8 +434,9 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
     }
   }
 
-  const selectable = isItem(node) && isRvt(node);
+  const selectable = isItem(node);
   const checked = !!selected[id];
+  const ext = extOf(node);
 
   return (
     <div style={{ marginLeft: 20 }}>
@@ -440,7 +489,7 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
             style={{ width: 18, height: 18, cursor: 'pointer', accentColor: '#2563eb' }}
           />
         )}
-        {isItem(node) && isRvt(node) && <RevitIcon />}
+        {selectable && <FileIcon ext={ext} />}
         <span style={{ fontSize: 14, color: '#1f2937', fontWeight: checked ? 600 : 400 }}>{nm}</span>
       </div>
 
@@ -1515,10 +1564,9 @@ export default function PlanningPage() {
 
   async function handleCreateCopyJob() {
     const selectedFileUrns = Object.entries(selectedItems)
-      .filter(([, v]) => v.checked)
-      .map(([, v]) => ({
-        urn: v.publishUrn || v.id,
-        name: v.data?.attributes?.displayName || v.data?.name || 'Fichier',
+      .map(([key, v]) => ({
+        urn: v.publishUrn || v.id || key,
+        name: v.attributes?.displayName || v.name || nameOf(v, 'Fichier'),
       }));
 
     if (selectedFileUrns.length === 0) {
@@ -2339,7 +2387,7 @@ export default function PlanningPage() {
                     </Button>
                     <Button
                       onClick={() => {
-                        const selectedFileCount = Object.values(selectedItems).filter(v => v.checked).length;
+                        const selectedFileCount = Object.keys(selectedItems).length;
                         if (selectedFileCount === 0) {
                           setToast('⚠️ Sélectionne au moins 1 fichier');
                           setTimeout(() => setToast(''), 3000);
@@ -3135,7 +3183,6 @@ export default function PlanningPage() {
               <label style={{ fontWeight: 600, fontSize: 14, color: '#374151' }}>Fichiers à copier :</label>
               <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {Object.entries(selectedItems)
-                  .filter(([, v]) => v.checked)
                   .map(([key, v]) => (
                     <div
                       key={key}
@@ -3147,7 +3194,7 @@ export default function PlanningPage() {
                         color: '#1f2937',
                       }}
                     >
-                      📄 {v.data?.attributes?.displayName || v.data?.name || key.slice(0, 16)}
+                      {getFileIcon(extOf(v))} {v.attributes?.displayName || v.name || nameOf(v, key.slice(0, 16))}
                     </div>
                   ))}
               </div>
