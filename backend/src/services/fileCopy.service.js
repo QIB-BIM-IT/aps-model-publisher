@@ -97,9 +97,9 @@ class FileCopyService {
     if (!storageId) throw new Error('Step 1: Storage introuvable pour le fichier source');
 
     const displayName = fileName || tipData.attributes?.displayName || 'file';
-    const sourceBucket = storageId.split('/')[0].split(':os.object:')[1];
-    const sourceObjectKey = storageId.split('/')[1];
-    logger.info(`[FileCopy] Step 1 OK - source: bucket=${sourceBucket} key=${sourceObjectKey} name=${displayName}`);
+    const { bucket: sourceBucket, objectKey: sourceObjectKey } = this._parseStorageId(storageId);
+    if (!sourceBucket || !sourceObjectKey) throw new Error(`Step 1: Format storageId invalide: ${storageId}`);
+    logger.info(`[FileCopy] Step 1 OK - source: bucket=${sourceBucket} key=${sourceObjectKey} name=${displayName} storageId=${storageId}`);
 
     // Step 2: Check if file already exists in destination
     let existingItemId = null;
@@ -136,64 +136,45 @@ class FileCopyService {
     }
     if (!targetStorageId) throw new Error('Step 3: Impossible de créer le storage de destination');
 
-    const destBucket = targetStorageId.split('/')[0].split(':os.object:')[1];
-    const destObjectKey = targetStorageId.split('/')[1];
-    logger.info(`[FileCopy] Step 3 OK - dest: bucket=${destBucket} key=${destObjectKey}`);
+    const { bucket: destBucket, objectKey: destObjectKey } = this._parseStorageId(targetStorageId);
+    if (!destBucket || !destObjectKey) throw new Error(`Step 3: Format targetStorageId invalide: ${targetStorageId}`);
+    logger.info(`[FileCopy] Step 3 OK - dest: bucket=${destBucket} key=${destObjectKey} targetStorageId=${targetStorageId}`);
 
-    // Step 4: Transfer binary via signed S3 URLs (works with ACC WIP buckets)
-    logger.info(`[FileCopy] Step 4 - Transfer binary via signed URLs`);
+    // Step 4: Transfer binary via direct OSS download/upload
+    // Note: signed S3 URLs are NOT supported for BIM360/ACC WIP bucket objects
+    logger.info(`[FileCopy] Step 4 - Transfer binary via OSS direct download/upload`);
     try {
-      // 4a: Get signed download URL for source
-      const signedDownloadResp = await axios.get(
-        `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(sourceBucket)}/objects/${encodeURIComponent(sourceObjectKey)}/signeds3download`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      const downloadUrl = signedDownloadResp.data.url;
-      if (!downloadUrl) throw new Error('Signed download URL introuvable');
-      logger.info(`[FileCopy] Step 4a OK - signed download URL obtained`);
+      const authHeader = { Authorization: `Bearer ${accessToken}` };
 
-      // 4b: Get signed upload URL for destination
-      const signedUploadResp = await axios.post(
-        `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(destBucket)}/objects/${encodeURIComponent(destObjectKey)}/signeds3upload`,
-        {},
-        { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
-      );
-      const uploadUrl = signedUploadResp.data.urls?.[0];
-      const uploadKey = signedUploadResp.data.uploadKey;
-      if (!uploadUrl || !uploadKey) throw new Error('Signed upload URL introuvable');
-      logger.info(`[FileCopy] Step 4b OK - signed upload URL obtained`);
-
-      // 4c: Download content from signed URL (no auth needed)
-      const downloadResp = await axios.get(downloadUrl, {
+      // 4a: Download source object from OSS
+      const sourceOssUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(sourceBucket)}/objects/${encodeURIComponent(sourceObjectKey)}`;
+      logger.info(`[FileCopy] Step 4a - Downloading from: ${sourceOssUrl}`);
+      const downloadResp = await axios.get(sourceOssUrl, {
+        headers: authHeader,
         responseType: 'arraybuffer',
         maxContentLength: Infinity,
         maxRedirects: 5,
       });
       const contentLength = downloadResp.data.length;
-      logger.info(`[FileCopy] Step 4c OK - downloaded ${(contentLength / 1024 / 1024).toFixed(2)} MB`);
+      logger.info(`[FileCopy] Step 4a OK - downloaded ${(contentLength / 1024 / 1024).toFixed(2)} MB`);
 
-      // 4d: Upload content to signed URL (no auth needed)
-      await axios.put(uploadUrl, downloadResp.data, {
+      // 4b: Upload to destination object in OSS
+      const destOssUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(destBucket)}/objects/${encodeURIComponent(destObjectKey)}`;
+      logger.info(`[FileCopy] Step 4b - Uploading to: ${destOssUrl}`);
+      await axios.put(destOssUrl, downloadResp.data, {
         headers: {
+          ...authHeader,
           'Content-Type': 'application/octet-stream',
           'Content-Length': contentLength,
         },
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       });
-      logger.info(`[FileCopy] Step 4d OK - uploaded to destination`);
-
-      // 4e: Complete the upload
-      await axios.post(
-        `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(destBucket)}/objects/${encodeURIComponent(destObjectKey)}/signeds3upload`,
-        { uploadKey },
-        { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
-      );
-      logger.info(`[FileCopy] Step 4e OK - upload finalized`);
+      logger.info(`[FileCopy] Step 4b OK - uploaded ${(contentLength / 1024 / 1024).toFixed(2)} MB to destination`);
     } catch (e) {
       const status = e.response?.status || 'unknown';
       const body = JSON.stringify(e.response?.data || {}).substring(0, 300);
-      throw new Error(`Step 4 échoué (transfer binary) HTTP ${status}: ${e.message} - ${body}`);
+      throw new Error(`Step 4 échoué (OSS transfer) HTTP ${status}: ${e.message} - ${body}`);
     }
 
     // Step 5: Create item or new version in destination
@@ -299,9 +280,20 @@ class FileCopyService {
     }
   }
 
+  _parseStorageId(storageId) {
+    if (!storageId) return { bucket: null, objectKey: null };
+    const slashIdx = storageId.indexOf('/');
+    if (slashIdx === -1) return { bucket: null, objectKey: null };
+    const prefix = storageId.substring(0, slashIdx);
+    const objectKey = storageId.substring(slashIdx + 1);
+    const osObjMarker = ':os.object:';
+    const markerIdx = prefix.indexOf(osObjMarker);
+    if (markerIdx === -1) return { bucket: null, objectKey: null };
+    const bucket = prefix.substring(markerIdx + osObjMarker.length);
+    return { bucket, objectKey };
+  }
+
   _getFileExtensionType(displayName) {
-    // BIM360 projects use autodesk.bim360:File, ACC uses autodesk.core:File
-    // autodesk.core:File works for both in most cases
     return {
       item: 'items:autodesk.core:File',
       version: 'versions:autodesk.core:File',
