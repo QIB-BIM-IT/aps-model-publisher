@@ -126,6 +126,39 @@ export async function runPDFExportJobNow(id) {
   }
 }
 
+// ----- Copy Jobs -----
+export async function createCopyJob(payload) {
+  const { data } = await api.post('/api/copy/jobs', payload);
+  return data?.data;
+}
+export async function getCopyJobs(params = {}) {
+  const { data } = await api.get('/api/copy/jobs', { params });
+  return data?.data || [];
+}
+export async function patchCopyJob(id, patch) {
+  const { data } = await api.patch(`/api/copy/jobs/${encodeURIComponent(id)}`, patch);
+  return data?.data;
+}
+export async function deleteCopyJob(id) {
+  const { data } = await api.delete(`/api/copy/jobs/${encodeURIComponent(id)}`);
+  return data?.success === true;
+}
+export async function runCopyJobNow(id) {
+  try {
+    const { data } = await api.post(`/api/copy/jobs/${encodeURIComponent(id)}/run`);
+    return data?.data || null;
+  } catch (err) {
+    const message = err?.response?.data?.message || err?.message || 'Erreur lancement du job';
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
+}
+export async function getCopyRuns(params = {}) {
+  const { data } = await api.get('/api/copy/runs', { params });
+  return data?.data || [];
+}
+
 // ----- Runs -----
 export async function getRuns(params = {}) {
   const { data } = await api.get('/api/publish/runs', { params });

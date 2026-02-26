@@ -65,6 +65,7 @@ app.use('/api/publish', publishDirectRoutes);
 app.use('/api/pdf-export', pdfExportRoutes);
 app.use('/api/pdf-export', require('./routes/pdf-export-jobs.routes'));
 app.use('/api/admin', adminRoutes);
+app.use('/api/copy', require('./routes/copy-jobs.routes'));
 
 // -------- Serve React frontend in production
 if (process.env.NODE_ENV === 'production') {

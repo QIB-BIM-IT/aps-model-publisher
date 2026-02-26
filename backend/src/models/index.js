@@ -10,6 +10,8 @@ const PublishJob = require('./PublishJob');
 const PublishRun = require('./PublishRun');
 const PDFExportJob = require('./PDFExportJob');
 const PDFExportRun = require('./PDFExportRun');
+const CopyJob = require('./CopyJob');
+const CopyRun = require('./CopyRun');
 const WebhookRegistration = require('./WebhookRegistration');
 
 // ========== PUBLISH JOBS ASSOCIATIONS ==========
@@ -98,6 +100,49 @@ PDFExportJob.hasMany(PDFExportRun, {
   onDelete: 'CASCADE',
 });
 
+// ========== COPY JOBS ASSOCIATIONS ==========
+CopyJob.belongsTo(User, {
+  foreignKey: 'userId',
+  as: 'user',
+  constraints: true,
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+User.hasMany(CopyJob, {
+  foreignKey: 'userId',
+  as: 'copyJobs',
+  constraints: true,
+  onDelete: 'CASCADE',
+});
+
+CopyRun.belongsTo(User, {
+  foreignKey: 'userId',
+  as: 'user',
+  constraints: true,
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+User.hasMany(CopyRun, {
+  foreignKey: 'userId',
+  as: 'copyRuns',
+  constraints: true,
+  onDelete: 'CASCADE',
+});
+
+CopyRun.belongsTo(CopyJob, {
+  foreignKey: 'jobId',
+  as: 'job',
+  constraints: true,
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE',
+});
+CopyJob.hasMany(CopyRun, {
+  foreignKey: 'jobId',
+  as: 'runs',
+  constraints: true,
+  onDelete: 'CASCADE',
+});
+
 module.exports = {
   sequelize,
   User,
@@ -105,5 +150,7 @@ module.exports = {
   PublishRun,
   PDFExportJob,
   PDFExportRun,
+  CopyJob,
+  CopyRun,
   WebhookRegistration,
 };

@@ -18,6 +18,12 @@ import api, {
   runPDFExportJobNow,
   getPDFExportRuns,
   exportPDFsFromCache,
+  createCopyJob,
+  getCopyJobs,
+  patchCopyJob,
+  deleteCopyJob,
+  runCopyJobNow,
+  getCopyRuns,
 } from '../services/api';
 import { PDFExportModal } from '../components/PDFExportModal';
 
@@ -279,15 +285,18 @@ function RevitIcon() {
   );
 }
 
-function mergeRuns(publishList = [], pdfList = []) {
+function mergeRuns(publishList = [], pdfList = [], copyList = []) {
   const normalizedPublish = Array.isArray(publishList)
     ? publishList.map((run) => ({ ...run, jobType: run.jobType || 'publish' }))
     : [];
   const normalizedPdf = Array.isArray(pdfList)
     ? pdfList.map((run) => ({ ...run, jobType: 'pdf-export' }))
     : [];
+  const normalizedCopy = Array.isArray(copyList)
+    ? copyList.map((run) => ({ ...run, jobType: 'file-copy' }))
+    : [];
 
-  return [...normalizedPublish, ...normalizedPdf].sort((a, b) => {
+  return [...normalizedPublish, ...normalizedPdf, ...normalizedCopy].sort((a, b) => {
     const dateA = new Date(a.createdAt || a.startedAt || 0).getTime();
     const dateB = new Date(b.createdAt || b.startedAt || 0).getTime();
     return dateB - dateA;
@@ -567,6 +576,17 @@ export default function PlanningPage() {
   const [jobs, setJobs] = React.useState([]);
   const [loadingJobs, setLoadingJobs] = React.useState(false);
 
+  const [copyJobs, setCopyJobs] = React.useState([]);
+  const copyRunsRef = React.useRef([]);
+
+  // État du modal de création de copie
+  const [showCopyModal, setShowCopyModal] = React.useState(false);
+  const [copyDestProjects, setCopyDestProjects] = React.useState([]);
+  const [copyDestFolders, setCopyDestFolders] = React.useState([]);
+  const [copyDestProjectId, setCopyDestProjectId] = React.useState('');
+  const [copyDestFolderId, setCopyDestFolderId] = React.useState('');
+  const [copyDestFolderChildren, setCopyDestFolderChildren] = React.useState(new Map());
+
   const [runs, setRuns] = React.useState([]);
   const publishRunsRef = React.useRef([]);
   const pdfRunsRef = React.useRef([]);
@@ -659,17 +679,21 @@ export default function PlanningPage() {
             setHasProjectAccess(false);
             // Charger les jobs/runs du projet via notre API (pas besoin d'accès ACC)
             try {
-              const [pubJobs, pdfJobs, pubRuns, pdfRuns] = await Promise.all([
+              const [pubJobs, pdfJobs, cpJobs, pubRuns, pdfRuns, cpRuns] = await Promise.all([
                 getPublishJobs({ projectId: preSelectProject }),
                 getPDFExportJobs({ projectId: preSelectProject }),
+                getCopyJobs({ projectId: preSelectProject }),
                 getRuns({ projectId: preSelectProject, limit: 50 }),
                 getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
+                getCopyRuns({ projectId: preSelectProject, limit: 50 }),
               ]);
               setJobs(Array.isArray(pubJobs) ? pubJobs : []);
               setPdfExportJobs(Array.isArray(pdfJobs) ? pdfJobs : []);
+              setCopyJobs(Array.isArray(cpJobs) ? cpJobs : []);
               publishRunsRef.current = Array.isArray(pubRuns) ? pubRuns : [];
               pdfRunsRef.current = Array.isArray(pdfRuns) ? pdfRuns : [];
-              setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current));
+              copyRunsRef.current = Array.isArray(cpRuns) ? cpRuns : [];
+              setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
             } catch (e2) {
               console.warn('Erreur chargement jobs pour projet inaccessible:', e2);
             }
@@ -695,10 +719,12 @@ export default function PlanningPage() {
     setJobType(null);
     setJobName('');
     setPdfExportJobs([]);
+    setCopyJobs([]);
     setJobs([]);
     setRuns([]);
     publishRunsRef.current = [];
     pdfRunsRef.current = [];
+    copyRunsRef.current = [];
     setHasProjectAccess(null);
   }, []);
 
@@ -728,17 +754,21 @@ export default function PlanningPage() {
           setTopFolders([]);
           // Charger les jobs/runs du projet inaccessible via notre API
           try {
-            const [pubJobs, pdfJobs, pubRuns, pdfRuns] = await Promise.all([
+            const [pubJobs, pdfJobs, cpJobs, pubRuns, pdfRuns, cpRuns] = await Promise.all([
               getPublishJobs({ projectId: preSelectProject }),
               getPDFExportJobs({ projectId: preSelectProject }),
+              getCopyJobs({ projectId: preSelectProject }),
               getRuns({ projectId: preSelectProject, limit: 50 }),
               getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
+              getCopyRuns({ projectId: preSelectProject, limit: 50 }),
             ]);
             setJobs(Array.isArray(pubJobs) ? pubJobs : []);
             setPdfExportJobs(Array.isArray(pdfJobs) ? pdfJobs : []);
+            setCopyJobs(Array.isArray(cpJobs) ? cpJobs : []);
             publishRunsRef.current = Array.isArray(pubRuns) ? pubRuns : [];
             pdfRunsRef.current = Array.isArray(pdfRuns) ? pdfRuns : [];
-            setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current));
+            copyRunsRef.current = Array.isArray(cpRuns) ? cpRuns : [];
+            setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
           } catch (e2) {
             console.warn('Erreur chargement jobs pour projet inaccessible:', e2);
           }
@@ -779,16 +809,14 @@ export default function PlanningPage() {
       const data = await fetchTopFolders(hubId, projectId);
       setTopFolders(data);
       setHasProjectAccess(true);
-      await Promise.all([refreshJobs(), refreshRuns(), refreshPdfJobs(), refreshPdfRuns()]);
+      await Promise.all([refreshJobs(), refreshRuns(), refreshPdfJobs(), refreshPdfRuns(), refreshCopyJobs(), refreshCopyRuns()]);
     } catch (e) {
       const status = e?.response?.status || e?.status;
       const msg = e?.message || '';
       if (status === 403 || status === 500 && (msg.includes('403') || msg.includes('BIM360DM_ERROR'))) {
-        // L'utilisateur n'a pas accès à ce projet ACC
         setHasProjectAccess(false);
         setTopFolders([]);
-        // Charger quand même les jobs et l'historique (ils sont accessibles via notre API)
-        await Promise.all([refreshJobs(), refreshRuns(), refreshPdfJobs(), refreshPdfRuns()]);
+        await Promise.all([refreshJobs(), refreshRuns(), refreshPdfJobs(), refreshPdfRuns(), refreshCopyJobs(), refreshCopyRuns()]);
       } else {
         setError(e?.message || 'Erreur dossiers');
         setHasProjectAccess(true); // Autre erreur, pas un problème d'accès
@@ -870,7 +898,7 @@ export default function PlanningPage() {
       try {
         const list = await getRuns({ hubId: selectedHub, projectId: selectedProject, limit: 50 });
         publishRunsRef.current = Array.isArray(list) ? list : [];
-        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current));
+        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
       } catch (e) {
         setError(e?.message || 'Erreur historique');
       } finally {
@@ -888,9 +916,42 @@ export default function PlanningPage() {
       try {
         const list = await getPDFExportRuns({ projectId: selectedProject, limit: 50 });
         pdfRunsRef.current = Array.isArray(list) ? list : [];
-        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current));
+        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
       } catch (e) {
         setError(e?.message || 'Erreur PDF runs');
+      } finally {
+        if (!silent) setLoadingRuns(false);
+      }
+    },
+    [selectedProject]
+  );
+
+  const refreshCopyJobs = React.useCallback(
+    async ({ silent = false } = {}) => {
+      if (!selectedProject) return;
+      if (!silent) setLoadingJobs(true);
+      try {
+        const list = await getCopyJobs({ projectId: selectedProject });
+        setCopyJobs(Array.isArray(list) ? list : []);
+      } catch (e) {
+        setError(e?.message || 'Erreur copy jobs');
+      } finally {
+        if (!silent) setLoadingJobs(false);
+      }
+    },
+    [selectedProject]
+  );
+
+  const refreshCopyRuns = React.useCallback(
+    async ({ silent = false } = {}) => {
+      if (!selectedProject) return;
+      if (!silent) setLoadingRuns(true);
+      try {
+        const list = await getCopyRuns({ projectId: selectedProject, limit: 50 });
+        copyRunsRef.current = Array.isArray(list) ? list : [];
+        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
+      } catch (e) {
+        setError(e?.message || 'Erreur copy runs');
       } finally {
         if (!silent) setLoadingRuns(false);
       }
@@ -1413,6 +1474,99 @@ export default function PlanningPage() {
     setTimeout(() => setToast(''), 3000);
   }
 
+  // ========== COPY JOB HANDLERS ==========
+
+  async function handleToggleCopyJob(job) {
+    try {
+      await patchCopyJob(job.id, { scheduleEnabled: !job.scheduleEnabled });
+      await refreshCopyJobs({ silent: true });
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  async function handleRunCopyJob(job) {
+    try {
+      await runCopyJobNow(job.id);
+      setToast('🚀 Copie lancée!');
+      setTimeout(() => setToast(''), 3000);
+      triggerAutoRefreshWindow(60000);
+      await Promise.all([
+        refreshCopyRuns({ silent: true }),
+        refreshCopyJobs({ silent: true }),
+      ]);
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  async function handleDeleteCopyJob(job) {
+    if (!window.confirm('Supprimer cette tâche de copie?')) return;
+    try {
+      await deleteCopyJob(job.id);
+      await Promise.all([refreshCopyJobs({ silent: true }), refreshCopyRuns({ silent: true })]);
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur suppression'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  async function handleCreateCopyJob() {
+    const selectedFileUrns = Object.entries(selectedItems)
+      .filter(([, v]) => v.checked)
+      .map(([, v]) => ({
+        urn: v.publishUrn || v.id,
+        name: v.data?.attributes?.displayName || v.data?.name || 'Fichier',
+      }));
+
+    if (selectedFileUrns.length === 0) {
+      setToast('❌ Sélectionnez au moins un fichier');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+    if (!copyDestFolderId) {
+      setToast('❌ Sélectionnez un dossier de destination');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    try {
+      const selectedFolder = topFolders.find((f) => idOf(f) === selectedFile);
+      await createCopyJob({
+        name: jobName || 'Copie de fichiers',
+        hubId: selectedHub,
+        hubName: hubs.find((h) => idOf(h) === selectedHub)?.attributes?.name || '',
+        projectId: selectedProject,
+        projectName: projects.find((p) => idOf(p) === selectedProject)?.attributes?.name || '',
+        sourceFolderId: selectedFolder ? idOf(selectedFolder) : '',
+        sourceFolderName: selectedFolder ? nameOf(selectedFolder) : '',
+        files: selectedFileUrns,
+        destinationProjectId: copyDestProjectId || selectedProject,
+        destinationProjectName: '',
+        destinationFolderId: copyDestFolderId,
+        destinationFolderName: '',
+        overwriteExisting: true,
+        scheduleEnabled: true,
+        cronExpression,
+        timezone,
+        notifyOnFailure,
+      });
+
+      setToast('✅ Tâche de copie créée!');
+      setTimeout(() => setToast(''), 3000);
+      setShowCopyModal(false);
+      setJobType(null);
+      setJobName('');
+      setSelectedItems({});
+      await refreshCopyJobs({ silent: true });
+    } catch (e) {
+      setToast('❌ ' + (e?.response?.data?.message || e?.message || 'Erreur'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
   React.useEffect(() => {
     loadHubs();
   }, []);
@@ -1528,8 +1682,9 @@ export default function PlanningPage() {
     const hasRunningRuns = runs.some((r) => r.status === 'running' || r.status === 'queued');
     const hasRunningJobs = jobs.some((j) => j.status === 'running');
     const hasRunningPdfJobs = pdfExportJobs.some((j) => j.status === 'running');
-    return hasRunningRuns || hasRunningJobs || hasRunningPdfJobs || autoRefreshActive;
-  }, [selectedProject, runs, jobs, pdfExportJobs, autoRefreshActive]);
+    const hasRunningCopyJobs = copyJobs.some((j) => j.status === 'running');
+    return hasRunningRuns || hasRunningJobs || hasRunningPdfJobs || hasRunningCopyJobs || autoRefreshActive;
+  }, [selectedProject, runs, jobs, pdfExportJobs, copyJobs, autoRefreshActive]);
 
   React.useEffect(() => {
     if (!shouldAutoRefresh) return undefined;
@@ -1539,12 +1694,14 @@ export default function PlanningPage() {
       void refreshJobs({ silent: true });
       void refreshPdfRuns({ silent: true });
       void refreshPdfJobs({ silent: true });
+      void refreshCopyRuns({ silent: true });
+      void refreshCopyJobs({ silent: true });
     };
 
     tick();
     const interval = setInterval(tick, 3000);
     return () => clearInterval(interval);
-  }, [shouldAutoRefresh, refreshRuns, refreshJobs, refreshPdfRuns, refreshPdfJobs]);
+  }, [shouldAutoRefresh, refreshRuns, refreshJobs, refreshPdfRuns, refreshPdfJobs, refreshCopyRuns, refreshCopyJobs]);
 
   React.useEffect(() => {
     if (!highlightJobId || jobs.length === 0) return;
@@ -2180,6 +2337,25 @@ export default function PlanningPage() {
                     >
                       📄 Créer tâche PDF
                     </Button>
+                    <Button
+                      onClick={() => {
+                        const selectedFileCount = Object.values(selectedItems).filter(v => v.checked).length;
+                        if (selectedFileCount === 0) {
+                          setToast('⚠️ Sélectionne au moins 1 fichier');
+                          setTimeout(() => setToast(''), 3000);
+                          return;
+                        }
+                        setJobType('file-copy');
+                        setShowCopyModal(true);
+                      }}
+                      style={{
+                        padding: '12px 24px',
+                        flex: 1,
+                        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                      }}
+                    >
+                      📋 Créer tâche Copie
+                    </Button>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', gap: 12, width: '100%' }}>
@@ -2213,7 +2389,7 @@ export default function PlanningPage() {
           {!selectedProject && hasProjectAccess !== false ? (
             <p style={{ color: '#9ca3af' }}>Sélectionne un projet</p>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24 }}>
               {/* Colonne Publish */}
               <div>
                 <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
@@ -2419,6 +2595,106 @@ export default function PlanningPage() {
                               <Button
                                 variant="danger"
                                 onClick={() => handleDeletePdfJob(j)}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                🗑️ Supprimer
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Colonne Copie */}
+              <div>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+                  📋 Tâches Copie ({copyJobs.length})
+                </h4>
+                {loadingJobs ? (
+                  <p style={{ color: '#6b7280', fontSize: 13 }}>Chargement...</p>
+                ) : copyJobs.length === 0 ? (
+                  <p style={{ color: '#9ca3af', fontSize: 13 }}>Aucune tâche de copie</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {copyJobs.map((j) => {
+                      const cronParts = typeof j.cronExpression === 'string' ? j.cronExpression.trim().split(/\s+/) : [];
+                      const minutePart = cronParts[0];
+                      const hourPart = cronParts[1];
+                      const isSimpleTime = /^\d+$/.test(hourPart || '') && /^\d+$/.test(minutePart || '');
+                      const displayTime = isSimpleTime
+                        ? `${hourPart.padStart(2, '0')}:${minutePart.padStart(2, '0')}`
+                        : 'Planification personnalisée';
+                      const statusLabel = !j.scheduleEnabled ? 'Pausé' : j.status || 'idle';
+                      const badgeStyles = !j.scheduleEnabled
+                        ? { background: 'rgba(148, 163, 184, 0.2)', color: '#475569' }
+                        : j.status === 'running'
+                        ? { background: 'rgba(245, 158, 11, 0.35)', color: '#b45309', border: '1px solid rgba(245, 158, 11, 0.4)' }
+                        : { background: 'rgba(245, 158, 11, 0.35)', color: '#92400e', border: '1px solid rgba(245, 158, 11, 0.4)' };
+                      const fileCount = Array.isArray(j.files) ? j.files.length : 0;
+
+                      return (
+                        <div
+                          key={j.id}
+                          style={{
+                            padding: '10px 12px',
+                            background: 'rgba(245, 158, 11, 0.12)',
+                            borderRadius: 8,
+                            border: '1px solid rgba(245, 158, 11, 0.35)',
+                            fontSize: 13,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, color: '#1f2937' }}>{j.name || 'Sans nom'}</div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            {fileCount} fichier{fileCount > 1 ? 's' : ''} • 🕐 {displayTime} • {j.timezone || 'UTC'}
+                          </div>
+                          <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
+                            Planifiée par : <span style={{ fontWeight: 500, color: '#475569' }}>{j.userName || 'Utilisateur inconnu'}</span>
+                          </div>
+                          <div>
+                            <span
+                              style={{
+                                padding: '4px 10px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                ...badgeStyles,
+                              }}
+                            >
+                              {statusLabel}
+                            </span>
+                          </div>
+                          {hasProjectAccess === false ? (
+                            <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                              🔒 Lecture seule
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleToggleCopyJob(j)}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                {j.scheduleEnabled ? '⏸️ Pause' : '▶️ Activer'}
+                              </Button>
+                              <Button
+                                onClick={() => handleRunCopyJob(j)}
+                                disabled={j.status === 'running'}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                🚀 Run Now
+                              </Button>
+                              <Button
+                                variant="danger"
+                                onClick={() => handleDeleteCopyJob(j)}
                                 style={{ padding: '6px 12px', fontSize: 12 }}
                               >
                                 🗑️ Supprimer
@@ -2640,11 +2916,11 @@ export default function PlanningPage() {
                               borderRadius: 4,
                               fontSize: 11,
                               fontWeight: 600,
-                              background: r.jobType === 'pdf-export' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.15)',
-                              color: r.jobType === 'pdf-export' ? '#059669' : '#1d4ed8',
-                              border: r.jobType === 'pdf-export' ? '1px solid rgba(16, 185, 129, 0.3)' : 'none'
+                              background: r.jobType === 'file-copy' ? 'rgba(245, 158, 11, 0.3)' : r.jobType === 'pdf-export' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.15)',
+                              color: r.jobType === 'file-copy' ? '#92400e' : r.jobType === 'pdf-export' ? '#059669' : '#1d4ed8',
+                              border: r.jobType === 'file-copy' ? '1px solid rgba(245, 158, 11, 0.3)' : r.jobType === 'pdf-export' ? '1px solid rgba(16, 185, 129, 0.3)' : 'none'
                             }}>
-                              {r.jobType === 'pdf-export' ? '📄 PDF' : '🚀 Publish'}
+                              {r.jobType === 'file-copy' ? '📋 Copie' : r.jobType === 'pdf-export' ? '📄 PDF' : '🚀 Publish'}
                             </span>
                             <span style={{ fontFamily: 'monospace' }}>{jobIdShort}</span>
                           </div>
@@ -2816,6 +3092,240 @@ export default function PlanningPage() {
           />
         );
       })()}
+
+      {/* Modal Copie de fichiers */}
+      {showCopyModal && jobType === 'file-copy' && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => {
+            setShowCopyModal(false);
+            setJobType(null);
+          }}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 16,
+              padding: 32,
+              width: '90%',
+              maxWidth: 600,
+              maxHeight: '80vh',
+              overflowY: 'auto',
+              boxShadow: '0 25px 50px rgba(0, 0, 0, 0.3)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 style={{ margin: '0 0 20px 0', fontSize: 20, fontWeight: 700, color: '#1f2937' }}>
+              📋 Planifier une copie de fichiers
+            </h2>
+
+            {/* Fichiers sélectionnés */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontWeight: 600, fontSize: 14, color: '#374151' }}>Fichiers à copier :</label>
+              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {Object.entries(selectedItems)
+                  .filter(([, v]) => v.checked)
+                  .map(([key, v]) => (
+                    <div
+                      key={key}
+                      style={{
+                        padding: '6px 10px',
+                        background: 'rgba(245, 158, 11, 0.1)',
+                        borderRadius: 6,
+                        fontSize: 13,
+                        color: '#1f2937',
+                      }}
+                    >
+                      📄 {v.data?.attributes?.displayName || v.data?.name || key.slice(0, 16)}
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            {/* Nom de la tâche */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontWeight: 600, fontSize: 14, color: '#374151' }}>Nom de la tâche :</label>
+              <input
+                type="text"
+                value={jobName}
+                onChange={(e) => setJobName(e.target.value)}
+                placeholder="Ex: Copie maquette Archi"
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  marginTop: 6,
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #d1d5db',
+                  fontSize: 14,
+                }}
+              />
+            </div>
+
+            {/* Dossier de destination - même projet */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontWeight: 600, fontSize: 14, color: '#374151' }}>Dossier de destination :</label>
+              <p style={{ fontSize: 12, color: '#6b7280', margin: '4px 0 8px' }}>
+                Sélectionnez un dossier dans le même projet
+              </p>
+              <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8, padding: 8 }}>
+                {topFolders.length === 0 ? (
+                  <p style={{ color: '#9ca3af', fontSize: 13 }}>Aucun dossier disponible</p>
+                ) : (
+                  topFolders.map((f) => {
+                    const fId = idOf(f);
+                    const isSelected = copyDestFolderId === fId;
+                    return (
+                      <div key={fId}>
+                        <div
+                          style={{
+                            padding: '6px 10px',
+                            cursor: 'pointer',
+                            borderRadius: 6,
+                            background: isSelected ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
+                            border: isSelected ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid transparent',
+                            fontSize: 13,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                          }}
+                          onClick={() => {
+                            setCopyDestFolderId(fId);
+                            setCopyDestProjectId(selectedProject);
+                            if (!copyDestFolderChildren.has(fId)) {
+                              fetchFolderContents(selectedProject, fId).then((data) => {
+                                const folders = (data || []).filter((item) => item.type === 'folders');
+                                setCopyDestFolderChildren((m) => new Map(m).set(fId, folders));
+                              });
+                            }
+                          }}
+                        >
+                          📁 {nameOf(f)}
+                        </div>
+                        {/* Sous-dossiers */}
+                        {copyDestFolderChildren.has(fId) && Array.isArray(copyDestFolderChildren.get(fId)) && (
+                          <div style={{ paddingLeft: 20 }}>
+                            {copyDestFolderChildren.get(fId).map((sub) => {
+                              const subId = idOf(sub);
+                              const isSubSelected = copyDestFolderId === subId;
+                              return (
+                                <div
+                                  key={subId}
+                                  style={{
+                                    padding: '4px 10px',
+                                    cursor: 'pointer',
+                                    borderRadius: 6,
+                                    background: isSubSelected ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
+                                    border: isSubSelected ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid transparent',
+                                    fontSize: 12,
+                                  }}
+                                  onClick={() => {
+                                    setCopyDestFolderId(subId);
+                                    setCopyDestProjectId(selectedProject);
+                                  }}
+                                >
+                                  📁 {nameOf(sub)}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              {copyDestFolderId && (
+                <p style={{ fontSize: 12, color: '#f59e0b', marginTop: 6, fontWeight: 500 }}>
+                  Destination sélectionnée
+                </p>
+              )}
+            </div>
+
+            {/* Horaire */}
+            <div style={{ marginBottom: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 14, color: '#374151' }}>Heure :</label>
+                <select
+                  value={selectedHour}
+                  onChange={(e) => setSelectedHour(e.target.value)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    marginTop: 6,
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    border: '1px solid #d1d5db',
+                    fontSize: 14,
+                  }}
+                >
+                  {HOUR_OPTIONS.map((h) => (
+                    <option key={h} value={h}>{h}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontWeight: 600, fontSize: 14, color: '#374151' }}>Timezone :</label>
+                <select
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    marginTop: 6,
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    border: '1px solid #d1d5db',
+                    fontSize: 14,
+                  }}
+                >
+                  {timezoneOptions.map((tz) => (
+                    <option key={tz} value={tz}>{tz}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Boutons */}
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setShowCopyModal(false);
+                  setJobType(null);
+                }}
+                style={{ padding: '10px 20px' }}
+              >
+                Annuler
+              </Button>
+              <Button
+                onClick={handleCreateCopyJob}
+                disabled={!copyDestFolderId}
+                style={{
+                  padding: '10px 20px',
+                  background: copyDestFolderId
+                    ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                    : 'rgba(148, 163, 184, 0.3)',
+                  opacity: copyDestFolderId ? 1 : 0.5,
+                }}
+              >
+                📋 Planifier la copie
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

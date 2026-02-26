@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getPublishJobs, getPDFExportJobs, getRuns, getPDFExportRuns } from '../services/api';
+import { getPublishJobs, getPDFExportJobs, getCopyJobs, getRuns, getPDFExportRuns, getCopyRuns } from '../services/api';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Composant Card
@@ -73,8 +73,10 @@ export default function GlobalDashboard() {
   const navigate = useNavigate();
   const [publishJobs, setPublishJobs] = React.useState([]);
   const [pdfJobs, setPdfJobs] = React.useState([]);
+  const [copyJobs, setCopyJobs] = React.useState([]);
   const [publishRuns, setPublishRuns] = React.useState([]);
   const [pdfRuns, setPdfRuns] = React.useState([]);
+  const [copyRuns, setCopyRuns] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState('');
   const [timeFilter, setTimeFilter] = React.useState('forever'); // day, week, month, year, forever
@@ -100,17 +102,21 @@ export default function GlobalDashboard() {
     setLoading(true);
     setError('');
     try {
-      const [pjobs, pdfjobs, pruns, pdfruns] = await Promise.all([
+      const [pjobs, pdfjobs, cpjobs, pruns, pdfruns, cpruns] = await Promise.all([
         getPublishJobs({}),
         getPDFExportJobs({}),
+        getCopyJobs({}),
         getRuns({ limit: 100 }),
         getPDFExportRuns({ limit: 100 }),
+        getCopyRuns({ limit: 100 }),
       ]);
       
       setPublishJobs(pjobs);
       setPdfJobs(pdfjobs);
+      setCopyJobs(cpjobs);
       setPublishRuns(pruns);
       setPdfRuns(pdfruns);
+      setCopyRuns(cpruns);
     } catch (e) {
       setError(e?.message || 'Erreur chargement des données');
     } finally {
@@ -125,8 +131,8 @@ export default function GlobalDashboard() {
   }, []);
 
   // ========== CALCULS ==========
-  const allJobs = [...publishJobs, ...pdfJobs];
-  const allRuns = [...publishRuns, ...pdfRuns];
+  const allJobs = [...publishJobs, ...pdfJobs, ...copyJobs];
+  const allRuns = [...publishRuns, ...pdfRuns, ...copyRuns];
   
   // Filtrage temporel
   const getFilteredRuns = React.useCallback((runs) => {
@@ -458,7 +464,7 @@ export default function GlobalDashboard() {
               📊 Vue d'ensemble
             </h1>
             <p style={{ color: '#94a3b8', fontSize: 15, margin: 0 }}>
-              Toutes les tâches planifiées (Publish & PDF Export)
+              Toutes les tâches planifiées (Publish, PDF Export & Copie)
             </p>
           </div>
 
@@ -838,7 +844,8 @@ export default function GlobalDashboard() {
                 const hour = cronParts[1]?.padStart(2, '0') || '02';
                 const minute = cronParts[0]?.padStart(2, '0') || '00';
                 const isPublish = publishJobs.some(j => j.id === job.id);
-                const jobType = isPublish ? 'publish' : 'pdf-export';
+                const isCopy = copyJobs.some(j => j.id === job.id);
+                const jobType = isPublish ? 'publish' : isCopy ? 'file-copy' : 'pdf-export';
 
                 return (
                   <button
@@ -909,11 +916,11 @@ export default function GlobalDashboard() {
                         borderRadius: 4,
                         fontSize: 10,
                         fontWeight: 600,
-                        background: isPublish ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.25)',
-                        color: isPublish ? '#60a5fa' : '#34d399',
-                        border: `1px solid ${isPublish ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`
+                        background: isCopy ? 'rgba(245, 158, 11, 0.25)' : isPublish ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.25)',
+                        color: isCopy ? '#f59e0b' : isPublish ? '#60a5fa' : '#34d399',
+                        border: `1px solid ${isCopy ? 'rgba(245, 158, 11, 0.4)' : isPublish ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`
                       }}>
-                        {isPublish ? '🚀' : '📄'}
+                        {isCopy ? '📋' : isPublish ? '🚀' : '📄'}
                       </span>
                     </div>
                   </button>
@@ -949,6 +956,7 @@ export default function GlobalDashboard() {
                     const hour = cronParts[1]?.padStart(2, '0') || '02';
                     const minute = cronParts[0]?.padStart(2, '0') || '00';
                     const isPublish = publishJobs.some(j => j.id === job.id);
+                    const isCopyJob = copyJobs.some(j => j.id === job.id);
                     
                     // Trouver le dernier run pour ce job
                     const jobRuns = allRuns.filter(r => r.jobId === job.id);
@@ -1027,7 +1035,7 @@ export default function GlobalDashboard() {
                         onMouseLeave={(e) => {
                           e.currentTarget.style.background = index % 2 === 0 ? 'rgba(255, 255, 255, 0.03)' : 'transparent';
                         }}
-                        onClick={() => handleJobClick(job, isPublish ? 'publish' : 'pdf-export')}
+                        onClick={() => handleJobClick(job, isPublish ? 'publish' : isCopyJob ? 'file-copy' : 'pdf-export')}
                       >
                         <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 500, color: '#e2e8f0', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
                           {job.name || 'Sans nom'}
@@ -1038,11 +1046,11 @@ export default function GlobalDashboard() {
                             borderRadius: 6,
                             fontSize: 11,
                             fontWeight: 600,
-                            background: isPublish ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.25)',
-                            color: isPublish ? '#60a5fa' : '#34d399',
-                            border: `1px solid ${isPublish ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`
+                            background: isCopyJob ? 'rgba(245, 158, 11, 0.25)' : isPublish ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.25)',
+                            color: isCopyJob ? '#f59e0b' : isPublish ? '#60a5fa' : '#34d399',
+                            border: `1px solid ${isCopyJob ? 'rgba(245, 158, 11, 0.4)' : isPublish ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`
                           }}>
-                            {isPublish ? '🚀 Publish' : '📄 PDF'}
+                            {isCopyJob ? '📋 Copie' : isPublish ? '🚀 Publish' : '📄 PDF'}
                           </span>
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: 13, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>

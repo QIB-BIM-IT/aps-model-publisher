@@ -7,9 +7,10 @@
 const cron = require('node-cron');
 const cronParser = require('cron-parser');
 const logger = require('../config/logger');
-const { PublishJob, PublishRun, PDFExportJob, PDFExportRun, User } = require('../models');
+const { PublishJob, PublishRun, PDFExportJob, PDFExportRun, CopyJob, CopyRun, User } = require('../models');
 const apsPublishService = require('./apsPublish.service');
 const pdfExportSchedulerService = require('./pdfExportScheduler.service');
+const fileCopyService = require('./fileCopy.service');
 const emailService = require('./email.service');
 
 // Map<jobId, CronTask>
@@ -99,9 +100,10 @@ async function scheduleJob(job) {
  * Détermine le type de job (publish ou pdf-export)
  */
 function getJobType(job) {
+  if (job.constructor.name === 'CopyJob') return 'file-copy';
   if (job.constructor.name === 'PDFExportJob') return 'pdf-export';
   if (job.constructor.name === 'PublishJob') return 'publish';
-  // Fallback: vérifier les champs
+  if (job.destinationFolderId && job.files) return 'file-copy';
   if (job.fileUrn && job.selectionMode) return 'pdf-export';
   if (job.models && Array.isArray(job.models)) return 'publish';
   return null;
@@ -211,12 +213,10 @@ async function runJob(jobId, jobInstance = null, options = {}) {
 
     RUNNING.add(key);
     try {
-      // Chercher d'abord comme PDFExportJob
+      // Chercher dans tous les types de job
       job = await PDFExportJob.findByPk(jobId);
-      if (!job) {
-        // Sinon comme PublishJob
-        job = await PublishJob.findByPk(jobId);
-      }
+      if (!job) job = await CopyJob.findByPk(jobId);
+      if (!job) job = await PublishJob.findByPk(jobId);
 
       if (!job) {
         logger.warn(`[Scheduler] Job ${jobId} introuvable`);
@@ -256,7 +256,9 @@ async function runJob(jobId, jobInstance = null, options = {}) {
       const scheduledStartTime = job.nextRun ? new Date(job.nextRun) : null;
 
       // Créer le run selon le type
-      if (jobType === 'pdf-export') {
+      if (jobType === 'file-copy') {
+        run = await fileCopyService.startRun(job);
+      } else if (jobType === 'pdf-export') {
         run = await pdfExportSchedulerService.startRun(job);
       } else {
         run = await apsPublishService.startRun(job);
@@ -304,7 +306,9 @@ async function runJob(jobId, jobInstance = null, options = {}) {
     let summary = null;
 
     // Exécuter selon le type
-    if (jobType === 'pdf-export') {
+    if (jobType === 'file-copy') {
+      summary = await fileCopyService.executeRun(run);
+    } else if (jobType === 'pdf-export') {
       summary = await pdfExportSchedulerService.executeRun(run);
     } else {
       summary = await apsPublishService.executeRun(run);
@@ -312,7 +316,9 @@ async function runJob(jobId, jobInstance = null, options = {}) {
 
     // Finaliser selon le type
     let finishedRun = null;
-    if (jobType === 'pdf-export') {
+    if (jobType === 'file-copy') {
+      finishedRun = await fileCopyService.finishRun(run, summary);
+    } else if (jobType === 'pdf-export') {
       finishedRun = await pdfExportSchedulerService.finishRun(run, summary);
     } else {
       finishedRun = await apsPublishService.finishRun(run, {
@@ -379,7 +385,9 @@ async function runJob(jobId, jobInstance = null, options = {}) {
           message: e.message,
         };
 
-        if (jobType === 'pdf-export') {
+        if (jobType === 'file-copy') {
+          failedRun = await fileCopyService.finishRun(run, finishOptions);
+        } else if (jobType === 'pdf-export') {
           failedRun = await pdfExportSchedulerService.finishRun(run, finishOptions);
         } else {
           failedRun = await apsPublishService.finishRun(run, finishOptions);
@@ -423,12 +431,9 @@ async function runJobNow(jobId, options = {}) {
 
   let job = options.job || null;
   if (!job) {
-    // Chercher comme PDFExportJob d'abord
     job = await PDFExportJob.findByPk(jobId);
-    if (!job) {
-      // Sinon comme PublishJob
-      job = await PublishJob.findByPk(jobId);
-    }
+    if (!job) job = await CopyJob.findByPk(jobId);
+    if (!job) job = await PublishJob.findByPk(jobId);
   }
 
   if (!job) {
@@ -460,7 +465,9 @@ async function runJobNow(jobId, options = {}) {
     const jobType = getJobType(job);
     let run = null;
 
-    if (jobType === 'pdf-export') {
+    if (jobType === 'file-copy') {
+      run = await fileCopyService.startRun(job);
+    } else if (jobType === 'pdf-export') {
       run = await pdfExportSchedulerService.startRun(job);
     } else {
       run = await apsPublishService.startRun(job);
@@ -517,7 +524,23 @@ async function init() {
     logger.error(`[Scheduler] Crash-safety PDFExportRun error: ${e.message}`);
   }
 
-  // Au boot: planifie tous les jobs actifs (Publish + PDF Export)
+  // Crash safety pour CopyRun
+  try {
+    const hangingCopy = await CopyRun.findAll({ where: { status: 'running' } });
+    for (const r of hangingCopy) {
+      r.status = 'failed';
+      r.message = 'Process restart while running';
+      r.endedAt = new Date();
+      await r.save();
+    }
+    if (hangingCopy.length) {
+      logger.warn(`[Scheduler] ${hangingCopy.length} CopyRun(s) marqués failed (crash) au démarrage`);
+    }
+  } catch (e) {
+    logger.error(`[Scheduler] Crash-safety CopyRun error: ${e.message}`);
+  }
+
+  // Au boot: planifie tous les jobs actifs (Publish + PDF Export + Copy)
   try {
     const publishJobs = await PublishJob.findAll({
       where: { scheduleEnabled: true },
@@ -538,6 +561,17 @@ async function init() {
     logger.info(`[Scheduler] ${pdfJobs.length} PDFExportJob(s) planifié(s) au démarrage`);
   } catch (e) {
     logger.error(`[Scheduler] Erreur init PDFExportJobs: ${e.message}`);
+  }
+
+  try {
+    const copyJobs = await CopyJob.findAll({
+      where: { scheduleEnabled: true },
+      order: [['createdAt', 'ASC']],
+    });
+    for (const j of copyJobs) scheduleJob(j);
+    logger.info(`[Scheduler] ${copyJobs.length} CopyJob(s) planifié(s) au démarrage`);
+  } catch (e) {
+    logger.error(`[Scheduler] Erreur init CopyJobs: ${e.message}`);
   }
 }
 
