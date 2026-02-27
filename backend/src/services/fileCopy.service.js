@@ -174,27 +174,26 @@ class FileCopyService {
       }
       logger.info(`[FileCopy] Step 4b OK - signed upload URL obtained (uploadKey=${uploadKey.substring(0, 20)}...)`);
 
-      // 4c: Download content from signed S3 URL (no auth header needed)
-      logger.info(`[FileCopy] Step 4c - Downloading binary from S3...`);
+      // 4c+4d: Stream binary from source S3 directly to destination S3
+      logger.info(`[FileCopy] Step 4c - Streaming binary from source to destination S3...`);
       const downloadResp = await axios.get(downloadUrl, {
-        responseType: 'arraybuffer',
-        maxContentLength: Infinity,
+        responseType: 'stream',
         maxRedirects: 5,
+        timeout: 600000,
       });
-      const contentLength = downloadResp.data.length;
-      logger.info(`[FileCopy] Step 4c OK - downloaded ${(contentLength / 1024 / 1024).toFixed(2)} MB`);
+      const contentLength = parseInt(downloadResp.headers['content-length'], 10) || 0;
+      logger.info(`[FileCopy] Step 4c - Download stream opened (content-length=${contentLength} bytes / ${(contentLength / 1024 / 1024).toFixed(2)} MB)`);
 
-      // 4d: Upload content to signed S3 URL (no auth header needed)
-      logger.info(`[FileCopy] Step 4d - Uploading ${(contentLength / 1024 / 1024).toFixed(2)} MB to S3...`);
       await axios.put(uploadUrl, downloadResp.data, {
         headers: {
           'Content-Type': 'application/octet-stream',
-          'Content-Length': contentLength,
+          ...(contentLength ? { 'Content-Length': contentLength } : {}),
         },
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
+        timeout: 600000,
       });
-      logger.info(`[FileCopy] Step 4d OK - uploaded to S3`);
+      logger.info(`[FileCopy] Step 4d OK - streamed ${(contentLength / 1024 / 1024).toFixed(2)} MB to S3`);
 
       // 4e: Complete the upload (POST with uploadKey in body)
       logger.info(`[FileCopy] Step 4e - Completing upload...`);
