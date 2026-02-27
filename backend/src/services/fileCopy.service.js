@@ -159,14 +159,12 @@ class FileCopyService {
       }
       logger.info(`[FileCopy] Step 4a OK - signed download URL obtained (status=${signedDownloadResp.data?.status})`);
 
-      // 4b: Get signed upload URL for destination (no body for initiation, only query params)
-      const signedUploadUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(destBucket)}/objects/${encodeURIComponent(destObjectKey)}/signeds3upload`;
-      logger.info(`[FileCopy] Step 4b - Getting signed upload URL: bucket=${destBucket} key=${destObjectKey}`);
-      const signedUploadResp = await axios({
-        method: 'POST',
-        url: signedUploadUrl,
-        headers: { ...authHeader, 'Content-Type': 'application/json' },
-        params: { minutesExpiration: 10, parts: 1 },
+      // 4b: Get signed upload URL for destination (GET to initiate, POST is only for completion)
+      const signedUploadBaseUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(destBucket)}/objects/${encodeURIComponent(destObjectKey)}/signeds3upload`;
+      logger.info(`[FileCopy] Step 4b - Getting signed upload URL (GET): bucket=${destBucket} key=${destObjectKey}`);
+      const signedUploadResp = await axios.get(signedUploadBaseUrl, {
+        headers: authHeader,
+        params: { minutesExpiration: 10 },
       });
       const uploadUrl = signedUploadResp.data?.urls?.[0];
       const uploadKey = signedUploadResp.data?.uploadKey;
@@ -198,9 +196,9 @@ class FileCopyService {
       });
       logger.info(`[FileCopy] Step 4d OK - uploaded to S3`);
 
-      // 4e: Complete the upload (tell APS the upload is done)
+      // 4e: Complete the upload (POST with uploadKey in body)
       logger.info(`[FileCopy] Step 4e - Completing upload...`);
-      await axios.post(signedUploadUrl, { uploadKey }, {
+      await axios.post(signedUploadBaseUrl, { uploadKey }, {
         headers: { ...authHeader, 'Content-Type': 'application/json' },
       });
       logger.info(`[FileCopy] Step 4e OK - upload finalized`);
