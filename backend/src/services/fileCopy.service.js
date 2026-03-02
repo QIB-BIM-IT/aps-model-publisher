@@ -79,33 +79,33 @@ class FileCopyService {
     const headers = this._headers(accessToken);
     const displayName = fileName || 'file';
 
-    // Step 1: Check if file already exists in destination (for overwrite → new version)
+    // Step 1: Get the tip (latest version) of the source to obtain the versionId (required for copyFrom)
+    logger.info(`[FileCopy] Step 1 - Get tip: project=${sourceProjectId} item=${sourceFileUrn}`);
+    const tipUrl = `${BASE_URL}/data/v1/projects/${encodeURIComponent(sourceProjectId)}/items/${encodeURIComponent(sourceFileUrn)}/tip`;
+    let sourceVersionId;
+    try {
+      const tipResp = await axios.get(tipUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+      sourceVersionId = tipResp.data?.data?.id;
+    } catch (e) {
+      const status = e.response?.status || 'unknown';
+      const body = JSON.stringify(e.response?.data || {}).substring(0, 300);
+      throw new Error(`Step 1 échoué (GET tip) HTTP ${status}: ${body}`);
+    }
+    if (!sourceVersionId) throw new Error('Step 1: Impossible de récupérer le versionId source');
+    logger.info(`[FileCopy] Step 1 OK - sourceVersionId=${sourceVersionId}`);
+
+    // Step 2: Check if file already exists in destination (for overwrite → new version)
     let existingItemId = null;
     if (overwriteExisting) {
-      logger.info(`[FileCopy] Step 1 - Check existing: folder=${destinationFolderId} name=${displayName}`);
+      logger.info(`[FileCopy] Step 2 - Check existing: folder=${destinationFolderId} name=${displayName}`);
       existingItemId = await this._findExistingItem(accessToken, destinationProjectId, destinationFolderId, displayName);
-      logger.info(`[FileCopy] Step 1 OK - existingItemId=${existingItemId || 'none (new file)'}`);
+      logger.info(`[FileCopy] Step 2 OK - existingItemId=${existingItemId || 'none (new file)'}`);
     }
 
     if (existingItemId) {
-      // Overwrite: get the tip versionId of the source, then POST /versions?copyFrom=versionId
-      logger.info(`[FileCopy] Step 2 - Get source tip version for overwrite`);
-      const tipUrl = `${BASE_URL}/data/v1/projects/${encodeURIComponent(sourceProjectId)}/items/${encodeURIComponent(sourceFileUrn)}/tip`;
-      let sourceVersionId;
-      try {
-        const tipResp = await axios.get(tipUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-        sourceVersionId = tipResp.data?.data?.id;
-      } catch (e) {
-        const status = e.response?.status || 'unknown';
-        const body = JSON.stringify(e.response?.data || {}).substring(0, 300);
-        throw new Error(`Step 2 échoué (GET tip) HTTP ${status}: ${body}`);
-      }
-      if (!sourceVersionId) throw new Error('Step 2: Impossible de récupérer le versionId source');
-      logger.info(`[FileCopy] Step 2 OK - sourceVersionId=${sourceVersionId}`);
-
-      // Step 3: Create new version via copyFrom
+      // Overwrite: POST /data/v1/versions?copyFrom=versionId
       logger.info(`[FileCopy] Step 3 - POST /versions?copyFrom for existing item: ${existingItemId}`);
-      const url = `${BASE_URL}/data/v2/projects/${encodeURIComponent(destinationProjectId)}/versions`;
+      const url = `${BASE_URL}/data/v1/projects/${encodeURIComponent(destinationProjectId)}/versions`;
       const payload = {
         jsonapi: { version: '1.0' },
         data: {
@@ -131,34 +131,43 @@ class FileCopyService {
         throw new Error(`Step 3 échoué (POST versions copyFrom) HTTP ${status}: ${body}`);
       }
     } else {
-      // New file: POST /items?copyFrom=sourceItemId
-      logger.info(`[FileCopy] Step 2 - POST /items?copyFrom to folder: ${destinationFolderId}`);
-      const url = `${BASE_URL}/data/v2/projects/${encodeURIComponent(destinationProjectId)}/items`;
+      // New file: POST /data/v1/items?copyFrom=versionId (URL-encoded)
+      logger.info(`[FileCopy] Step 3 - POST /items?copyFrom to folder: ${destinationFolderId} (versionId=${sourceVersionId})`);
+      const url = `${BASE_URL}/data/v1/projects/${encodeURIComponent(destinationProjectId)}/items`;
       const payload = {
         jsonapi: { version: '1.0' },
         data: {
           type: 'items',
-          attributes: {
-            displayName,
-          },
           relationships: {
+            tip: {
+              data: { type: 'versions', id: '1' },
+            },
             parent: {
               data: { type: 'folders', id: destinationFolderId },
             },
           },
         },
+        included: [
+          {
+            type: 'versions',
+            id: '1',
+            attributes: {
+              name: displayName,
+            },
+          },
+        ],
       };
       try {
         const resp = await axios.post(url, payload, {
           headers,
-          params: { copyFrom: sourceFileUrn },
+          params: { copyFrom: sourceVersionId },
         });
-        logger.info(`[FileCopy] Step 2 OK - item created: ${resp.data?.data?.id}`);
+        logger.info(`[FileCopy] Step 3 OK - item created: ${resp.data?.data?.id}`);
         return { action: 'created', itemId: resp.data?.data?.id };
       } catch (e) {
         const status = e.response?.status || 'unknown';
         const body = JSON.stringify(e.response?.data || {}).substring(0, 500);
-        throw new Error(`Step 2 échoué (POST items copyFrom) HTTP ${status}: ${body}`);
+        throw new Error(`Step 3 échoué (POST items copyFrom) HTTP ${status}: ${body}`);
       }
     }
   }
