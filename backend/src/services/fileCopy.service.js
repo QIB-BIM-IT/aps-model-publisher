@@ -76,9 +76,7 @@ class FileCopyService {
   }
 
   async _copyFile({ accessToken, sourceProjectId, sourceFileUrn, fileName, destinationProjectId, destinationFolderId, overwriteExisting }) {
-    const headers = this._headers(accessToken);
-
-    // Step 1: Get the tip (latest version) of the source file
+    // Step 1: Get the tip (latest version) of the source file to obtain its storageId
     logger.info(`[FileCopy] Step 1 - Get tip: project=${sourceProjectId} item=${sourceFileUrn}`);
     const tipUrl = `${BASE_URL}/data/v1/projects/${encodeURIComponent(sourceProjectId)}/items/${encodeURIComponent(sourceFileUrn)}/tip`;
     let tipData;
@@ -93,133 +91,26 @@ class FileCopyService {
 
     if (!tipData) throw new Error('Step 1: Impossible de récupérer la version source');
 
-    const storageId = tipData.relationships?.storage?.data?.id;
-    if (!storageId) throw new Error('Step 1: Storage introuvable pour le fichier source');
+    const sourceStorageId = tipData.relationships?.storage?.data?.id;
+    if (!sourceStorageId) throw new Error('Step 1: Storage introuvable pour le fichier source');
 
     const displayName = fileName || tipData.attributes?.displayName || 'file';
-    const { bucket: sourceBucket, objectKey: sourceObjectKey } = this._parseStorageId(storageId);
-    if (!sourceBucket || !sourceObjectKey) throw new Error(`Step 1: Format storageId invalide: ${storageId}`);
-    logger.info(`[FileCopy] Step 1 OK - source: bucket=${sourceBucket} key=${sourceObjectKey} name=${displayName} storageId=${storageId}`);
+    logger.info(`[FileCopy] Step 1 OK - name=${displayName} sourceStorageId=${sourceStorageId}`);
 
     // Step 2: Check if file already exists in destination
     let existingItemId = null;
-    if (overwriteExisting) {
-      logger.info(`[FileCopy] Step 2 - Check existing: folder=${destinationFolderId} name=${displayName}`);
-      existingItemId = await this._findExistingItem(accessToken, destinationProjectId, destinationFolderId, displayName);
-      logger.info(`[FileCopy] Step 2 OK - existingItemId=${existingItemId || 'none (new file)'}`);
-    }
+    logger.info(`[FileCopy] Step 2 - Check existing: folder=${destinationFolderId} name=${displayName}`);
+    existingItemId = await this._findExistingItem(accessToken, destinationProjectId, destinationFolderId, displayName);
+    logger.info(`[FileCopy] Step 2 OK - existingItemId=${existingItemId || 'none (new file)'}`);
 
-    // Step 3: Create storage in destination folder
-    logger.info(`[FileCopy] Step 3 - Create dest storage: project=${destinationProjectId} folder=${destinationFolderId}`);
-    const storageUrl = `${BASE_URL}/data/v1/projects/${encodeURIComponent(destinationProjectId)}/storage`;
-    const storagePayload = {
-      jsonapi: { version: '1.0' },
-      data: {
-        type: 'objects',
-        attributes: { name: displayName },
-        relationships: {
-          target: {
-            data: { type: 'folders', id: destinationFolderId },
-          },
-        },
-      },
-    };
-
-    let targetStorageId;
-    try {
-      const storageResp = await axios.post(storageUrl, storagePayload, { headers });
-      targetStorageId = storageResp.data?.data?.id;
-    } catch (e) {
-      const status = e.response?.status || 'unknown';
-      const body = JSON.stringify(e.response?.data || {}).substring(0, 300);
-      throw new Error(`Step 3 échoué (POST storage) HTTP ${status}: ${body}`);
-    }
-    if (!targetStorageId) throw new Error('Step 3: Impossible de créer le storage de destination');
-
-    const { bucket: destBucket, objectKey: destObjectKey } = this._parseStorageId(targetStorageId);
-    if (!destBucket || !destObjectKey) throw new Error(`Step 3: Format targetStorageId invalide: ${targetStorageId}`);
-    logger.info(`[FileCopy] Step 3 OK - dest: bucket=${destBucket} key=${destObjectKey} targetStorageId=${targetStorageId}`);
-
-    // Step 4: Transfer binary via signed S3 URLs (required since legacy OSS endpoints are deprecated)
-    logger.info(`[FileCopy] Step 4 - Transfer binary via signed S3 URLs`);
-    try {
-      const authHeader = { Authorization: `Bearer ${accessToken}` };
-
-      // 4a: Get signed download URL for source
-      const signedDownloadUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(sourceBucket)}/objects/${encodeURIComponent(sourceObjectKey)}/signeds3download`;
-      logger.info(`[FileCopy] Step 4a - Getting signed download URL: bucket=${sourceBucket} key=${sourceObjectKey}`);
-      const signedDownloadResp = await axios.get(signedDownloadUrl, {
-        headers: authHeader,
-        params: { minutesExpiration: 10 },
-      });
-      const downloadUrl = signedDownloadResp.data?.url;
-      if (!downloadUrl) {
-        logger.error(`[FileCopy] Step 4a - Response: ${JSON.stringify(signedDownloadResp.data).substring(0, 500)}`);
-        throw new Error('Step 4a: Signed download URL introuvable dans la réponse');
-      }
-      logger.info(`[FileCopy] Step 4a OK - signed download URL obtained (status=${signedDownloadResp.data?.status})`);
-
-      // 4b: Get signed upload URL for destination (GET to initiate, POST is only for completion)
-      const signedUploadBaseUrl = `${BASE_URL}/oss/v2/buckets/${encodeURIComponent(destBucket)}/objects/${encodeURIComponent(destObjectKey)}/signeds3upload`;
-      logger.info(`[FileCopy] Step 4b - Getting signed upload URL (GET): bucket=${destBucket} key=${destObjectKey}`);
-      const signedUploadResp = await axios.get(signedUploadBaseUrl, {
-        headers: authHeader,
-        params: { minutesExpiration: 10 },
-      });
-      const uploadUrl = signedUploadResp.data?.urls?.[0];
-      const uploadKey = signedUploadResp.data?.uploadKey;
-      if (!uploadUrl || !uploadKey) {
-        logger.error(`[FileCopy] Step 4b - Response: ${JSON.stringify(signedUploadResp.data).substring(0, 500)}`);
-        throw new Error('Step 4b: Signed upload URL ou uploadKey introuvable');
-      }
-      logger.info(`[FileCopy] Step 4b OK - signed upload URL obtained (uploadKey=${uploadKey.substring(0, 20)}...)`);
-
-      // 4c+4d: Stream binary from source S3 directly to destination S3
-      logger.info(`[FileCopy] Step 4c - Streaming binary from source to destination S3...`);
-      const downloadResp = await axios.get(downloadUrl, {
-        responseType: 'stream',
-        maxRedirects: 5,
-        timeout: 600000,
-      });
-      const contentLength = parseInt(downloadResp.headers['content-length'], 10) || 0;
-      logger.info(`[FileCopy] Step 4c - Download stream opened (content-length=${contentLength} bytes / ${(contentLength / 1024 / 1024).toFixed(2)} MB)`);
-
-      await axios.put(uploadUrl, downloadResp.data, {
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          ...(contentLength ? { 'Content-Length': contentLength } : {}),
-        },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        timeout: 600000,
-      });
-      logger.info(`[FileCopy] Step 4d OK - streamed ${(contentLength / 1024 / 1024).toFixed(2)} MB to S3`);
-
-      // 4e: Complete the upload (POST with uploadKey in body)
-      logger.info(`[FileCopy] Step 4e - Completing upload...`);
-      await axios.post(signedUploadBaseUrl, { uploadKey }, {
-        headers: { ...authHeader, 'Content-Type': 'application/json' },
-      });
-      logger.info(`[FileCopy] Step 4e OK - upload finalized`);
-    } catch (e) {
-      const status = e.response?.status || 'unknown';
-      let body = '';
-      if (e.response?.data) {
-        if (Buffer.isBuffer(e.response.data) || e.response.data instanceof ArrayBuffer) {
-          body = Buffer.from(e.response.data).toString('utf8').substring(0, 300);
-        } else {
-          body = JSON.stringify(e.response.data).substring(0, 300);
-        }
-      }
-      throw new Error(`Step 4 échoué HTTP ${status}: ${e.message} - ${body}`);
-    }
-
-    // Step 5: Create item or new version in destination
-    logger.info(`[FileCopy] Step 5 - Create ${existingItemId ? 'new version' : 'new item'}: ${displayName}`);
+    // Step 3: Create item or new version referencing the SOURCE storageId directly
+    // No binary transfer needed - ACC reuses the existing storage object (server-side copy)
     if (existingItemId) {
-      return await this._createNewVersion(accessToken, destinationProjectId, existingItemId, displayName, targetStorageId);
+      logger.info(`[FileCopy] Step 3 - Create new version for existing item: ${existingItemId}`);
+      return await this._createNewVersion(accessToken, destinationProjectId, existingItemId, displayName, sourceStorageId);
     } else {
-      return await this._createNewItem(accessToken, destinationProjectId, destinationFolderId, displayName, targetStorageId);
+      logger.info(`[FileCopy] Step 3 - Create new item in folder: ${destinationFolderId}`);
+      return await this._createNewItem(accessToken, destinationProjectId, destinationFolderId, displayName, sourceStorageId);
     }
   }
 
@@ -276,12 +167,12 @@ class FileCopyService {
 
     try {
       const resp = await axios.post(url, payload, { headers });
-      logger.info(`[FileCopy] Step 5 OK - item created: ${resp.data?.data?.id}`);
+      logger.info(`[FileCopy] Step 3 OK - item created: ${resp.data?.data?.id}`);
       return { action: 'created', itemId: resp.data?.data?.id };
     } catch (e) {
       const status = e.response?.status || 'unknown';
       const body = JSON.stringify(e.response?.data || {}).substring(0, 500);
-      throw new Error(`Step 5 échoué (POST items) HTTP ${status}: ${body}`);
+      throw new Error(`Step 3 échoué (POST items) HTTP ${status}: ${body}`);
     }
   }
 
@@ -308,26 +199,13 @@ class FileCopyService {
 
     try {
       const resp = await axios.post(url, payload, { headers });
-      logger.info(`[FileCopy] Step 5 OK - version created: ${resp.data?.data?.id}`);
+      logger.info(`[FileCopy] Step 3 OK - version created: ${resp.data?.data?.id}`);
       return { action: 'versioned', versionId: resp.data?.data?.id };
     } catch (e) {
       const status = e.response?.status || 'unknown';
       const body = JSON.stringify(e.response?.data || {}).substring(0, 500);
-      throw new Error(`Step 5 échoué (POST versions) HTTP ${status}: ${body}`);
+      throw new Error(`Step 3 échoué (POST versions) HTTP ${status}: ${body}`);
     }
-  }
-
-  _parseStorageId(storageId) {
-    if (!storageId) return { bucket: null, objectKey: null };
-    const slashIdx = storageId.indexOf('/');
-    if (slashIdx === -1) return { bucket: null, objectKey: null };
-    const prefix = storageId.substring(0, slashIdx);
-    const objectKey = storageId.substring(slashIdx + 1);
-    const osObjMarker = ':os.object:';
-    const markerIdx = prefix.indexOf(osObjMarker);
-    if (markerIdx === -1) return { bucket: null, objectKey: null };
-    const bucket = prefix.substring(markerIdx + osObjMarker.length);
-    return { bucket, objectKey };
   }
 
   _getFileExtensionType(displayName) {
