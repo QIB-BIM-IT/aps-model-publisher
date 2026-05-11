@@ -518,6 +518,110 @@ function TreeNode({ node, projectId, onLoadChildren, childrenMap, selected, onTo
   );
 }
 
+// Tree Node pour la sélection d'un dossier de destination (copie) — récursif, dossiers seulement
+function CopyDestFolderNode({
+  folder,
+  level = 0,
+  selectedFolderId,
+  onSelectFolder,
+  childrenMap,
+  onLoadChildren,
+  expandedSet,
+  onToggleExpand,
+}) {
+  const fId = idOf(folder);
+  const isSelected = selectedFolderId === fId;
+  const expanded = expandedSet.has(fId);
+  const kids = childrenMap.get(fId);
+  const loading = kids === 'loading';
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 8px',
+          paddingLeft: 8 + level * 14,
+          borderRadius: 6,
+          background: isSelected ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
+          border: isSelected ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid transparent',
+          fontSize: level === 0 ? 13 : 12,
+          transition: 'all 0.15s',
+        }}
+      >
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleExpand(fId);
+          }}
+          style={{
+            width: 20,
+            height: 20,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 11,
+            color: '#475569',
+            flexShrink: 0,
+          }}
+          title={expanded ? 'Réduire' : 'Développer'}
+        >
+          {expanded ? '▾' : '▸'}
+        </button>
+        <div
+          onClick={() => onSelectFolder(fId)}
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            cursor: 'pointer',
+            color: isSelected ? '#92400e' : '#1f2937',
+            fontWeight: isSelected ? 600 : 400,
+          }}
+        >
+          <span>📁</span>
+          <span style={{ wordBreak: 'break-word' }}>{nameOf(folder)}</span>
+        </div>
+      </div>
+      {expanded && (
+        <div>
+          {loading && (
+            <div style={{ paddingLeft: 28 + level * 14, fontSize: 12, color: '#9ca3af', padding: '4px 0' }}>
+              Chargement…
+            </div>
+          )}
+          {!loading && Array.isArray(kids) && kids.length === 0 && (
+            <div style={{ paddingLeft: 28 + level * 14, fontSize: 12, color: '#9ca3af', padding: '4px 0' }}>
+              (aucun sous-dossier)
+            </div>
+          )}
+          {!loading &&
+            Array.isArray(kids) &&
+            kids.map((sub) => (
+              <CopyDestFolderNode
+                key={idOf(sub)}
+                folder={sub}
+                level={level + 1}
+                selectedFolderId={selectedFolderId}
+                onSelectFolder={onSelectFolder}
+                childrenMap={childrenMap}
+                onLoadChildren={onLoadChildren}
+                expandedSet={expandedSet}
+                onToggleExpand={onToggleExpand}
+              />
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Composant Card moderne
 function Card({ children, title, style = {}, id }) {
   return (
@@ -635,6 +739,7 @@ export default function PlanningPage() {
   const [copyDestProjectId, setCopyDestProjectId] = React.useState('');
   const [copyDestFolderId, setCopyDestFolderId] = React.useState('');
   const [copyDestFolderChildren, setCopyDestFolderChildren] = React.useState(new Map());
+  const [expandedCopyDestFolders, setExpandedCopyDestFolders] = React.useState(new Set());
 
   const [runs, setRuns] = React.useState([]);
   const publishRunsRef = React.useRef([]);
@@ -884,6 +989,45 @@ export default function PlanningPage() {
       setChildrenMap((m) => new Map(m.set(folderId, [])));
       setError(e?.message || 'Erreur dossier');
     }
+  }
+
+  async function loadCopyDestChildren(folderId) {
+    if (!selectedProject || !folderId) return;
+    const current = copyDestFolderChildren.get(folderId);
+    if (current === 'loading' || Array.isArray(current)) return;
+    setCopyDestFolderChildren((m) => new Map(m).set(folderId, 'loading'));
+    try {
+      const data = await fetchFolderContents(selectedProject, folderId);
+      const folders = (data || []).filter(
+        (item) =>
+          item?.type === 'folders' ||
+          (typeof item?.attributes?.extension?.type === 'string' &&
+            item.attributes.extension.type.includes('folder'))
+      );
+      setCopyDestFolderChildren((m) => new Map(m).set(folderId, folders));
+    } catch (e) {
+      setCopyDestFolderChildren((m) => new Map(m).set(folderId, []));
+    }
+  }
+
+  function toggleCopyDestExpanded(folderId) {
+    setExpandedCopyDestFolders((s) => {
+      const nxt = new Set(s);
+      if (nxt.has(folderId)) {
+        nxt.delete(folderId);
+      } else {
+        nxt.add(folderId);
+      }
+      return nxt;
+    });
+    if (!copyDestFolderChildren.has(folderId)) {
+      loadCopyDestChildren(folderId);
+    }
+  }
+
+  function selectCopyDestFolder(folderId) {
+    setCopyDestFolderId(folderId);
+    setCopyDestProjectId(selectedProject);
   }
 
   function toggleSelect(itemId, nodeData) {
@@ -3227,71 +3371,23 @@ export default function PlanningPage() {
               <p style={{ fontSize: 12, color: '#6b7280', margin: '4px 0 8px' }}>
                 Sélectionnez un dossier dans le même projet
               </p>
-              <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8, padding: 8 }}>
+              <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: 8, padding: 8 }}>
                 {topFolders.length === 0 ? (
                   <p style={{ color: '#9ca3af', fontSize: 13 }}>Aucun dossier disponible</p>
                 ) : (
-                  topFolders.map((f) => {
-                    const fId = idOf(f);
-                    const isSelected = copyDestFolderId === fId;
-                    return (
-                      <div key={fId}>
-                        <div
-                          style={{
-                            padding: '6px 10px',
-                            cursor: 'pointer',
-                            borderRadius: 6,
-                            background: isSelected ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
-                            border: isSelected ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid transparent',
-                            fontSize: 13,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                          }}
-                          onClick={() => {
-                            setCopyDestFolderId(fId);
-                            setCopyDestProjectId(selectedProject);
-                            if (!copyDestFolderChildren.has(fId)) {
-                              fetchFolderContents(selectedProject, fId).then((data) => {
-                                const folders = (data || []).filter((item) => item.type === 'folders');
-                                setCopyDestFolderChildren((m) => new Map(m).set(fId, folders));
-                              });
-                            }
-                          }}
-                        >
-                          📁 {nameOf(f)}
-                        </div>
-                        {/* Sous-dossiers */}
-                        {copyDestFolderChildren.has(fId) && Array.isArray(copyDestFolderChildren.get(fId)) && (
-                          <div style={{ paddingLeft: 20 }}>
-                            {copyDestFolderChildren.get(fId).map((sub) => {
-                              const subId = idOf(sub);
-                              const isSubSelected = copyDestFolderId === subId;
-                              return (
-                                <div
-                                  key={subId}
-                                  style={{
-                                    padding: '4px 10px',
-                                    cursor: 'pointer',
-                                    borderRadius: 6,
-                                    background: isSubSelected ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
-                                    border: isSubSelected ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid transparent',
-                                    fontSize: 12,
-                                  }}
-                                  onClick={() => {
-                                    setCopyDestFolderId(subId);
-                                    setCopyDestProjectId(selectedProject);
-                                  }}
-                                >
-                                  📁 {nameOf(sub)}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
+                  topFolders.map((f) => (
+                    <CopyDestFolderNode
+                      key={idOf(f)}
+                      folder={f}
+                      level={0}
+                      selectedFolderId={copyDestFolderId}
+                      onSelectFolder={selectCopyDestFolder}
+                      childrenMap={copyDestFolderChildren}
+                      onLoadChildren={loadCopyDestChildren}
+                      expandedSet={expandedCopyDestFolders}
+                      onToggleExpand={toggleCopyDestExpanded}
+                    />
+                  ))
                 )}
               </div>
               {copyDestFolderId && (
