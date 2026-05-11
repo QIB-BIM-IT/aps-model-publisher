@@ -2816,10 +2816,18 @@ export default function PlanningPage() {
                       const cronParts = typeof j.cronExpression === 'string' ? j.cronExpression.trim().split(/\s+/) : [];
                       const minutePart = cronParts[0];
                       const hourPart = cronParts[1];
+                      const dowPart = cronParts[4];
                       const isSimpleTime = /^\d+$/.test(hourPart || '') && /^\d+$/.test(minutePart || '');
                       const displayTime = isSimpleTime
                         ? `${hourPart.padStart(2, '0')}:${minutePart.padStart(2, '0')}`
                         : 'Planification personnalisée';
+                      const isWeekly = /^\d+$/.test(dowPart || '');
+                      const dowLabel = isWeekly
+                        ? (DAY_OF_WEEK_OPTIONS.find((d) => d.value === Number(dowPart))?.label || '')
+                        : '';
+                      const recurrenceLabel = isSimpleTime
+                        ? (isWeekly ? `📆 Hebdo · ${dowLabel}` : '📅 Quotidien')
+                        : '';
                       const statusLabel = !j.scheduleEnabled ? 'Pausé' : j.status || 'idle';
                       const badgeStyles = !j.scheduleEnabled
                         ? { background: 'rgba(148, 163, 184, 0.2)', color: '#475569' }
@@ -2844,7 +2852,8 @@ export default function PlanningPage() {
                         >
                           <div style={{ fontWeight: 600, color: '#1f2937' }}>{j.name || 'Sans nom'}</div>
                           <div style={{ fontSize: 12, color: '#64748b' }}>
-                            {fileCount} fichier{fileCount > 1 ? 's' : ''} • 🕐 {displayTime} • {j.timezone || 'UTC'}
+                            {fileCount} fichier{fileCount > 1 ? 's' : ''} • 🕐 {displayTime}
+                            {recurrenceLabel ? ` • ${recurrenceLabel}` : ''} • {j.timezone || 'UTC'}
                           </div>
                           <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
                             Planifiée par : <span style={{ fontWeight: 500, color: '#475569' }}>{j.userName || 'Utilisateur inconnu'}</span>
@@ -3397,47 +3406,114 @@ export default function PlanningPage() {
               )}
             </div>
 
-            {/* Horaire */}
-            <div style={{ marginBottom: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <label style={{ fontWeight: 600, fontSize: 14, color: '#374151' }}>Heure :</label>
-                <select
-                  value={selectedHour}
-                  onChange={(e) => setSelectedHour(e.target.value)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    marginTop: 6,
-                    padding: '10px 14px',
-                    borderRadius: 8,
-                    border: '1px solid #d1d5db',
-                    fontSize: 14,
-                  }}
-                >
-                  {HOUR_OPTIONS.map((h) => (
-                    <option key={h.value} value={h.value}>{h.label}</option>
-                  ))}
-                </select>
+            {/* Planification */}
+            <div style={{ marginBottom: 16 }}>
+              <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+                🕐 Planification
+              </h4>
+
+              {/* Type de récurrence */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4, display: 'block', marginBottom: 8 }}>
+                  Récurrence
+                </label>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="recurrence-copy"
+                      checked={recurrenceType === 'daily'}
+                      onChange={() => setRecurrenceType('daily')}
+                      style={{ marginRight: 8, cursor: 'pointer', accentColor: '#f59e0b' }}
+                    />
+                    <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>📅 Quotidien</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="recurrence-copy"
+                      checked={recurrenceType === 'weekly'}
+                      onChange={() => setRecurrenceType('weekly')}
+                      style={{ marginRight: 8, cursor: 'pointer', accentColor: '#f59e0b' }}
+                    />
+                    <span style={{ fontSize: 14, color: '#1f2937', fontWeight: 500 }}>📆 Hebdomadaire</span>
+                  </label>
+                </div>
               </div>
-              <div>
-                <label style={{ fontWeight: 600, fontSize: 14, color: '#374151' }}>Timezone :</label>
-                <select
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    marginTop: 6,
-                    padding: '10px 14px',
-                    borderRadius: 8,
-                    border: '1px solid #d1d5db',
-                    fontSize: 14,
-                  }}
-                >
-                  {timezoneOptions.map((tz) => (
-                    <option key={tz.value} value={tz.value}>{tz.label}</option>
-                  ))}
-                </select>
+
+              <div style={{ display: 'flex', gap: 12, alignItems: 'stretch', flexWrap: 'wrap' }}>
+                {recurrenceType === 'weekly' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 160px', minWidth: 160 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                      Jour de la semaine
+                    </label>
+                    <select
+                      value={selectedDayOfWeek}
+                      onChange={(e) => setSelectedDayOfWeek(Number(e.target.value))}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: 8,
+                        border: '1px solid #d1d5db',
+                        fontSize: 14,
+                        outline: 'none',
+                        cursor: 'pointer',
+                        background: '#fff',
+                      }}
+                    >
+                      {DAY_OF_WEEK_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 140px', minWidth: 140 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                    Heure
+                  </label>
+                  <select
+                    value={selectedHour}
+                    onChange={(e) => setSelectedHour(e.target.value)}
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 8,
+                      border: '1px solid #d1d5db',
+                      fontSize: 14,
+                      outline: 'none',
+                      cursor: 'pointer',
+                      background: '#fff',
+                    }}
+                  >
+                    {HOUR_OPTIONS.map((h) => (
+                      <option key={h.value} value={h.value}>{h.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 200px', minWidth: 200 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                    Fuseau horaire
+                  </label>
+                  <select
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 8,
+                      border: '1px solid #d1d5db',
+                      fontSize: 14,
+                      outline: 'none',
+                      cursor: 'pointer',
+                      background: '#fff',
+                    }}
+                  >
+                    {timezoneOptions.map((tz) => (
+                      <option key={tz.value} value={tz.value}>{tz.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
