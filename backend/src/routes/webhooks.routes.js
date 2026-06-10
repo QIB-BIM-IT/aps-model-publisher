@@ -183,35 +183,35 @@ router.post('/registrations/sync', authenticateToken, asyncHandler(async (req, r
  * Créer manuellement un webhook pour un projet
  */
 router.post('/registrations/project', authenticateToken, asyncHandler(async (req, res) => {
-  if (!webhookRegistrationService.isConfigured()) {
-    throw new ValidationError('Webhooks non configurés. Définissez WEBHOOKS_ENABLED, WEBHOOK_SECRET et WEBHOOK_CALLBACK_URL');
-  }
-
-  const { projectId, hubId, region } = req.body;
-  if (!projectId) {
-    throw new ValidationError('projectId requis');
-  }
-
-  const accessToken = await apsAuthService.ensureValidToken(req.userId);
+  const { projectId, hubId, region } = req.body || {};
   try {
+    if (!webhookRegistrationService.isConfigured()) {
+      return res.status(400).json({ success: false, message: 'Webhooks non configurés (WEBHOOKS_ENABLED/WEBHOOK_SECRET/WEBHOOK_CALLBACK_URL)' });
+    }
+    if (!projectId) {
+      return res.status(400).json({ success: false, message: 'projectId requis' });
+    }
+
+    const accessToken = await apsAuthService.ensureValidToken(req.userId);
     const webhook = await webhookRegistrationService.ensureProjectWebhook(accessToken, projectId, hubId, region || null);
 
     if (!webhook) {
-      throw new ValidationError('Impossible de créer le webhook');
+      return res.status(502).json({ success: false, message: 'Impossible de créer le webhook (résultat vide)' });
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Webhook créé',
       data: webhook,
     });
   } catch (err) {
-    // Exposer le vrai message d'erreur APS (le errorHandler global est désactivé)
-    logger.error(`[Webhooks] Echec enregistrement projet ${projectId}: ${err.message}`);
-    return res.status(err.apsStatus || 502).json({
+    // Le errorHandler global est désactivé: on renvoie nous-mêmes un JSON exploitable.
+    logger.error(`[Webhooks] Echec enregistrement projet ${projectId}: ${err.message}\n${err.stack}`);
+    return res.status(err.apsStatus || 500).json({
       success: false,
-      message: err.message,
+      message: err.message || 'Erreur inconnue',
       aps: err.apsBody || null,
+      stack: String(err.stack || '').split('\n').slice(0, 4),
     });
   }
 }));
