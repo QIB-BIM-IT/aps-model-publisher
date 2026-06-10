@@ -13,42 +13,50 @@ class WebhookRegistrationService {
     this.enabled = String(process.env.WEBHOOKS_ENABLED || 'false').toLowerCase() === 'true';
     this.callbackUrl = process.env.WEBHOOK_CALLBACK_URL;
     this.secret = process.env.WEBHOOK_SECRET;
-    this.secretRegistered = false;
+    // Region(s) ou le secret HMAC a deja ete enregistre cote Autodesk
+    this.secretRegisteredRegions = new Set();
   }
 
   /**
    * Vérifie si les webhooks sont configurés correctement
+   * @returns {boolean}
    */
   isConfigured() {
-    return this.enabled && this.callbackUrl && this.secret;
+    return !!(this.enabled && this.callbackUrl && this.secret);
   }
 
   /**
    * Enregistre le secret HMAC auprès d'Autodesk (une seule fois)
    * @param {string} accessToken - Token 2-legged ou 3-legged
    */
-  async registerSecret(accessToken) {
-    if (this.secretRegistered || !this.secret) {
+  async registerSecret(accessToken, region = null) {
+    if (!this.secret) {
+      return;
+    }
+    // Le secret doit etre enregistre dans la meme region que le hook
+    const regionKey = region || 'US';
+    if (this.secretRegisteredRegions.has(regionKey)) {
       return;
     }
 
     try {
+      const headers = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      };
+      if (region) headers['x-ads-region'] = region;
+
       await axios.post(
         `${APS_WEBHOOKS_BASE}/tokens`,
         { token: this.secret },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
+        { headers }
       );
-      this.secretRegistered = true;
-      logger.info('[WebhookRegistration] ✅ Secret HMAC enregistré auprès d\'Autodesk');
+      this.secretRegisteredRegions.add(regionKey);
+      logger.info(`[WebhookRegistration] ✅ Secret HMAC enregistré auprès d'Autodesk (région ${regionKey})`);
     } catch (error) {
       // 409 Conflict = secret déjà enregistré, c'est OK
       if (error.response?.status === 409) {
-        this.secretRegistered = true;
+        this.secretRegisteredRegions.add(regionKey);
         logger.debug('[WebhookRegistration] Secret déjà enregistré');
       } else {
         logger.warn(`[WebhookRegistration] ⚠️ Erreur enregistrement secret: ${error.response?.data?.message || error.message}`);
@@ -80,7 +88,7 @@ class WebhookRegistrationService {
    * @param {string} projectId - ID du projet (ex: b.xxxxx)
    * @param {string} hubId - ID du hub (optionnel)
    */
-  async ensureProjectWebhook(accessToken, projectId, hubId = null) {
+  async ensureProjectWebhook(accessToken, projectId, hubId = null, region = null) {
     if (!this.isConfigured()) {
       logger.debug('[WebhookRegistration] Webhooks non configurés, skip');
       return null;
@@ -97,10 +105,16 @@ class WebhookRegistrationService {
       return existing;
     }
 
-    // Enregistrer le secret si pas encore fait
-    await this.registerSecret(accessToken);
+    // Enregistrer le secret si pas encore fait (dans la meme region que le hook)
+    await this.registerSecret(accessToken, region);
 
     try {
+      const headers = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      };
+      if (region) headers['x-ads-region'] = region;
+
       // Créer le webhook via l'API Autodesk
       const response = await axios.post(
         `${APS_WEBHOOKS_BASE}/systems/data/events/${eventType}/hooks`,
@@ -116,12 +130,7 @@ class WebhookRegistrationService {
           },
           autoReactivateHook: true,
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
+        { headers }
       );
 
       const hookData = response.data;
@@ -141,21 +150,27 @@ class WebhookRegistrationService {
           urn: hookData.urn,
           createdBy: hookData.createdBy,
           system: hookData.system,
+          region: region || 'US',
         },
       });
 
       return registration;
     } catch (error) {
+      const status = error.response?.status;
       const errorMsg = error.response?.data?.message || error.response?.data?.detail || error.message;
-      logger.error(`[WebhookRegistration] ❌ Erreur création webhook projet ${projectId}: ${errorMsg}`);
-      
+      logger.error(`[WebhookRegistration] ❌ Erreur création webhook projet ${projectId}: ${status || ''} ${errorMsg}`);
+
       // Si le webhook existe déjà côté Autodesk (409), essayer de le récupérer
-      if (error.response?.status === 409) {
+      if (status === 409) {
         logger.info('[WebhookRegistration] Webhook existe déjà côté Autodesk, récupération...');
         return this.syncExistingWebhooks(accessToken, projectId);
       }
-      
-      return null;
+
+      // 🆕 Propager l'erreur reelle pour que la route puisse l'exposer (au lieu d'un 500 opaque)
+      const err = new Error(`APS ${status || 'error'}: ${errorMsg}`);
+      err.apsStatus = status;
+      err.apsBody = error.response?.data || null;
+      throw err;
     }
   }
 

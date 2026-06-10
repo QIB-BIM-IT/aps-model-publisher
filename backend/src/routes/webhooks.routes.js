@@ -187,23 +187,33 @@ router.post('/registrations/project', authenticateToken, asyncHandler(async (req
     throw new ValidationError('Webhooks non configurés. Définissez WEBHOOKS_ENABLED, WEBHOOK_SECRET et WEBHOOK_CALLBACK_URL');
   }
 
-  const { projectId, hubId } = req.body;
+  const { projectId, hubId, region } = req.body;
   if (!projectId) {
     throw new ValidationError('projectId requis');
   }
 
   const accessToken = await apsAuthService.ensureValidToken(req.userId);
-  const webhook = await webhookRegistrationService.ensureProjectWebhook(accessToken, projectId, hubId);
-  
-  if (!webhook) {
-    throw new ValidationError('Impossible de créer le webhook');
-  }
+  try {
+    const webhook = await webhookRegistrationService.ensureProjectWebhook(accessToken, projectId, hubId, region || null);
 
-  res.json({
-    success: true,
-    message: 'Webhook créé',
-    data: webhook,
-  });
+    if (!webhook) {
+      throw new ValidationError('Impossible de créer le webhook');
+    }
+
+    res.json({
+      success: true,
+      message: 'Webhook créé',
+      data: webhook,
+    });
+  } catch (err) {
+    // Exposer le vrai message d'erreur APS (le errorHandler global est désactivé)
+    logger.error(`[Webhooks] Echec enregistrement projet ${projectId}: ${err.message}`);
+    return res.status(err.apsStatus || 502).json({
+      success: false,
+      message: err.message,
+      aps: err.apsBody || null,
+    });
+  }
 }));
 
 /**
