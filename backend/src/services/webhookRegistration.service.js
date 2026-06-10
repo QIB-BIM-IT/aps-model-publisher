@@ -148,35 +148,49 @@ class WebhookRegistrationService {
       throw err;
     }
 
-    // Déterminer la région: explicite si fournie, sinon auto-détection par projet.
-    const effectiveRegion = region ? String(region).toUpperCase() : await this.detectProjectRegion(accessToken, projectId);
-    const apsRegion = effectiveRegion && effectiveRegion !== 'US' ? effectiveRegion : null;
+    // Récupérer les top-folders du projet en essayant les régions de data residency.
+    // On ne se fie pas à un endpoint de sondage: la région qui renvoie réellement
+    // des dossiers EST la région du projet (et donc celle des webhooks).
+    const hint = region ? String(region).toUpperCase() : null;
+    const regionOrder = hint
+      ? [hint, ...REGIONS.map((r) => r.toUpperCase()).filter((r) => r !== hint)]
+      : REGIONS.map((r) => r.toUpperCase());
 
-    // Enregistrer le secret dans la même région que les hooks.
-    await this.registerSecret(accessToken, apsRegion);
-
-    // Récupérer les top-folders du projet.
-    let topFolders;
-    try {
-      topFolders = await apsDataService.getTopFolders(hubId, projectId, accessToken);
-    } catch (error) {
-      const status = error.response?.status;
-      const detail = error.response?.data?.message || error.response?.data?.detail || error.message;
-      const err = new Error(`APS ${status || 'error'} (topFolders): ${detail}`);
-      err.apsStatus = status;
-      err.apsBody = error.response?.data || null;
-      throw err;
+    let folders = [];
+    let effectiveRegion = 'US';
+    let lastError = null;
+    for (const r of regionOrder) {
+      try {
+        const topFolders = await apsDataService.getTopFolders(hubId, projectId, accessToken, r);
+        const ids = (Array.isArray(topFolders) ? topFolders : [])
+          .map((f) => f && f.id)
+          .filter(Boolean);
+        if (ids.length > 0) {
+          folders = ids;
+          effectiveRegion = r;
+          this.projectRegionCache.set(projectId, r);
+          logger.info(`[WebhookRegistration] Top-folders trouvés pour ${projectId} en région ${r} (${ids.length})`);
+          break;
+        }
+      } catch (error) {
+        lastError = error;
+        // 404 attendu sur les mauvaises régions: on essaie la suivante.
+      }
     }
-
-    const folders = (Array.isArray(topFolders) ? topFolders : [])
-      .map((f) => f && f.id)
-      .filter(Boolean);
 
     if (folders.length === 0) {
-      const err = new Error('Aucun top-folder trouvé pour ce projet (impossible de créer le webhook folder)');
-      err.apsStatus = 404;
+      const detail = lastError
+        ? (lastError.response?.data?.message || lastError.response?.data?.detail || lastError.message)
+        : 'aucune région ne renvoie de dossiers';
+      const err = new Error(`Impossible de récupérer les top-folders pour ${projectId} (régions essayées: ${regionOrder.join(',')}): ${detail}`);
+      err.apsStatus = lastError?.response?.status || 404;
+      err.apsBody = lastError?.response?.data || null;
       throw err;
     }
+
+    const apsRegion = effectiveRegion !== 'US' ? effectiveRegion : null;
+    // Enregistrer le secret dans la même région que les hooks.
+    await this.registerSecret(accessToken, apsRegion);
 
     const registrations = [];
     const errors = [];
