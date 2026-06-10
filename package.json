@@ -4,8 +4,7 @@
   "private": true,
   "description": "Application de publication de modèles APS/ACC",
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "install:backend": "cd backend && npm cache clean --force && npm install --prefer-online",
