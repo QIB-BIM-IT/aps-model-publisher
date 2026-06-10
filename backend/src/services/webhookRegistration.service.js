@@ -6,7 +6,12 @@ const logger = require('../config/logger');
 const { apsConfig } = require('../config/aps.config');
 const { WebhookRegistration } = require('../models');
 
-const APS_WEBHOOKS_BASE = 'https://developer.api.autodesk.com/webhooks/v1';
+const APS_BASE = 'https://developer.api.autodesk.com';
+const APS_WEBHOOKS_BASE = `${APS_BASE}/webhooks/v1`;
+
+// Régions Data Management v2 (ordre d'essai). Doivent matcher l'enum x-ads-region des Webhooks.
+// US = USA, CAN = Canada, EMEA = Europe, GBR = UK, DEU = Allemagne, JPN = Japon, IND = Inde, AUS = Australie
+const REGIONS = ['us', 'can', 'emea', 'gbr', 'deu', 'jpn', 'ind', 'aus'];
 
 class WebhookRegistrationService {
   constructor() {
@@ -15,6 +20,42 @@ class WebhookRegistrationService {
     this.secret = process.env.WEBHOOK_SECRET;
     // Region(s) ou le secret HMAC a deja ete enregistre cote Autodesk
     this.secretRegisteredRegions = new Set();
+    // Cache projectId -> region (US/EMEA/CAN...) pour eviter de re-sonder a chaque appel
+    this.projectRegionCache = new Map();
+  }
+
+  /**
+   * Détecte la région d'un projet en sondant les endpoints Data Management régionaux.
+   * Réutilise la même approche que la publication (GET /data/v2/regions/:region/projects/:id).
+   * @param {string} accessToken
+   * @param {string} projectId
+   * @returns {Promise<string>} region en MAJUSCULES (ex: 'US', 'CAN', 'EMEA'); 'US' par défaut
+   */
+  async detectProjectRegion(accessToken, projectId) {
+    if (this.projectRegionCache.has(projectId)) {
+      return this.projectRegionCache.get(projectId);
+    }
+    for (const region of REGIONS) {
+      try {
+        const url = `${APS_BASE}/data/v2/regions/${region}/projects/${encodeURIComponent(projectId)}`;
+        const resp = await axios.get(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 8000,
+          validateStatus: () => true,
+        });
+        if (resp.status === 200) {
+          const up = region.toUpperCase();
+          this.projectRegionCache.set(projectId, up);
+          logger.info(`[WebhookRegistration] Région détectée pour ${projectId}: ${up}`);
+          return up;
+        }
+      } catch (_e) {
+        // région suivante
+      }
+    }
+    logger.warn(`[WebhookRegistration] Région indéterminée pour ${projectId}, fallback US`);
+    this.projectRegionCache.set(projectId, 'US');
+    return 'US';
   }
 
   /**
@@ -105,15 +146,21 @@ class WebhookRegistrationService {
       return existing;
     }
 
+    // Déterminer la région: explicite si fournie, sinon auto-détection par projet.
+    // Le webhook DOIT être créé dans la région des données (US/CAN/EMEA...).
+    let effectiveRegion = region ? String(region).toUpperCase() : await this.detectProjectRegion(accessToken, projectId);
+    // 'US' est la région par défaut: header optionnel.
+    const apsRegion = effectiveRegion && effectiveRegion !== 'US' ? effectiveRegion : null;
+
     // Enregistrer le secret si pas encore fait (dans la meme region que le hook)
-    await this.registerSecret(accessToken, region);
+    await this.registerSecret(accessToken, apsRegion);
 
     try {
       const headers = {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       };
-      if (region) headers['x-ads-region'] = region;
+      if (apsRegion) headers['x-ads-region'] = apsRegion;
 
       // Créer le webhook via l'API Autodesk
       const response = await axios.post(
@@ -150,10 +197,11 @@ class WebhookRegistrationService {
           urn: hookData.urn,
           createdBy: hookData.createdBy,
           system: hookData.system,
-          region: region || 'US',
+          region: effectiveRegion || 'US',
         },
       });
 
+      logger.info(`[WebhookRegistration] ✅ Webhook ${projectId} créé en région ${effectiveRegion || 'US'}`);
       return registration;
     } catch (error) {
       const status = error.response?.status;
@@ -336,13 +384,14 @@ class WebhookRegistrationService {
     }
 
     try {
+      const headers = { 'Authorization': `Bearer ${accessToken}` };
+      const storedRegion = registration.metadata?.region;
+      if (storedRegion && String(storedRegion).toUpperCase() !== 'US') {
+        headers['x-ads-region'] = String(storedRegion).toUpperCase();
+      }
       await axios.delete(
         `${APS_WEBHOOKS_BASE}/systems/data/events/${registration.eventType}/hooks/${registration.apsHookId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
+        { headers }
       );
       logger.info(`[WebhookRegistration] ✅ Webhook supprimé: ${registration.apsHookId}`);
     } catch (error) {
