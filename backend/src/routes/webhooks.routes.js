@@ -17,6 +17,11 @@ const {
 // Middleware pour parser le body en string (pour vérification signature)
 const rawBodyParser = express.raw({ type: 'application/json', limit: '2mb' });
 
+// ⚠️ Ce routeur est monté AVANT express.json() (pour préserver le body brut du
+// callback /aps). Les routes de registration attendent du JSON: on leur applique
+// donc un parser JSON local.
+const jsonParser = express.json({ limit: '2mb' });
+
 /**
  * POST /api/webhooks/aps
  * Endpoint principal pour recevoir les webhooks Autodesk APS
@@ -111,7 +116,7 @@ router.get('/status', asyncHandler(async (req, res) => {
  * Endpoint de test (développement uniquement)
  * Permet de tester la logique sans passer par Autodesk
  */
-router.post('/test', asyncHandler(async (req, res) => {
+router.post('/test', jsonParser, asyncHandler(async (req, res) => {
   if (process.env.NODE_ENV === 'production') {
     throw new ValidationError('Endpoint de test non disponible en production');
   }
@@ -160,7 +165,7 @@ router.get('/registrations', authenticateToken, asyncHandler(async (req, res) =>
  * POST /api/webhooks/registrations/sync
  * Synchronise les webhooks existants côté Autodesk avec notre base
  */
-router.post('/registrations/sync', authenticateToken, asyncHandler(async (req, res) => {
+router.post('/registrations/sync', authenticateToken, jsonParser, asyncHandler(async (req, res) => {
   if (!webhookRegistrationService.isConfigured()) {
     throw new ValidationError('Webhooks non configurés. Définissez WEBHOOKS_ENABLED, WEBHOOK_SECRET et WEBHOOK_CALLBACK_URL');
   }
@@ -182,7 +187,7 @@ router.post('/registrations/sync', authenticateToken, asyncHandler(async (req, r
  * POST /api/webhooks/registrations/project
  * Créer manuellement un webhook pour un projet
  */
-router.post('/registrations/project', authenticateToken, asyncHandler(async (req, res) => {
+router.post('/registrations/project', authenticateToken, jsonParser, asyncHandler(async (req, res) => {
   const { projectId, hubId, region } = req.body || {};
   try {
     if (!webhookRegistrationService.isConfigured()) {
