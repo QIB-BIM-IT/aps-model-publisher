@@ -35,7 +35,11 @@ router.post('/aps', rawBodyParser, asyncHandler(async (req, res) => {
     });
   }
 
-  const signature = req.headers['x-webhook-signature'] || req.headers['x-autodesk-signature'];
+  // Autodesk APS envoie la signature dans le header x-adsk-signature
+  // (on garde les anciens noms en repli au cas ou)
+  const signature = req.headers['x-adsk-signature']
+    || req.headers['x-webhook-signature']
+    || req.headers['x-autodesk-signature'];
   const payloadString = req.body.toString('utf8');
 
   if (!signature) {

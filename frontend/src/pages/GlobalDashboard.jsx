@@ -78,7 +78,9 @@ export default function GlobalDashboard() {
   const [pdfRuns, setPdfRuns] = React.useState([]);
   const [copyRuns, setCopyRuns] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [lastUpdated, setLastUpdated] = React.useState(null);
   const [timeFilter, setTimeFilter] = React.useState('forever'); // day, week, month, year, forever
 
   function handleJobClick(job, jobType) {
@@ -98,17 +100,34 @@ export default function GlobalDashboard() {
     });
   }
 
-  async function loadAllData() {
-    setLoading(true);
+  // 🆕 Calcule la borne 'from' (ISO) correspondant a la periode selectionnee.
+  // Pour 'forever', on envoie l'epoch afin que le backend autorise un plafond eleve.
+  const getRunsQuery = React.useCallback(() => {
+    const now = Date.now();
+    const windows = {
+      day: 24 * 60 * 60 * 1000,
+      week: 7 * 24 * 60 * 60 * 1000,
+      month: 30 * 24 * 60 * 60 * 1000,
+      year: 365 * 24 * 60 * 60 * 1000,
+    };
+    const from = timeFilter === 'forever'
+      ? new Date(0).toISOString()
+      : new Date(now - windows[timeFilter]).toISOString();
+    return { from, limit: 5000 };
+  }, [timeFilter]);
+
+  const loadAllData = React.useCallback(async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true); else setLoading(true);
     setError('');
     try {
+      const runsQuery = getRunsQuery();
       const [pjobs, pdfjobs, cpjobs, pruns, pdfruns, cpruns] = await Promise.all([
         getPublishJobs({}),
         getPDFExportJobs({}),
         getCopyJobs({}),
-        getRuns({ limit: 100 }),
-        getPDFExportRuns({ limit: 100 }),
-        getCopyRuns({ limit: 100 }),
+        getRuns(runsQuery),
+        getPDFExportRuns(runsQuery),
+        getCopyRuns(runsQuery),
       ]);
       
       setPublishJobs(pjobs);
@@ -117,18 +136,20 @@ export default function GlobalDashboard() {
       setPublishRuns(pruns);
       setPdfRuns(pdfruns);
       setCopyRuns(cpruns);
+      setLastUpdated(new Date());
     } catch (e) {
       setError(e?.message || 'Erreur chargement des données');
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false); else setLoading(false);
     }
-  }
+  }, [getRunsQuery]);
 
   React.useEffect(() => {
+    // Rechargement complet quand la periode change, puis polling silencieux toutes les 30s
     loadAllData();
-    const interval = setInterval(loadAllData, 30000);
+    const interval = setInterval(() => loadAllData({ silent: true }), 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadAllData]);
 
   // ========== CALCULS ==========
   const allJobs = [...publishJobs, ...pdfJobs, ...copyJobs];
@@ -176,8 +197,9 @@ export default function GlobalDashboard() {
   // 🆕 Métriques de performance par type de job
   const performanceMetrics = React.useMemo(() => {
     // Identifier les runs publish vs PDF
+    // Statuts reels en BD: success / partial / failed (pas de 'completed')
     const completedRuns = filteredRuns.filter(r => 
-      r.status === 'success' || r.status === 'partial' || r.status === 'completed'
+      r.status === 'success' || r.status === 'partial'
     );
     
     const publishRunsFiltered = completedRuns.filter(r => {
@@ -196,8 +218,7 @@ export default function GlobalDashboard() {
     
     // Calculer temps moyen pour publish
     const publishDurations = publishRunsFiltered.map(r => {
-      // 🆕 TODO: Quand webhooks seront actifs, utiliser webhookEndTime - startedAt
-      // Pour l'instant, utiliser durationMs ou endedAt - startedAt
+      // Temps reel via webhook (webhookEndTime) si disponible, sinon duree interne
       if (r.stats?.webhookEndTime) {
         return new Date(r.stats.webhookEndTime) - new Date(r.startedAt);
       }
@@ -206,7 +227,7 @@ export default function GlobalDashboard() {
     
     // Calculer temps moyen pour PDF
     const pdfDurations = pdfRunsFiltered.map(r => {
-      // 🆕 TODO: Quand webhooks seront actifs, utiliser webhookEndTime - startedAt
+      // Temps reel via webhook (webhookEndTime) si disponible
       if (r.stats?.webhookEndTime) {
         return new Date(r.stats.webhookEndTime) - new Date(r.startedAt);
       }
@@ -293,19 +314,6 @@ export default function GlobalDashboard() {
       heure: `${i}h`,
       jobs: hours[i] || 0
     }));
-  }, [allJobs]);
-
-  const projectData = React.useMemo(() => {
-    const projects = {};
-    allJobs.forEach(job => {
-      const projectName = job.projectName || job.projectId?.slice(0, 8) || 'Inconnu';
-      projects[projectName] = (projects[projectName] || 0) + 1;
-    });
-    
-    return Object.entries(projects)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
   }, [allJobs]);
 
   // Graphique basé sur les fichiers individuels (pas les runs)
@@ -468,25 +476,53 @@ export default function GlobalDashboard() {
             </p>
           </div>
 
-          <button
-            onClick={() => navigate('/planning')}
-            style={{
-              padding: '12px 24px',
-              borderRadius: 10,
-              border: 'none',
-              background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-              color: '#fff',
-              fontSize: 15,
-              fontWeight: 600,
-              cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
-              transition: 'transform 0.2s'
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-            onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
-          >
-            ➕ Planifier une tâche
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {lastUpdated && (
+              <span style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap' }}>
+                {refreshing ? '🔄 Mise à jour…' : `Mis à jour à ${lastUpdated.toLocaleTimeString('fr-CA')}`}
+              </span>
+            )}
+            <button
+              onClick={() => loadAllData({ silent: true })}
+              disabled={refreshing}
+              title="Rafraîchir les données"
+              style={{
+                padding: '12px 18px',
+                borderRadius: 10,
+                border: '1px solid rgba(148, 163, 184, 0.3)',
+                background: 'rgba(255, 255, 255, 0.05)',
+                color: '#cbd5e1',
+                fontSize: 15,
+                fontWeight: 600,
+                cursor: refreshing ? 'wait' : 'pointer',
+                opacity: refreshing ? 0.6 : 1,
+                transition: 'transform 0.2s'
+              }}
+              onMouseEnter={(e) => { if (!refreshing) e.currentTarget.style.transform = 'translateY(-2px)'; }}
+              onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
+            >
+              🔄 Rafraîchir
+            </button>
+            <button
+              onClick={() => navigate('/planning')}
+              style={{
+                padding: '12px 24px',
+                borderRadius: 10,
+                border: 'none',
+                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                color: '#fff',
+                fontSize: 15,
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+                transition: 'transform 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+              onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
+            >
+              ➕ Planifier une tâche
+            </button>
+          </div>
         </div>
 
         {/* Filtre temporel */}
@@ -968,7 +1004,7 @@ export default function GlobalDashboard() {
                     const isError = lastRun && ['failed', 'error', 'timeout'].includes(lastRun.status);
                     const isPartial = lastRun && lastRun.status === 'partial';
                     const isRunning = job.status === 'running';
-                    const isSuccess = lastRun && ['success', 'completed'].includes(lastRun.status);
+                    const isSuccess = lastRun && lastRun.status === 'success';
 
                     // Couleurs du status basées sur le dernier run
                     const getStatusStyle = () => {

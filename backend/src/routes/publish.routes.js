@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../config/logger');
 const cron = require('node-cron');
+const { Op } = require('sequelize');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { PublishJob, PublishRun, User } = require('../models');
 const scheduler = require('../services/scheduler.service');
@@ -21,6 +22,21 @@ const {
 
 // ------------- helpers -------------
 const ENABLE_REAL = String(process.env.ENABLE_REAL_PUBLISH || 'false').toLowerCase() === 'true';
+
+// 🆕 Construit un filtre Sequelize sur createdAt a partir de query params from/to (ISO)
+// Retourne null si aucune borne valide n'est fournie.
+function buildDateRange(from, to) {
+  const range = {};
+  if (from) {
+    const d = new Date(from);
+    if (!Number.isNaN(d.getTime())) range[Op.gte] = d;
+  }
+  if (to) {
+    const d = new Date(to);
+    if (!Number.isNaN(d.getTime())) range[Op.lte] = d;
+  }
+  return Object.getOwnPropertySymbols(range).length > 0 ? range : null;
+}
 
 // URN valides pour toutes les régions APS/ACC :
 // Les préfixes URN varient selon les régions (wipprod, wipemea, wips7bwc pour Canada, etc.)
@@ -362,7 +378,14 @@ router.get('/runs', asyncHandler(async (req, res) => {
   if (req.query.projectId) where.projectId = String(req.query.projectId);
   if (req.query.jobId) where.jobId = String(req.query.jobId);
   if (req.query.status) where.status = String(req.query.status);
-  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+
+  // 🆕 Filtrage par plage de dates (createdAt) pour les metriques du Dashboard
+  const createdAt = buildDateRange(req.query.from, req.query.to);
+  if (createdAt) where.createdAt = createdAt;
+
+  // Plafond plus eleve quand une plage de dates est fournie (vue "longue periode")
+  const maxLimit = createdAt ? 5000 : 200;
+  const limit = Math.min(parseInt(req.query.limit || '50', 10), maxLimit);
 
   const runs = await PublishRun.findAll({
     where,

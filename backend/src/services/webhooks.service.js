@@ -35,20 +35,52 @@ class WebhooksService {
     }
 
     try {
-      // Autodesk utilise HMAC-SHA256
-      const hmac = crypto.createHmac('sha256', this.secret);
-      hmac.update(payload);
-      const expectedSignature = hmac.digest('hex');
-      
-      // Comparaison sécurisée (timing-safe)
-      const providedSignature = signature.replace(/^sha256=/, ''); // Enlever le préfixe si présent
-      
-      return crypto.timingSafeEqual(
-        Buffer.from(expectedSignature, 'hex'),
-        Buffer.from(providedSignature, 'hex')
-      );
+      // Autodesk APS envoie la signature dans x-adsk-signature avec un préfixe
+      // qui indique l'algorithme:
+      //   - "sha1hash=<hex>"  -> HMAC-SHA1  (cas des webhooks Data Management / Forge)
+      //   - "sha256=<hex>"    -> HMAC-SHA256 (certains autres produits Autodesk)
+      // On détecte le préfixe pour choisir le bon algorithme. Sans préfixe connu,
+      // on accepte si SHA1 OU SHA256 correspond (robustesse face à l'ambiguïté).
+      const raw = String(signature).trim();
+      const match = raw.match(/^(sha1hash|sha256|sha1)=(.+)$/i);
+
+      let algos;
+      let providedSignature;
+      if (match) {
+        const prefix = match[1].toLowerCase();
+        providedSignature = match[2];
+        algos = prefix === 'sha256' ? ['sha256'] : ['sha1'];
+      } else {
+        // Pas de préfixe reconnu: essayer les deux algos
+        providedSignature = raw;
+        algos = ['sha1', 'sha256'];
+      }
+
+      return algos.some((algo) => this._matchesHmac(algo, payload, providedSignature));
     } catch (error) {
       logger.error(`[Webhooks] Erreur vérification signature: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Compare (timing-safe) la signature fournie avec le HMAC calculé pour un algo donné
+   * @param {string} algo - 'sha1' ou 'sha256'
+   * @param {string} payload - Corps brut de la requête
+   * @param {string} providedHex - Signature hex fournie (sans préfixe)
+   * @returns {boolean}
+   */
+  _matchesHmac(algo, payload, providedHex) {
+    try {
+      const expected = crypto.createHmac(algo, this.secret).update(payload).digest('hex');
+      const expectedBuf = Buffer.from(expected, 'hex');
+      const providedBuf = Buffer.from(providedHex, 'hex');
+      // timingSafeEqual exige des buffers de même longueur
+      if (expectedBuf.length !== providedBuf.length) {
+        return false;
+      }
+      return crypto.timingSafeEqual(expectedBuf, providedBuf);
+    } catch (_e) {
       return false;
     }
   }
