@@ -93,6 +93,8 @@ export default function GlobalDashboard() {
   const [error, setError] = React.useState('');
   const [lastUpdated, setLastUpdated] = React.useState(null);
   const [timeFilter, setTimeFilter] = React.useState('forever'); // day, week, month, year, forever
+  const [jobSearch, setJobSearch] = React.useState(''); // recherche dans le tableau récapitulatif
+  const [jobSort, setJobSort] = React.useState({ key: null, direction: 'asc' }); // tri des colonnes
 
   function handleJobClick(job, jobType) {
     if (!job) return;
@@ -165,6 +167,87 @@ export default function GlobalDashboard() {
   // ========== CALCULS ==========
   const allJobs = [...publishJobs, ...pdfJobs, ...copyJobs];
   const allRuns = [...publishRuns, ...pdfRuns, ...copyRuns];
+
+  // ===== Recherche & tri du tableau récapitulatif =====
+  // Normalisation insensible à la casse et aux accents pour une recherche "intelligente"
+  const normalizeText = (s) => (s ?? '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const formatHourMin = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+
+  // Calcule les champs dérivés (affichés/triables) pour une tâche donnée
+  const getJobMeta = React.useCallback((job) => {
+    const isPublish = publishJobs.some(j => j.id === job.id);
+    const isCopyJob = copyJobs.some(j => j.id === job.id);
+    const typeLabel = isCopyJob ? 'Copie' : isPublish ? 'Publish' : 'PDF';
+
+    const cronParts = job.cronExpression?.split(' ') || [];
+    const hour = parseInt(cronParts[1], 10);
+    const minute = parseInt(cronParts[0], 10);
+    const hourMinutes = (Number.isNaN(hour) ? 2 : hour) * 60 + (Number.isNaN(minute) ? 0 : minute);
+
+    const jobRuns = allRuns.filter(r => r.jobId === job.id);
+    const lastRun = jobRuns.length > 0
+      ? jobRuns.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+      : null;
+
+    let statusText;
+    if (!job.scheduleEnabled) statusText = 'Pausé';
+    else if (job.status === 'running') statusText = 'running';
+    else if (lastRun && ['failed', 'error', 'timeout'].includes(lastRun.status)) statusText = lastRun.status;
+    else if (lastRun && lastRun.status === 'partial') statusText = 'partial';
+    else if (lastRun && lastRun.status === 'success') statusText = 'success';
+    else statusText = job.status || 'idle';
+
+    return {
+      name: job.name || 'Sans nom',
+      typeLabel,
+      projectName: job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`,
+      userName: job.userName || 'Inconnu',
+      hourMinutes,
+      timezone: job.timezone || 'UTC',
+      statusText,
+    };
+  }, [publishJobs, copyJobs, allRuns]);
+
+  // Liste filtrée (recherche) puis triée (en-têtes cliquables)
+  const visibleJobs = React.useMemo(() => {
+    let list = allJobs.map(job => ({ job, meta: getJobMeta(job) }));
+
+    const q = normalizeText(jobSearch).trim();
+    if (q) {
+      const terms = q.split(/\s+/);
+      list = list.filter(({ meta }) => {
+        const haystack = normalizeText([
+          meta.name,
+          meta.typeLabel,
+          meta.projectName,
+          meta.userName,
+          meta.timezone,
+          meta.statusText,
+          formatHourMin(meta.hourMinutes),
+        ].join(' '));
+        return terms.every(term => haystack.includes(term));
+      });
+    }
+
+    if (jobSort.key) {
+      const dir = jobSort.direction === 'asc' ? 1 : -1;
+      list = list.slice().sort((a, b) => {
+        const av = a.meta[jobSort.key];
+        const bv = b.meta[jobSort.key];
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+        return String(av).localeCompare(String(bv), 'fr', { sensitivity: 'base', numeric: true }) * dir;
+      });
+    }
+
+    return list.map(item => item.job);
+  }, [allJobs, jobSearch, jobSort, getJobMeta]);
+
+  const handleJobSort = (key) => {
+    setJobSort(prev => prev.key === key
+      ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: 'asc' });
+  };
+
   
   // Filtrage temporel
   const getFilteredRuns = React.useCallback((runs) => {
@@ -1058,21 +1141,99 @@ export default function GlobalDashboard() {
               Aucune tâche planifiée. Cliquez sur "Planifier une tâche" pour commencer!
             </p>
           ) : (
+            <>
+              {/* Barre de recherche intelligente */}
+              <div style={{ position: 'relative', marginBottom: 16, maxWidth: 420 }}>
+                <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 15, pointerEvents: 'none', opacity: 0.7 }}>🔍</span>
+                <input
+                  type="text"
+                  value={jobSearch}
+                  onChange={(e) => setJobSearch(e.target.value)}
+                  placeholder="Rechercher une tâche (nom, projet, utilisateur, status...)"
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '10px 36px 10px 40px',
+                    fontSize: 14,
+                    color: '#e2e8f0',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    borderRadius: 10,
+                    outline: 'none',
+                    transition: 'border-color 0.2s, box-shadow 0.2s',
+                  }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(96, 165, 250, 0.6)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(96, 165, 250, 0.15)';
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                />
+                {jobSearch && (
+                  <button
+                    onClick={() => setJobSearch('')}
+                    title="Effacer"
+                    style={{
+                      position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                      background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer',
+                      fontSize: 16, lineHeight: 1, padding: 4,
+                    }}
+                  >✕</button>
+                )}
+              </div>
+
+              {visibleJobs.length === 0 ? (
+                <p style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>
+                  Aucune tâche ne correspond à « {jobSearch} ».
+                </p>
+              ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid rgba(96, 165, 250, 0.3)', background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.15) 0%, rgba(37, 99, 235, 0.08) 100%)' }}>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Nom</th>
-                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Type</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Projet</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Utilisateur</th>
-                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Heure</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Timezone</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1' }}>Status</th>
+                    {[
+                      { label: 'Nom', key: 'name', align: 'left', border: true },
+                      { label: 'Type', key: 'typeLabel', align: 'center', border: true },
+                      { label: 'Projet', key: 'projectName', align: 'left', border: true },
+                      { label: 'Utilisateur', key: 'userName', align: 'left', border: true },
+                      { label: 'Heure', key: 'hourMinutes', align: 'center', border: true },
+                      { label: 'Timezone', key: 'timezone', align: 'left', border: true },
+                      { label: 'Status', key: 'statusText', align: 'left', border: false },
+                    ].map((col) => {
+                      const isActive = jobSort.key === col.key;
+                      return (
+                        <th
+                          key={col.key}
+                          onClick={() => handleJobSort(col.key)}
+                          title="Cliquer pour trier"
+                          style={{
+                            textAlign: col.align,
+                            padding: '12px 16px',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: isActive ? '#60a5fa' : '#cbd5e1',
+                            borderRight: col.border ? '1px solid rgba(148, 163, 184, 0.2)' : undefined,
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            whiteSpace: 'nowrap',
+                            transition: 'color 0.2s',
+                          }}
+                          onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = '#e2e8f0'; }}
+                          onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = '#cbd5e1'; }}
+                        >
+                          {col.label}
+                          <span style={{ marginLeft: 6, fontSize: 11, opacity: isActive ? 1 : 0.35 }}>
+                            {isActive ? (jobSort.direction === 'asc' ? '▲' : '▼') : '↕'}
+                          </span>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
-                  {allJobs.map((job, index) => {
+                  {visibleJobs.map((job, index) => {
                     const cronParts = job.cronExpression?.split(' ') || [];
                     const hour = cronParts[1]?.padStart(2, '0') || '02';
                     const minute = cronParts[0]?.padStart(2, '0') || '00';
@@ -1206,6 +1367,8 @@ export default function GlobalDashboard() {
                 </tbody>
               </table>
             </div>
+              )}
+            </>
           )}
         </Card>
       </div>
