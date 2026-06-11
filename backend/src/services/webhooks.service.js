@@ -101,7 +101,16 @@ class WebhooksService {
       const eventTime = new Date().toISOString();
       
       // Extraire les infos du webhook Autodesk Data Management
-      const projectId = payload?.project || payload?.projectId;
+      // ⚠️ Le payload APS envoie souvent le projet SANS le préfixe "b." alors
+      // que nos PublishRun.projectId le stockent AVEC. On accepte les 2 formes.
+      const rawProject = payload?.project || payload?.projectId;
+      const projectId = rawProject;
+      const projectIdCandidates = [];
+      if (rawProject) {
+        projectIdCandidates.push(rawProject);
+        if (rawProject.startsWith('b.')) projectIdCandidates.push(rawProject.slice(2));
+        else projectIdCandidates.push(`b.${rawProject}`);
+      }
       const lineageUrn = payload?.lineageUrn;
       const versionUrn = payload?.versionUrn || payload?.resourceUrn;
       const fileName = payload?.name;
@@ -121,7 +130,7 @@ class WebhooksService {
       
       const recentRuns = await PublishRun.findAll({
         where: {
-          projectId,
+          projectId: { [Op.in]: projectIdCandidates },
           startedAt: {
             [Op.gte]: oneHourAgo,
           },

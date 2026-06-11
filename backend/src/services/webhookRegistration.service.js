@@ -305,11 +305,22 @@ class WebhookRegistrationService {
       const status = error.response?.status;
       const errorMsg = error.response?.data?.message || error.response?.data?.detail || error.message;
 
-      // 409 = le hook existe déjà côté Autodesk : on le synchronise dans notre base
+      // 409 = le hook existe déjà côté Autodesk : objectif atteint (hook actif).
+      // On tente de le retrouver pour l'enregistrer en base, sinon on le considère
+      // comme déjà actif (résultat non-bloquant).
       if (status === 409) {
         logger.info(`[WebhookRegistration] Webhook dossier déjà existant côté Autodesk (${folderUrn}), synchronisation...`);
-        const synced = await this.syncExistingWebhooks(accessToken, projectId);
+        const synced = await this.syncExistingWebhooks(accessToken, projectId, effectiveRegion);
         if (synced) return synced;
+        return {
+          alreadyExists: true,
+          scopeType,
+          scopeValue,
+          projectId,
+          hubId,
+          eventType,
+          status: 'active',
+        };
       }
 
       logger.error(`[WebhookRegistration] ❌ Erreur création webhook dossier ${folderUrn}: ${status || ''} ${errorMsg}`);
@@ -325,15 +336,15 @@ class WebhookRegistrationService {
    * @param {string} accessToken - Token Autodesk
    * @param {string} projectId - ID du projet (optionnel, pour filtrer)
    */
-  async syncExistingWebhooks(accessToken, projectId = null) {
+  async syncExistingWebhooks(accessToken, projectId = null, region = null) {
     try {
+      const headers = { 'Authorization': `Bearer ${accessToken}` };
+      const apsRegion = region && String(region).toUpperCase() !== 'US' ? String(region).toUpperCase() : null;
+      if (apsRegion) headers['x-ads-region'] = apsRegion;
+
       const response = await axios.get(
         `${APS_WEBHOOKS_BASE}/systems/data/hooks`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
+        { headers }
       );
 
       const hooks = response.data?.data || [];
