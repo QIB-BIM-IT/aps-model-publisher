@@ -215,24 +215,40 @@ export default function GlobalDashboard() {
       // Sinon, vérifier si c'est dans pdfRuns
       return pdfRuns.some(pr => pr.id === r.id);
     });
-    
-    // Calculer temps moyen pour publish
-    const publishDurations = publishRunsFiltered.map(r => {
-      // Temps reel via webhook (webhookEndTime) si disponible, sinon duree interne
-      if (r.stats?.webhookEndTime) {
+
+    const copyRunsFiltered = completedRuns.filter(r => {
+      if (r.jobType === 'file-copy' || r.jobType === 'copy') return true;
+      return copyRuns.some(cr => cr.id === r.id);
+    });
+
+    // Durée RÉELLE end-to-end = début du run -> confirmation de publication sur ACC
+    // (webhookEndTime). À défaut de webhook, on retombe sur la durée de traitement interne.
+    const realDuration = (r) => {
+      if (r.stats?.webhookEndTime && r.startedAt) {
         return new Date(r.stats.webhookEndTime) - new Date(r.startedAt);
       }
-      return r.stats?.durationMs || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
-    }).filter(d => d > 0);
-    
-    // Calculer temps moyen pour PDF
-    const pdfDurations = pdfRunsFiltered.map(r => {
-      // Temps reel via webhook (webhookEndTime) si disponible
-      if (r.stats?.webhookEndTime) {
-        return new Date(r.stats.webhookEndTime) - new Date(r.startedAt);
-      }
-      return r.stats?.durationMs || r.stats?.timing?.totalMs || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
-    }).filter(d => d > 0);
+      return r.stats?.realDurationMs || r.stats?.durationMs || r.stats?.timing?.totalMs
+        || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
+    };
+
+    const publishDurations = publishRunsFiltered.map(realDuration).filter(d => d > 0);
+    const pdfDurations = pdfRunsFiltered.map(realDuration).filter(d => d > 0);
+    const copyDurations = copyRunsFiltered.map(realDuration).filter(d => d > 0);
+
+    // 🆕 Confirmation ACC: parmi les runs réussis, combien ont reçu le webhook
+    // (= document réellement publié/créé/copié sur ACC). Détecte les "faux succès".
+    const confirmableRuns = completedRuns; // success/partial
+    const confirmedRuns = confirmableRuns.filter(r => r.stats?.webhookReceived || r.stats?.webhookEndTime);
+    const GRACE_MS = 10 * 60 * 1000; // délai de propagation attendu
+    const pendingConfirmation = confirmableRuns.filter(r => {
+      const confirmed = r.stats?.webhookReceived || r.stats?.webhookEndTime;
+      if (confirmed) return false;
+      const ref = r.endedAt || r.startedAt;
+      return ref && (Date.now() - new Date(ref).getTime()) > GRACE_MS;
+    }).length;
+    const accConfirmationRate = confirmableRuns.length > 0
+      ? Math.round((confirmedRuns.length / confirmableRuns.length) * 100)
+      : 0;
     
     // 🆕 Autres métriques intéressantes
     const avgSheetsPerRun = pdfRunsFiltered.length > 0 
@@ -291,6 +307,9 @@ export default function GlobalDashboard() {
       avgPdfMs: pdfDurations.length > 0
         ? Math.round(pdfDurations.reduce((a, b) => a + b, 0) / pdfDurations.length)
         : 0,
+      avgCopyMs: copyDurations.length > 0
+        ? Math.round(copyDurations.reduce((a, b) => a + b, 0) / copyDurations.length)
+        : 0,
       avgSheetsPerRun,
       avgModelsPerRun,
       runningJobs,
@@ -299,8 +318,14 @@ export default function GlobalDashboard() {
       successRate,
       publishRunsCount: publishRunsFiltered.length,
       pdfRunsCount: pdfRunsFiltered.length,
+      copyRunsCount: copyRunsFiltered.length,
+      // 🆕 Confirmation ACC (preuve de publication réelle via webhook)
+      accConfirmationRate,
+      accConfirmedCount: confirmedRuns.length,
+      accConfirmableCount: confirmableRuns.length,
+      pendingConfirmation,
     };
-  }, [filteredRuns, publishRuns, pdfRuns, allJobs, timeFilter]);
+  }, [filteredRuns, publishRuns, pdfRuns, copyRuns, allJobs, timeFilter]);
 
   const hourlyData = React.useMemo(() => {
     const hours = {};
@@ -610,7 +635,7 @@ export default function GlobalDashboard() {
         </div>
 
         {/* 🆕 Métriques de Performance */}
-        <Card title="⚡ Temps de traitement moyen" style={{ marginBottom: 24 }}>
+        <Card title="⚡ Durée réelle moyenne (du lancement jusqu'à la publication sur ACC)" style={{ marginBottom: 24 }}>
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
@@ -669,9 +694,36 @@ export default function GlobalDashboard() {
                 </div>
               )}
             </div>
+
+            {/* Temps moyen Copie */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(168, 85, 247, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 20,
+              border: '1px solid rgba(168, 85, 247, 0.2)',
+            }}>
+              <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>📁 Copie (temps réel)</div>
+              <div style={{ fontSize: 32, fontWeight: 700, color: '#c084fc', marginBottom: 4 }}>
+                {performanceMetrics.avgCopyMs > 60000
+                  ? `${Math.round(performanceMetrics.avgCopyMs / 60000)}min ${Math.round((performanceMetrics.avgCopyMs % 60000) / 1000)}s`
+                  : performanceMetrics.avgCopyMs > 0
+                  ? `${Math.round(performanceMetrics.avgCopyMs / 1000)}s`
+                  : 'N/A'}
+              </div>
+              {performanceMetrics.copyRunsCount > 0 && (
+                <div style={{ fontSize: 11, color: '#64748b' }}>
+                  Basé sur {performanceMetrics.copyRunsCount} exécution{performanceMetrics.copyRunsCount > 1 ? 's' : ''}
+                </div>
+              )}
+              {performanceMetrics.copyRunsCount === 0 && filteredRuns.length > 0 && (
+                <div style={{ fontSize: 11, color: '#fbbf24', fontStyle: 'italic' }}>
+                  ⏳ Données disponibles après prochaine exécution
+                </div>
+              )}
+            </div>
           </div>
           
-          {performanceMetrics.publishRunsCount === 0 && performanceMetrics.pdfRunsCount === 0 && filteredRuns.length > 0 && (
+          {performanceMetrics.publishRunsCount === 0 && performanceMetrics.pdfRunsCount === 0 && performanceMetrics.copyRunsCount === 0 && filteredRuns.length > 0 && (
             <div style={{ 
               marginTop: 16, 
               padding: '12px 16px', 
@@ -681,9 +733,68 @@ export default function GlobalDashboard() {
               color: '#fbbf24',
               textAlign: 'center'
             }}>
-              ℹ️ Les temps réels (incluant webhooks) seront disponibles une fois sur Azure avec les webhooks activés
+              ℹ️ Les durées réelles (confirmées par webhook ACC) apparaîtront après la prochaine exécution de chaque type de tâche
             </div>
           )}
+        </Card>
+
+        {/* 🆕 Confirmation de publication sur ACC (via webhooks) */}
+        <Card title="🛰️ Confirmation de publication sur ACC" style={{ marginBottom: 24 }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: 16,
+          }}>
+            {/* Taux de confirmation */}
+            <div style={{
+              background: performanceMetrics.accConfirmationRate >= 90
+                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%)'
+                : performanceMetrics.accConfirmationRate >= 60
+                ? 'linear-gradient(135deg, rgba(251, 191, 36, 0.15) 0%, rgba(251, 191, 36, 0.05) 100%)'
+                : 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 16,
+              border: '1px solid rgba(148, 163, 184, 0.2)',
+            }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>✅ Taux de confirmation</div>
+              <div style={{
+                fontSize: 28, fontWeight: 700,
+                color: performanceMetrics.accConfirmationRate >= 90 ? '#34d399'
+                  : performanceMetrics.accConfirmationRate >= 60 ? '#fbbf24' : '#f87171',
+              }}>
+                {performanceMetrics.accConfirmableCount > 0 ? `${performanceMetrics.accConfirmationRate}%` : 'N/A'}
+              </div>
+              <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                {performanceMetrics.accConfirmedCount}/{performanceMetrics.accConfirmableCount} run(s) confirmé(s) sur ACC
+              </div>
+            </div>
+
+            {/* En attente de confirmation */}
+            <div style={{
+              background: performanceMetrics.pendingConfirmation > 0
+                ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.05) 100%)'
+                : 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.04) 100%)',
+              borderRadius: 12,
+              padding: 16,
+              border: '1px solid rgba(148, 163, 184, 0.2)',
+            }}>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>⚠️ En attente de confirmation</div>
+              <div style={{
+                fontSize: 28, fontWeight: 700,
+                color: performanceMetrics.pendingConfirmation > 0 ? '#f87171' : '#34d399',
+              }}>
+                {performanceMetrics.pendingConfirmation}
+              </div>
+              <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
+                {performanceMetrics.pendingConfirmation > 0
+                  ? 'Réussis sans publication confirmée (>10 min)'
+                  : 'Tout est confirmé'}
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 12, fontSize: 11, color: '#64748b' }}>
+            La confirmation provient des webhooks Autodesk : elle prouve que le document a réellement été publié/créé/copié dans ACC, au-delà du simple succès de l'appel API.
+          </div>
         </Card>
 
         {/* 🆕 KPIs supplémentaires */}
