@@ -30,6 +30,8 @@ const adminRoutes = require('./routes/admin.routes');
 
 // 🆕 Scheduler pour les jobs planifiés
 const scheduler = require('./services/scheduler.service');
+// 🆕 Backfill automatique des webhooks (toujours actif, en arrière-plan)
+const webhookBackfill = require('./services/webhookBackfill.service');
 
 const app = express();
 
@@ -103,6 +105,9 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
     // 🆕 Initialiser le scheduler pour charger tous les jobs planifiés
     await scheduler.init();
     logger.info(`✅ Scheduler initialisé`);
+
+    // 🆕 Démarrer le backfill webhooks (enregistrement auto en arrière-plan)
+    webhookBackfill.start();
 
     const server = app.listen(PORT, () => {
       logger.info(`🚀 Serveur démarré sur le port ${PORT}`);

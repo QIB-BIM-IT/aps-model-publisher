@@ -16,7 +16,8 @@ const REGIONS = ['us', 'can', 'emea', 'gbr', 'deu', 'jpn', 'ind', 'aus'];
 
 class WebhookRegistrationService {
   constructor() {
-    this.enabled = String(process.env.WEBHOOKS_ENABLED || 'false').toLowerCase() === 'true';
+    // Toujours actif par défaut (mettre WEBHOOKS_ENABLED=false pour désactiver, ex. en local)
+    this.enabled = String(process.env.WEBHOOKS_ENABLED || 'true').toLowerCase() === 'true';
     this.callbackUrl = process.env.WEBHOOK_CALLBACK_URL;
     this.secret = process.env.WEBHOOK_SECRET;
     // Region(s) ou le secret HMAC a deja ete enregistre cote Autodesk
@@ -329,6 +330,46 @@ class WebhookRegistrationService {
       err.apsBody = error.response?.data || null;
       throw err;
     }
+  }
+
+  /**
+   * Détecte la région d'un dossier (= région de son projet) en sondant
+   * folderContents région par région. Utile quand on n'a pas le hubId.
+   */
+  async detectFolderRegion(accessToken, projectId, folderUrn) {
+    if (this.projectRegionCache.has(projectId)) {
+      return this.projectRegionCache.get(projectId);
+    }
+    for (const region of REGIONS) {
+      const r = region.toUpperCase();
+      try {
+        await apsDataService.getFolderContents(projectId, folderUrn, accessToken, r);
+        this.projectRegionCache.set(projectId, r);
+        return r;
+      } catch (_e) {
+        // mauvaise région -> suivante
+      }
+    }
+    this.projectRegionCache.set(projectId, 'US');
+    return 'US';
+  }
+
+  /**
+   * Enregistre un webhook folder en détectant automatiquement la région.
+   * Idempotent. Utilisé pour les tâches PDF (folderId) et Copie (destinationFolderId)
+   * où l'on connaît directement le dossier cible mais pas forcément le hubId.
+   */
+  async ensureFolderWebhookAnyRegion(accessToken, folderUrn, projectId, hubId = null) {
+    if (!this.isConfigured()) return null;
+    if (!folderUrn || !projectId) {
+      const err = new Error('folderUrn et projectId requis');
+      err.apsStatus = 400;
+      throw err;
+    }
+    const existing = await this.findExistingWebhook('folder', folderUrn, 'dm.version.added');
+    if (existing) return existing;
+    const region = await this.detectFolderRegion(accessToken, projectId, folderUrn);
+    return this.ensureFolderWebhook(accessToken, folderUrn, projectId, hubId, region);
   }
 
   /**

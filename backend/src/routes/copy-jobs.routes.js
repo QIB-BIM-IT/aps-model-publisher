@@ -6,6 +6,8 @@ const { Op } = require('sequelize');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { CopyJob, CopyRun, User } = require('../models');
 const scheduler = require('../services/scheduler.service');
+const apsAuthService = require('../services/apsAuth.service');
+const webhookRegistrationService = require('../services/webhookRegistration.service');
 
 const {
   asyncHandler,
@@ -128,6 +130,20 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
   });
 
   if (job.scheduleEnabled) await scheduler.scheduleJob(job);
+
+  // 🆕 Auto-enregistrement webhook sur le dossier de destination (non bloquant)
+  // La nouvelle version (fichier copié) apparaît dans le dossier destination.
+  (async () => {
+    try {
+      if (webhookRegistrationService.isConfigured() && job.destinationFolderId && job.destinationProjectId) {
+        const token = await apsAuthService.ensureValidToken(user.id);
+        await webhookRegistrationService.ensureFolderWebhookAnyRegion(token, job.destinationFolderId, job.destinationProjectId, job.hubId || null);
+        logger.info(`[CopyJobs] Webhook auto-enregistré pour dossier destination ${job.destinationFolderId}`);
+      }
+    } catch (e) {
+      logger.warn(`[CopyJobs] Auto-enregistrement webhook échoué: ${e.message}`);
+    }
+  })();
 
   logger.info(`[CopyJobs] Job créé: ${job.id} - ${(payload.files || []).length} fichier(s)`);
   return res.json({ success: true, data: job });

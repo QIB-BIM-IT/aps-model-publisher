@@ -58,12 +58,15 @@ class APSDataService {
   }
 
   // --------- Folder Contents (subfolders + items) ----------
-  async getFolderContents(projectId, folderId, accessToken) {
+  async getFolderContents(projectId, folderId, accessToken, region = null) {
     const path = apsConfig.apis.dataManagement.folderContents
       .replace('{project_id}', encodeURIComponent(projectId))
       .replace('{folder_id}', encodeURIComponent(folderId));
     const url = `${this.baseUrl}${path}`;
-    const data = await this._get(url, accessToken);
+    const extraHeaders = region && String(region).toUpperCase() !== 'US'
+      ? { 'x-ads-region': String(region).toUpperCase() }
+      : undefined;
+    const data = await this._get(url, accessToken, undefined, extraHeaders);
     return Array.isArray(data?.data) ? data.data : data;
   }
 }

@@ -10,6 +10,8 @@ const { authenticateToken } = require('../middleware/auth.middleware');
 const { PDFExportJob, PDFExportRun, User } = require('../models');
 const scheduler = require('../services/scheduler.service');
 const apsAccessService = require('../services/apsAccess.service');
+const apsAuthService = require('../services/apsAuth.service');
+const webhookRegistrationService = require('../services/webhookRegistration.service');
 
 const {
   asyncHandler,
@@ -177,6 +179,19 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
 
   console.log('✅ Job créé:', { id: job.id, name: job.name });
   if (job.scheduleEnabled) await scheduler.scheduleJob(job);
+
+  // 🆕 Auto-enregistrement webhook sur le dossier cible (non bloquant)
+  (async () => {
+    try {
+      if (webhookRegistrationService.isConfigured() && job.folderId && job.projectId) {
+        const token = await apsAuthService.ensureValidToken(user.id);
+        await webhookRegistrationService.ensureFolderWebhookAnyRegion(token, job.folderId, job.projectId, null);
+        logger.info(`[PDFExport] Webhook auto-enregistré pour dossier ${job.folderId}`);
+      }
+    } catch (e) {
+      logger.warn(`[PDFExport] Auto-enregistrement webhook échoué: ${e.message}`);
+    }
+  })();
 
   logger.info(`[PDFExportJobs] Job créé: ${job.id} - nextRun: ${job.nextRun?.toISOString() || 'N/A'}`);
   return res.json({ success: true, data: job });
