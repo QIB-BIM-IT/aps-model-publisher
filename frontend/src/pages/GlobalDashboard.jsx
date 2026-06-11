@@ -1,7 +1,18 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getPublishJobs, getPDFExportJobs, getCopyJobs, getRuns, getPDFExportRuns, getCopyRuns } from '../services/api';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+// Durée RÉELLE end-to-end d'un run = début -> confirmation de publication sur ACC
+// (webhookEndTime). À défaut de webhook, on retombe sur la durée de traitement interne.
+function getRealDurationMs(r) {
+  const s = r?.stats || {};
+  if (s.webhookEndTime && r.startedAt) {
+    return new Date(s.webhookEndTime) - new Date(r.startedAt);
+  }
+  return s.realDurationMs || s.durationMs || s.timing?.totalMs
+    || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
+}
 
 // Composant Card
 function Card({ children, title, style = {} }) {
@@ -221,34 +232,9 @@ export default function GlobalDashboard() {
       return copyRuns.some(cr => cr.id === r.id);
     });
 
-    // Durée RÉELLE end-to-end = début du run -> confirmation de publication sur ACC
-    // (webhookEndTime). À défaut de webhook, on retombe sur la durée de traitement interne.
-    const realDuration = (r) => {
-      if (r.stats?.webhookEndTime && r.startedAt) {
-        return new Date(r.stats.webhookEndTime) - new Date(r.startedAt);
-      }
-      return r.stats?.realDurationMs || r.stats?.durationMs || r.stats?.timing?.totalMs
-        || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
-    };
-
-    const publishDurations = publishRunsFiltered.map(realDuration).filter(d => d > 0);
-    const pdfDurations = pdfRunsFiltered.map(realDuration).filter(d => d > 0);
-    const copyDurations = copyRunsFiltered.map(realDuration).filter(d => d > 0);
-
-    // 🆕 Confirmation ACC: parmi les runs réussis, combien ont reçu le webhook
-    // (= document réellement publié/créé/copié sur ACC). Détecte les "faux succès".
-    const confirmableRuns = completedRuns; // success/partial
-    const confirmedRuns = confirmableRuns.filter(r => r.stats?.webhookReceived || r.stats?.webhookEndTime);
-    const GRACE_MS = 10 * 60 * 1000; // délai de propagation attendu
-    const pendingConfirmation = confirmableRuns.filter(r => {
-      const confirmed = r.stats?.webhookReceived || r.stats?.webhookEndTime;
-      if (confirmed) return false;
-      const ref = r.endedAt || r.startedAt;
-      return ref && (Date.now() - new Date(ref).getTime()) > GRACE_MS;
-    }).length;
-    const accConfirmationRate = confirmableRuns.length > 0
-      ? Math.round((confirmedRuns.length / confirmableRuns.length) * 100)
-      : 0;
+    const publishDurations = publishRunsFiltered.map(getRealDurationMs).filter(d => d > 0);
+    const pdfDurations = pdfRunsFiltered.map(getRealDurationMs).filter(d => d > 0);
+    const copyDurations = copyRunsFiltered.map(getRealDurationMs).filter(d => d > 0);
     
     // 🆕 Autres métriques intéressantes
     const avgSheetsPerRun = pdfRunsFiltered.length > 0 
@@ -319,13 +305,33 @@ export default function GlobalDashboard() {
       publishRunsCount: publishRunsFiltered.length,
       pdfRunsCount: pdfRunsFiltered.length,
       copyRunsCount: copyRunsFiltered.length,
-      // 🆕 Confirmation ACC (preuve de publication réelle via webhook)
-      accConfirmationRate,
-      accConfirmedCount: confirmedRuns.length,
-      accConfirmableCount: confirmableRuns.length,
-      pendingConfirmation,
     };
   }, [filteredRuns, publishRuns, pdfRuns, copyRuns, allJobs, timeFilter]);
+
+  // 🆕 Tendance: durée réelle moyenne par jour (sur la période filtrée)
+  const trendData = React.useMemo(() => {
+    const buckets = new Map(); // dateKey -> { sumMs, count }
+    for (const r of filteredRuns) {
+      if (!(r.status === 'success' || r.status === 'partial')) continue;
+      const ms = getRealDurationMs(r);
+      if (!ms || ms <= 0) continue;
+      const ref = r.startedAt || r.createdAt;
+      if (!ref) continue;
+      const d = new Date(ref);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const b = buckets.get(key) || { sumMs: 0, count: 0 };
+      b.sumMs += ms;
+      b.count += 1;
+      buckets.set(key, b);
+    }
+    return [...buckets.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([key, b]) => ({
+        date: key.slice(5), // MM-DD
+        dureeSec: Math.round(b.sumMs / b.count / 1000),
+        runs: b.count,
+      }));
+  }, [filteredRuns]);
 
   const hourlyData = React.useMemo(() => {
     const hours = {};
@@ -738,65 +744,6 @@ export default function GlobalDashboard() {
           )}
         </Card>
 
-        {/* 🆕 Confirmation de publication sur ACC (via webhooks) */}
-        <Card title="🛰️ Confirmation de publication sur ACC" style={{ marginBottom: 24 }}>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 16,
-          }}>
-            {/* Taux de confirmation */}
-            <div style={{
-              background: performanceMetrics.accConfirmationRate >= 90
-                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%)'
-                : performanceMetrics.accConfirmationRate >= 60
-                ? 'linear-gradient(135deg, rgba(251, 191, 36, 0.15) 0%, rgba(251, 191, 36, 0.05) 100%)'
-                : 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.05) 100%)',
-              borderRadius: 12,
-              padding: 16,
-              border: '1px solid rgba(148, 163, 184, 0.2)',
-            }}>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>✅ Taux de confirmation</div>
-              <div style={{
-                fontSize: 28, fontWeight: 700,
-                color: performanceMetrics.accConfirmationRate >= 90 ? '#34d399'
-                  : performanceMetrics.accConfirmationRate >= 60 ? '#fbbf24' : '#f87171',
-              }}>
-                {performanceMetrics.accConfirmableCount > 0 ? `${performanceMetrics.accConfirmationRate}%` : 'N/A'}
-              </div>
-              <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
-                {performanceMetrics.accConfirmedCount}/{performanceMetrics.accConfirmableCount} run(s) confirmé(s) sur ACC
-              </div>
-            </div>
-
-            {/* En attente de confirmation */}
-            <div style={{
-              background: performanceMetrics.pendingConfirmation > 0
-                ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.05) 100%)'
-                : 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.04) 100%)',
-              borderRadius: 12,
-              padding: 16,
-              border: '1px solid rgba(148, 163, 184, 0.2)',
-            }}>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>⚠️ En attente de confirmation</div>
-              <div style={{
-                fontSize: 28, fontWeight: 700,
-                color: performanceMetrics.pendingConfirmation > 0 ? '#f87171' : '#34d399',
-              }}>
-                {performanceMetrics.pendingConfirmation}
-              </div>
-              <div style={{ fontSize: 10, color: '#64748b', marginTop: 4 }}>
-                {performanceMetrics.pendingConfirmation > 0
-                  ? 'Réussis sans publication confirmée (>10 min)'
-                  : 'Tout est confirmé'}
-              </div>
-            </div>
-          </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: '#64748b' }}>
-            La confirmation provient des webhooks Autodesk : elle prouve que le document a réellement été publié/créé/copié dans ACC, au-delà du simple succès de l'appel API.
-          </div>
-        </Card>
-
         {/* 🆕 KPIs supplémentaires */}
         <Card title="📊 Métriques de productivité" style={{ marginBottom: 24 }}>
           <div style={{
@@ -904,6 +851,33 @@ export default function GlobalDashboard() {
               </div>
             </div>
           </div>
+        </Card>
+
+        {/* 🆕 Tendance de la durée réelle */}
+        <Card title="📈 Tendance — durée réelle moyenne par jour (jusqu'à publication sur ACC)" style={{ marginBottom: 24 }}>
+          {trendData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={trendData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.2)" />
+                <XAxis dataKey="date" stroke="#94a3b8" style={{ fontSize: 12, fill: '#cbd5e1' }} />
+                <YAxis stroke="#94a3b8" style={{ fontSize: 12, fill: '#cbd5e1' }} unit="s" />
+                <Tooltip
+                  contentStyle={{
+                    background: 'rgba(15, 23, 42, 0.95)',
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    borderRadius: 8,
+                    color: '#fff'
+                  }}
+                  formatter={(value, name) => name === 'dureeSec' ? [`${value}s`, 'Durée réelle moy.'] : [value, 'Exécutions']}
+                />
+                <Line type="monotone" dataKey="dureeSec" name="dureeSec" stroke="#60a5fa" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b', fontSize: 13 }}>
+              Aucune donnée de durée sur la période sélectionnée.
+            </div>
+          )}
         </Card>
 
         {/* Graphiques */}

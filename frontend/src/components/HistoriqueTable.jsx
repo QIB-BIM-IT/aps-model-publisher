@@ -263,13 +263,27 @@ export default function HistoriqueTable({ runs }) {
       },
     },
     {
-      accessorKey: 'stats.durationMs',
-      header: 'Durée',
-      cell: ({ getValue }) => {
+      id: 'dureeReelle',
+      header: 'Durée réelle',
+      accessorFn: (row) => {
+        const s = row.stats || {};
+        if (s.webhookEndTime && row.startedAt) return new Date(s.webhookEndTime) - new Date(row.startedAt);
+        return s.realDurationMs || s.durationMs
+          || (row.endedAt && row.startedAt ? new Date(row.endedAt) - new Date(row.startedAt) : 0);
+      },
+      cell: ({ getValue, row }) => {
         const ms = getValue();
         if (!ms) return '-';
         const seconds = Math.round(ms / 1000);
-        return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds/60)}m ${seconds%60}s`;
+        const txt = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+        const confirmed = !!(row.original.stats?.webhookReceived || row.original.stats?.webhookEndTime);
+        return (
+          <span title={confirmed
+            ? 'Durée réelle confirmée par webhook (publié sur ACC)'
+            : 'Durée de traitement interne (pas de confirmation ACC — ex. maquette sans modification)'}>
+            {txt}{confirmed ? ' ✅' : ''}
+          </span>
+        );
       },
     },
     {
