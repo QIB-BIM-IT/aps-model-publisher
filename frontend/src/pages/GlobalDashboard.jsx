@@ -1,7 +1,18 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getPublishJobs, getPDFExportJobs, getCopyJobs, getRuns, getPDFExportRuns, getCopyRuns } from '../services/api';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+// Durée RÉELLE end-to-end d'un run = début -> confirmation de publication sur ACC
+// (webhookEndTime). À défaut de webhook, on retombe sur la durée de traitement interne.
+function getRealDurationMs(r) {
+  const s = r?.stats || {};
+  if (s.webhookEndTime && r.startedAt) {
+    return new Date(s.webhookEndTime) - new Date(r.startedAt);
+  }
+  return s.realDurationMs || s.durationMs || s.timing?.totalMs
+    || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
+}
 
 // Composant Card
 function Card({ children, title, style = {} }) {
@@ -78,8 +89,12 @@ export default function GlobalDashboard() {
   const [pdfRuns, setPdfRuns] = React.useState([]);
   const [copyRuns, setCopyRuns] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState('');
+  const [lastUpdated, setLastUpdated] = React.useState(null);
   const [timeFilter, setTimeFilter] = React.useState('forever'); // day, week, month, year, forever
+  const [jobSearch, setJobSearch] = React.useState(''); // recherche dans le tableau récapitulatif
+  const [jobSort, setJobSort] = React.useState({ key: null, direction: 'asc' }); // tri des colonnes
 
   function handleJobClick(job, jobType) {
     if (!job) return;
@@ -98,17 +113,34 @@ export default function GlobalDashboard() {
     });
   }
 
-  async function loadAllData() {
-    setLoading(true);
+  // 🆕 Calcule la borne 'from' (ISO) correspondant a la periode selectionnee.
+  // Pour 'forever', on envoie l'epoch afin que le backend autorise un plafond eleve.
+  const getRunsQuery = React.useCallback(() => {
+    const now = Date.now();
+    const windows = {
+      day: 24 * 60 * 60 * 1000,
+      week: 7 * 24 * 60 * 60 * 1000,
+      month: 30 * 24 * 60 * 60 * 1000,
+      year: 365 * 24 * 60 * 60 * 1000,
+    };
+    const from = timeFilter === 'forever'
+      ? new Date(0).toISOString()
+      : new Date(now - windows[timeFilter]).toISOString();
+    return { from, limit: 5000 };
+  }, [timeFilter]);
+
+  const loadAllData = React.useCallback(async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true); else setLoading(true);
     setError('');
     try {
+      const runsQuery = getRunsQuery();
       const [pjobs, pdfjobs, cpjobs, pruns, pdfruns, cpruns] = await Promise.all([
         getPublishJobs({}),
         getPDFExportJobs({}),
         getCopyJobs({}),
-        getRuns({ limit: 100 }),
-        getPDFExportRuns({ limit: 100 }),
-        getCopyRuns({ limit: 100 }),
+        getRuns(runsQuery),
+        getPDFExportRuns(runsQuery),
+        getCopyRuns(runsQuery),
       ]);
       
       setPublishJobs(pjobs);
@@ -117,22 +149,105 @@ export default function GlobalDashboard() {
       setPublishRuns(pruns);
       setPdfRuns(pdfruns);
       setCopyRuns(cpruns);
+      setLastUpdated(new Date());
     } catch (e) {
       setError(e?.message || 'Erreur chargement des données');
     } finally {
-      setLoading(false);
+      if (silent) setRefreshing(false); else setLoading(false);
     }
-  }
+  }, [getRunsQuery]);
 
   React.useEffect(() => {
+    // Rechargement complet quand la periode change, puis polling silencieux toutes les 30s
     loadAllData();
-    const interval = setInterval(loadAllData, 30000);
+    const interval = setInterval(() => loadAllData({ silent: true }), 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadAllData]);
 
   // ========== CALCULS ==========
   const allJobs = [...publishJobs, ...pdfJobs, ...copyJobs];
   const allRuns = [...publishRuns, ...pdfRuns, ...copyRuns];
+
+  // ===== Recherche & tri du tableau récapitulatif =====
+  // Normalisation insensible à la casse et aux accents pour une recherche "intelligente"
+  const normalizeText = (s) => (s ?? '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const formatHourMin = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+
+  // Calcule les champs dérivés (affichés/triables) pour une tâche donnée
+  const getJobMeta = React.useCallback((job) => {
+    const isPublish = publishJobs.some(j => j.id === job.id);
+    const isCopyJob = copyJobs.some(j => j.id === job.id);
+    const typeLabel = isCopyJob ? 'Copie' : isPublish ? 'Publish' : 'PDF';
+
+    const cronParts = job.cronExpression?.split(' ') || [];
+    const hour = parseInt(cronParts[1], 10);
+    const minute = parseInt(cronParts[0], 10);
+    const hourMinutes = (Number.isNaN(hour) ? 2 : hour) * 60 + (Number.isNaN(minute) ? 0 : minute);
+
+    const jobRuns = allRuns.filter(r => r.jobId === job.id);
+    const lastRun = jobRuns.length > 0
+      ? jobRuns.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
+      : null;
+
+    let statusText;
+    if (!job.scheduleEnabled) statusText = 'Pausé';
+    else if (job.status === 'running') statusText = 'running';
+    else if (lastRun && ['failed', 'error', 'timeout'].includes(lastRun.status)) statusText = lastRun.status;
+    else if (lastRun && lastRun.status === 'partial') statusText = 'partial';
+    else if (lastRun && lastRun.status === 'success') statusText = 'success';
+    else statusText = job.status || 'idle';
+
+    return {
+      name: job.name || 'Sans nom',
+      typeLabel,
+      projectName: job.projectName || `Projet ${job.projectId?.slice(0, 8) || '?'}`,
+      userName: job.userName || 'Inconnu',
+      hourMinutes,
+      timezone: job.timezone || 'UTC',
+      statusText,
+    };
+  }, [publishJobs, copyJobs, allRuns]);
+
+  // Liste filtrée (recherche) puis triée (en-têtes cliquables)
+  const visibleJobs = React.useMemo(() => {
+    let list = allJobs.map(job => ({ job, meta: getJobMeta(job) }));
+
+    const q = normalizeText(jobSearch).trim();
+    if (q) {
+      const terms = q.split(/\s+/);
+      list = list.filter(({ meta }) => {
+        const haystack = normalizeText([
+          meta.name,
+          meta.typeLabel,
+          meta.projectName,
+          meta.userName,
+          meta.timezone,
+          meta.statusText,
+          formatHourMin(meta.hourMinutes),
+        ].join(' '));
+        return terms.every(term => haystack.includes(term));
+      });
+    }
+
+    if (jobSort.key) {
+      const dir = jobSort.direction === 'asc' ? 1 : -1;
+      list = list.slice().sort((a, b) => {
+        const av = a.meta[jobSort.key];
+        const bv = b.meta[jobSort.key];
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+        return String(av).localeCompare(String(bv), 'fr', { sensitivity: 'base', numeric: true }) * dir;
+      });
+    }
+
+    return list.map(item => item.job);
+  }, [allJobs, jobSearch, jobSort, getJobMeta]);
+
+  const handleJobSort = (key) => {
+    setJobSort(prev => prev.key === key
+      ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+      : { key, direction: 'asc' });
+  };
+
   
   // Filtrage temporel
   const getFilteredRuns = React.useCallback((runs) => {
@@ -176,8 +291,9 @@ export default function GlobalDashboard() {
   // 🆕 Métriques de performance par type de job
   const performanceMetrics = React.useMemo(() => {
     // Identifier les runs publish vs PDF
+    // Statuts reels en BD: success / partial / failed (pas de 'completed')
     const completedRuns = filteredRuns.filter(r => 
-      r.status === 'success' || r.status === 'partial' || r.status === 'completed'
+      r.status === 'success' || r.status === 'partial'
     );
     
     const publishRunsFiltered = completedRuns.filter(r => {
@@ -193,25 +309,15 @@ export default function GlobalDashboard() {
       // Sinon, vérifier si c'est dans pdfRuns
       return pdfRuns.some(pr => pr.id === r.id);
     });
-    
-    // Calculer temps moyen pour publish
-    const publishDurations = publishRunsFiltered.map(r => {
-      // 🆕 TODO: Quand webhooks seront actifs, utiliser webhookEndTime - startedAt
-      // Pour l'instant, utiliser durationMs ou endedAt - startedAt
-      if (r.stats?.webhookEndTime) {
-        return new Date(r.stats.webhookEndTime) - new Date(r.startedAt);
-      }
-      return r.stats?.durationMs || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
-    }).filter(d => d > 0);
-    
-    // Calculer temps moyen pour PDF
-    const pdfDurations = pdfRunsFiltered.map(r => {
-      // 🆕 TODO: Quand webhooks seront actifs, utiliser webhookEndTime - startedAt
-      if (r.stats?.webhookEndTime) {
-        return new Date(r.stats.webhookEndTime) - new Date(r.startedAt);
-      }
-      return r.stats?.durationMs || r.stats?.timing?.totalMs || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
-    }).filter(d => d > 0);
+
+    const copyRunsFiltered = completedRuns.filter(r => {
+      if (r.jobType === 'file-copy' || r.jobType === 'copy') return true;
+      return copyRuns.some(cr => cr.id === r.id);
+    });
+
+    const publishDurations = publishRunsFiltered.map(getRealDurationMs).filter(d => d > 0);
+    const pdfDurations = pdfRunsFiltered.map(getRealDurationMs).filter(d => d > 0);
+    const copyDurations = copyRunsFiltered.map(getRealDurationMs).filter(d => d > 0);
     
     // 🆕 Autres métriques intéressantes
     const avgSheetsPerRun = pdfRunsFiltered.length > 0 
@@ -270,6 +376,9 @@ export default function GlobalDashboard() {
       avgPdfMs: pdfDurations.length > 0
         ? Math.round(pdfDurations.reduce((a, b) => a + b, 0) / pdfDurations.length)
         : 0,
+      avgCopyMs: copyDurations.length > 0
+        ? Math.round(copyDurations.reduce((a, b) => a + b, 0) / copyDurations.length)
+        : 0,
       avgSheetsPerRun,
       avgModelsPerRun,
       runningJobs,
@@ -278,8 +387,34 @@ export default function GlobalDashboard() {
       successRate,
       publishRunsCount: publishRunsFiltered.length,
       pdfRunsCount: pdfRunsFiltered.length,
+      copyRunsCount: copyRunsFiltered.length,
     };
-  }, [filteredRuns, publishRuns, pdfRuns, allJobs, timeFilter]);
+  }, [filteredRuns, publishRuns, pdfRuns, copyRuns, allJobs, timeFilter]);
+
+  // 🆕 Tendance: durée réelle moyenne par jour (sur la période filtrée)
+  const trendData = React.useMemo(() => {
+    const buckets = new Map(); // dateKey -> { sumMs, count }
+    for (const r of filteredRuns) {
+      if (!(r.status === 'success' || r.status === 'partial')) continue;
+      const ms = getRealDurationMs(r);
+      if (!ms || ms <= 0) continue;
+      const ref = r.startedAt || r.createdAt;
+      if (!ref) continue;
+      const d = new Date(ref);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const b = buckets.get(key) || { sumMs: 0, count: 0 };
+      b.sumMs += ms;
+      b.count += 1;
+      buckets.set(key, b);
+    }
+    return [...buckets.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([key, b]) => ({
+        date: key.slice(5), // MM-DD
+        dureeSec: Math.round(b.sumMs / b.count / 1000),
+        runs: b.count,
+      }));
+  }, [filteredRuns]);
 
   const hourlyData = React.useMemo(() => {
     const hours = {};
@@ -293,19 +428,6 @@ export default function GlobalDashboard() {
       heure: `${i}h`,
       jobs: hours[i] || 0
     }));
-  }, [allJobs]);
-
-  const projectData = React.useMemo(() => {
-    const projects = {};
-    allJobs.forEach(job => {
-      const projectName = job.projectName || job.projectId?.slice(0, 8) || 'Inconnu';
-      projects[projectName] = (projects[projectName] || 0) + 1;
-    });
-    
-    return Object.entries(projects)
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 6);
   }, [allJobs]);
 
   // Graphique basé sur les fichiers individuels (pas les runs)
@@ -468,25 +590,53 @@ export default function GlobalDashboard() {
             </p>
           </div>
 
-          <button
-            onClick={() => navigate('/planning')}
-            style={{
-              padding: '12px 24px',
-              borderRadius: 10,
-              border: 'none',
-              background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-              color: '#fff',
-              fontSize: 15,
-              fontWeight: 600,
-              cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
-              transition: 'transform 0.2s'
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
-            onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
-          >
-            ➕ Planifier une tâche
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {lastUpdated && (
+              <span style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap' }}>
+                {refreshing ? '🔄 Mise à jour…' : `Mis à jour à ${lastUpdated.toLocaleTimeString('fr-CA')}`}
+              </span>
+            )}
+            <button
+              onClick={() => loadAllData({ silent: true })}
+              disabled={refreshing}
+              title="Rafraîchir les données"
+              style={{
+                padding: '12px 18px',
+                borderRadius: 10,
+                border: '1px solid rgba(148, 163, 184, 0.3)',
+                background: 'rgba(255, 255, 255, 0.05)',
+                color: '#cbd5e1',
+                fontSize: 15,
+                fontWeight: 600,
+                cursor: refreshing ? 'wait' : 'pointer',
+                opacity: refreshing ? 0.6 : 1,
+                transition: 'transform 0.2s'
+              }}
+              onMouseEnter={(e) => { if (!refreshing) e.currentTarget.style.transform = 'translateY(-2px)'; }}
+              onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
+            >
+              🔄 Rafraîchir
+            </button>
+            <button
+              onClick={() => navigate('/planning')}
+              style={{
+                padding: '12px 24px',
+                borderRadius: 10,
+                border: 'none',
+                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                color: '#fff',
+                fontSize: 15,
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+                transition: 'transform 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+              onMouseLeave={(e) => e.currentTarget.style.transform = 'none'}
+            >
+              ➕ Planifier une tâche
+            </button>
+          </div>
         </div>
 
         {/* Filtre temporel */}
@@ -574,7 +724,7 @@ export default function GlobalDashboard() {
         </div>
 
         {/* 🆕 Métriques de Performance */}
-        <Card title="⚡ Temps de traitement moyen" style={{ marginBottom: 24 }}>
+        <Card title="⚡ Durée réelle moyenne (du lancement jusqu'à la publication sur ACC)" style={{ marginBottom: 24 }}>
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
@@ -633,9 +783,36 @@ export default function GlobalDashboard() {
                 </div>
               )}
             </div>
+
+            {/* Temps moyen Copie */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(168, 85, 247, 0.05) 100%)',
+              borderRadius: 12,
+              padding: 20,
+              border: '1px solid rgba(168, 85, 247, 0.2)',
+            }}>
+              <div style={{ fontSize: 13, color: '#94a3b8', marginBottom: 8 }}>📁 Copie (temps réel)</div>
+              <div style={{ fontSize: 32, fontWeight: 700, color: '#c084fc', marginBottom: 4 }}>
+                {performanceMetrics.avgCopyMs > 60000
+                  ? `${Math.round(performanceMetrics.avgCopyMs / 60000)}min ${Math.round((performanceMetrics.avgCopyMs % 60000) / 1000)}s`
+                  : performanceMetrics.avgCopyMs > 0
+                  ? `${Math.round(performanceMetrics.avgCopyMs / 1000)}s`
+                  : 'N/A'}
+              </div>
+              {performanceMetrics.copyRunsCount > 0 && (
+                <div style={{ fontSize: 11, color: '#64748b' }}>
+                  Basé sur {performanceMetrics.copyRunsCount} exécution{performanceMetrics.copyRunsCount > 1 ? 's' : ''}
+                </div>
+              )}
+              {performanceMetrics.copyRunsCount === 0 && filteredRuns.length > 0 && (
+                <div style={{ fontSize: 11, color: '#fbbf24', fontStyle: 'italic' }}>
+                  ⏳ Données disponibles après prochaine exécution
+                </div>
+              )}
+            </div>
           </div>
           
-          {performanceMetrics.publishRunsCount === 0 && performanceMetrics.pdfRunsCount === 0 && filteredRuns.length > 0 && (
+          {performanceMetrics.publishRunsCount === 0 && performanceMetrics.pdfRunsCount === 0 && performanceMetrics.copyRunsCount === 0 && filteredRuns.length > 0 && (
             <div style={{ 
               marginTop: 16, 
               padding: '12px 16px', 
@@ -645,7 +822,7 @@ export default function GlobalDashboard() {
               color: '#fbbf24',
               textAlign: 'center'
             }}>
-              ℹ️ Les temps réels (incluant webhooks) seront disponibles une fois sur Azure avec les webhooks activés
+              ℹ️ Les durées réelles (confirmées par webhook ACC) apparaîtront après la prochaine exécution de chaque type de tâche
             </div>
           )}
         </Card>
@@ -757,6 +934,33 @@ export default function GlobalDashboard() {
               </div>
             </div>
           </div>
+        </Card>
+
+        {/* 🆕 Tendance de la durée réelle */}
+        <Card title="📈 Tendance — durée réelle moyenne par jour (jusqu'à publication sur ACC)" style={{ marginBottom: 24 }}>
+          {trendData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={trendData} margin={{ top: 10, right: 20, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.2)" />
+                <XAxis dataKey="date" stroke="#94a3b8" style={{ fontSize: 12, fill: '#cbd5e1' }} />
+                <YAxis stroke="#94a3b8" style={{ fontSize: 12, fill: '#cbd5e1' }} unit="s" />
+                <Tooltip
+                  contentStyle={{
+                    background: 'rgba(15, 23, 42, 0.95)',
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    borderRadius: 8,
+                    color: '#fff'
+                  }}
+                  formatter={(value, name) => name === 'dureeSec' ? [`${value}s`, 'Durée réelle moy.'] : [value, 'Exécutions']}
+                />
+                <Line type="monotone" dataKey="dureeSec" name="dureeSec" stroke="#60a5fa" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b', fontSize: 13 }}>
+              Aucune donnée de durée sur la période sélectionnée.
+            </div>
+          )}
         </Card>
 
         {/* Graphiques */}
@@ -937,21 +1141,99 @@ export default function GlobalDashboard() {
               Aucune tâche planifiée. Cliquez sur "Planifier une tâche" pour commencer!
             </p>
           ) : (
+            <>
+              {/* Barre de recherche intelligente */}
+              <div style={{ position: 'relative', marginBottom: 16, maxWidth: 420 }}>
+                <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 15, pointerEvents: 'none', opacity: 0.7 }}>🔍</span>
+                <input
+                  type="text"
+                  value={jobSearch}
+                  onChange={(e) => setJobSearch(e.target.value)}
+                  placeholder="Rechercher une tâche (nom, projet, utilisateur, status...)"
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '10px 36px 10px 40px',
+                    fontSize: 14,
+                    color: '#e2e8f0',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(148, 163, 184, 0.3)',
+                    borderRadius: 10,
+                    outline: 'none',
+                    transition: 'border-color 0.2s, box-shadow 0.2s',
+                  }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(96, 165, 250, 0.6)';
+                    e.currentTarget.style.boxShadow = '0 0 0 3px rgba(96, 165, 250, 0.15)';
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.3)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                />
+                {jobSearch && (
+                  <button
+                    onClick={() => setJobSearch('')}
+                    title="Effacer"
+                    style={{
+                      position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                      background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer',
+                      fontSize: 16, lineHeight: 1, padding: 4,
+                    }}
+                  >✕</button>
+                )}
+              </div>
+
+              {visibleJobs.length === 0 ? (
+                <p style={{ color: '#94a3b8', textAlign: 'center', padding: 40 }}>
+                  Aucune tâche ne correspond à « {jobSearch} ».
+                </p>
+              ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid rgba(96, 165, 250, 0.3)', background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.15) 0%, rgba(37, 99, 235, 0.08) 100%)' }}>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Nom</th>
-                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Type</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Projet</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Utilisateur</th>
-                    <th style={{ textAlign: 'center', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Heure</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.2)' }}>Timezone</th>
-                    <th style={{ textAlign: 'left', padding: '12px 16px', fontSize: 13, fontWeight: 600, color: '#cbd5e1' }}>Status</th>
+                    {[
+                      { label: 'Nom', key: 'name', align: 'left', border: true },
+                      { label: 'Type', key: 'typeLabel', align: 'center', border: true },
+                      { label: 'Projet', key: 'projectName', align: 'left', border: true },
+                      { label: 'Utilisateur', key: 'userName', align: 'left', border: true },
+                      { label: 'Heure', key: 'hourMinutes', align: 'center', border: true },
+                      { label: 'Timezone', key: 'timezone', align: 'left', border: true },
+                      { label: 'Status', key: 'statusText', align: 'left', border: false },
+                    ].map((col) => {
+                      const isActive = jobSort.key === col.key;
+                      return (
+                        <th
+                          key={col.key}
+                          onClick={() => handleJobSort(col.key)}
+                          title="Cliquer pour trier"
+                          style={{
+                            textAlign: col.align,
+                            padding: '12px 16px',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: isActive ? '#60a5fa' : '#cbd5e1',
+                            borderRight: col.border ? '1px solid rgba(148, 163, 184, 0.2)' : undefined,
+                            cursor: 'pointer',
+                            userSelect: 'none',
+                            whiteSpace: 'nowrap',
+                            transition: 'color 0.2s',
+                          }}
+                          onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = '#e2e8f0'; }}
+                          onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = '#cbd5e1'; }}
+                        >
+                          {col.label}
+                          <span style={{ marginLeft: 6, fontSize: 11, opacity: isActive ? 1 : 0.35 }}>
+                            {isActive ? (jobSort.direction === 'asc' ? '▲' : '▼') : '↕'}
+                          </span>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
-                  {allJobs.map((job, index) => {
+                  {visibleJobs.map((job, index) => {
                     const cronParts = job.cronExpression?.split(' ') || [];
                     const hour = cronParts[1]?.padStart(2, '0') || '02';
                     const minute = cronParts[0]?.padStart(2, '0') || '00';
@@ -968,7 +1250,7 @@ export default function GlobalDashboard() {
                     const isError = lastRun && ['failed', 'error', 'timeout'].includes(lastRun.status);
                     const isPartial = lastRun && lastRun.status === 'partial';
                     const isRunning = job.status === 'running';
-                    const isSuccess = lastRun && ['success', 'completed'].includes(lastRun.status);
+                    const isSuccess = lastRun && lastRun.status === 'success';
 
                     // Couleurs du status basées sur le dernier run
                     const getStatusStyle = () => {
@@ -1085,6 +1367,8 @@ export default function GlobalDashboard() {
                 </tbody>
               </table>
             </div>
+              )}
+            </>
           )}
         </Card>
       </div>

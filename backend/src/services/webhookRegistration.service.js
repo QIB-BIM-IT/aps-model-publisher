@@ -5,50 +5,101 @@ const axios = require('axios');
 const logger = require('../config/logger');
 const { apsConfig } = require('../config/aps.config');
 const { WebhookRegistration } = require('../models');
+const apsDataService = require('./apsData.service');
 
-const APS_WEBHOOKS_BASE = 'https://developer.api.autodesk.com/webhooks/v1';
+const APS_BASE = 'https://developer.api.autodesk.com';
+const APS_WEBHOOKS_BASE = `${APS_BASE}/webhooks/v1`;
+
+// Régions Data Management v2 (ordre d'essai). Doivent matcher l'enum x-ads-region des Webhooks.
+// US = USA, CAN = Canada, EMEA = Europe, GBR = UK, DEU = Allemagne, JPN = Japon, IND = Inde, AUS = Australie
+const REGIONS = ['us', 'can', 'emea', 'gbr', 'deu', 'jpn', 'ind', 'aus'];
 
 class WebhookRegistrationService {
   constructor() {
-    this.enabled = String(process.env.WEBHOOKS_ENABLED || 'false').toLowerCase() === 'true';
+    // Toujours actif par défaut (mettre WEBHOOKS_ENABLED=false pour désactiver, ex. en local)
+    this.enabled = String(process.env.WEBHOOKS_ENABLED || 'true').toLowerCase() === 'true';
     this.callbackUrl = process.env.WEBHOOK_CALLBACK_URL;
     this.secret = process.env.WEBHOOK_SECRET;
-    this.secretRegistered = false;
+    // Region(s) ou le secret HMAC a deja ete enregistre cote Autodesk
+    this.secretRegisteredRegions = new Set();
+    // Cache projectId -> region (US/EMEA/CAN...) pour eviter de re-sonder a chaque appel
+    this.projectRegionCache = new Map();
+  }
+
+  /**
+   * Détecte la région d'un projet en sondant les endpoints Data Management régionaux.
+   * Réutilise la même approche que la publication (GET /data/v2/regions/:region/projects/:id).
+   * @param {string} accessToken
+   * @param {string} projectId
+   * @returns {Promise<string>} region en MAJUSCULES (ex: 'US', 'CAN', 'EMEA'); 'US' par défaut
+   */
+  async detectProjectRegion(accessToken, projectId) {
+    if (this.projectRegionCache.has(projectId)) {
+      return this.projectRegionCache.get(projectId);
+    }
+    for (const region of REGIONS) {
+      try {
+        const url = `${APS_BASE}/data/v2/regions/${region}/projects/${encodeURIComponent(projectId)}`;
+        const resp = await axios.get(url, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 8000,
+          validateStatus: () => true,
+        });
+        if (resp.status === 200) {
+          const up = region.toUpperCase();
+          this.projectRegionCache.set(projectId, up);
+          logger.info(`[WebhookRegistration] Région détectée pour ${projectId}: ${up}`);
+          return up;
+        }
+      } catch (_e) {
+        // région suivante
+      }
+    }
+    logger.warn(`[WebhookRegistration] Région indéterminée pour ${projectId}, fallback US`);
+    this.projectRegionCache.set(projectId, 'US');
+    return 'US';
   }
 
   /**
    * Vérifie si les webhooks sont configurés correctement
+   * @returns {boolean}
    */
   isConfigured() {
-    return this.enabled && this.callbackUrl && this.secret;
+    return !!(this.enabled && this.callbackUrl && this.secret);
   }
 
   /**
    * Enregistre le secret HMAC auprès d'Autodesk (une seule fois)
    * @param {string} accessToken - Token 2-legged ou 3-legged
    */
-  async registerSecret(accessToken) {
-    if (this.secretRegistered || !this.secret) {
+  async registerSecret(accessToken, region = null) {
+    if (!this.secret) {
+      return;
+    }
+    // Le secret doit etre enregistre dans la meme region que le hook
+    const regionKey = region || 'US';
+    if (this.secretRegisteredRegions.has(regionKey)) {
       return;
     }
 
     try {
+      const headers = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      };
+      if (region) headers['x-ads-region'] = region;
+
       await axios.post(
         `${APS_WEBHOOKS_BASE}/tokens`,
         { token: this.secret },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
+        { headers }
       );
-      this.secretRegistered = true;
-      logger.info('[WebhookRegistration] ✅ Secret HMAC enregistré auprès d\'Autodesk');
+      this.secretRegisteredRegions.add(regionKey);
+      logger.info(`[WebhookRegistration] ✅ Secret HMAC enregistré auprès d'Autodesk (région ${regionKey})`);
     } catch (error) {
       // 409 Conflict = secret déjà enregistré, c'est OK
       if (error.response?.status === 409) {
-        this.secretRegistered = true;
+        this.secretRegisteredRegions.add(regionKey);
         logger.debug('[WebhookRegistration] Secret déjà enregistré');
       } else {
         logger.warn(`[WebhookRegistration] ⚠️ Erreur enregistrement secret: ${error.response?.data?.message || error.message}`);
@@ -80,83 +131,97 @@ class WebhookRegistrationService {
    * @param {string} projectId - ID du projet (ex: b.xxxxx)
    * @param {string} hubId - ID du hub (optionnel)
    */
-  async ensureProjectWebhook(accessToken, projectId, hubId = null) {
+  async ensureProjectWebhook(accessToken, projectId, hubId = null, region = null) {
     if (!this.isConfigured()) {
       logger.debug('[WebhookRegistration] Webhooks non configurés, skip');
       return null;
     }
 
+    // ⚠️ L'API Webhooks du système "data" n'accepte PAS de scope "project".
+    // Le seul scope valide pour dm.version.added est "folder" (récursif sur les
+    // sous-dossiers). On couvre donc le projet en enregistrant un hook par
+    // top-folder du projet.
     const eventType = 'dm.version.added';
-    const scopeType = 'project';
-    const scopeValue = projectId;
 
-    // Vérifier si existe déjà
-    const existing = await this.findExistingWebhook(scopeType, scopeValue, eventType);
-    if (existing) {
-      logger.debug(`[WebhookRegistration] Webhook déjà existant pour projet ${projectId}`);
-      return existing;
+    if (!hubId) {
+      const err = new Error('hubId requis pour enregistrer les webhooks du projet (scope folder)');
+      err.apsStatus = 400;
+      throw err;
     }
 
-    // Enregistrer le secret si pas encore fait
-    await this.registerSecret(accessToken);
+    // Récupérer les top-folders du projet en essayant les régions de data residency.
+    // On ne se fie pas à un endpoint de sondage: la région qui renvoie réellement
+    // des dossiers EST la région du projet (et donc celle des webhooks).
+    const hint = region ? String(region).toUpperCase() : null;
+    const regionOrder = hint
+      ? [hint, ...REGIONS.map((r) => r.toUpperCase()).filter((r) => r !== hint)]
+      : REGIONS.map((r) => r.toUpperCase());
 
-    try {
-      // Créer le webhook via l'API Autodesk
-      const response = await axios.post(
-        `${APS_WEBHOOKS_BASE}/systems/data/events/${eventType}/hooks`,
-        {
-          callbackUrl: this.callbackUrl,
-          scope: {
-            project: projectId,
-          },
-          hookAttribute: {
-            projectId: projectId,
-            hubId: hubId,
-            source: 'aps-model-publisher',
-          },
-          autoReactivateHook: true,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
+    let folders = [];
+    let effectiveRegion = 'US';
+    let lastError = null;
+    for (const r of regionOrder) {
+      try {
+        const topFolders = await apsDataService.getTopFolders(hubId, projectId, accessToken, r);
+        const ids = (Array.isArray(topFolders) ? topFolders : [])
+          .map((f) => f && f.id)
+          .filter(Boolean);
+        if (ids.length > 0) {
+          folders = ids;
+          effectiveRegion = r;
+          this.projectRegionCache.set(projectId, r);
+          logger.info(`[WebhookRegistration] Top-folders trouvés pour ${projectId} en région ${r} (${ids.length})`);
+          break;
         }
-      );
-
-      const hookData = response.data;
-      logger.info(`[WebhookRegistration] ✅ Webhook créé pour projet ${projectId}: ${hookData.hookId}`);
-
-      // Sauvegarder en base
-      const registration = await WebhookRegistration.create({
-        apsHookId: hookData.hookId,
-        scopeType,
-        scopeValue,
-        projectId,
-        hubId,
-        eventType,
-        callbackUrl: this.callbackUrl,
-        status: 'active',
-        metadata: {
-          urn: hookData.urn,
-          createdBy: hookData.createdBy,
-          system: hookData.system,
-        },
-      });
-
-      return registration;
-    } catch (error) {
-      const errorMsg = error.response?.data?.message || error.response?.data?.detail || error.message;
-      logger.error(`[WebhookRegistration] ❌ Erreur création webhook projet ${projectId}: ${errorMsg}`);
-      
-      // Si le webhook existe déjà côté Autodesk (409), essayer de le récupérer
-      if (error.response?.status === 409) {
-        logger.info('[WebhookRegistration] Webhook existe déjà côté Autodesk, récupération...');
-        return this.syncExistingWebhooks(accessToken, projectId);
+      } catch (error) {
+        lastError = error;
+        // 404 attendu sur les mauvaises régions: on essaie la suivante.
       }
-      
-      return null;
     }
+
+    if (folders.length === 0) {
+      const detail = lastError
+        ? (lastError.response?.data?.message || lastError.response?.data?.detail || lastError.message)
+        : 'aucune région ne renvoie de dossiers';
+      const err = new Error(`Impossible de récupérer les top-folders pour ${projectId} (régions essayées: ${regionOrder.join(',')}): ${detail}`);
+      err.apsStatus = lastError?.response?.status || 404;
+      err.apsBody = lastError?.response?.data || null;
+      throw err;
+    }
+
+    const apsRegion = effectiveRegion !== 'US' ? effectiveRegion : null;
+    // Enregistrer le secret dans la même région que les hooks.
+    await this.registerSecret(accessToken, apsRegion);
+
+    const registrations = [];
+    const errors = [];
+    for (const folderUrn of folders) {
+      try {
+        const reg = await this.ensureFolderWebhook(accessToken, folderUrn, projectId, hubId, effectiveRegion);
+        if (reg) registrations.push(reg);
+      } catch (e) {
+        errors.push(`${folderUrn}: ${e.message}`);
+      }
+    }
+
+    if (registrations.length === 0) {
+      const err = new Error(`Aucun webhook folder créé pour ${projectId}. ${errors.join(' | ')}`);
+      err.apsStatus = 502;
+      throw err;
+    }
+
+    logger.info(`[WebhookRegistration] ✅ ${registrations.length}/${folders.length} webhook(s) folder créé(s) pour projet ${projectId} (région ${effectiveRegion || 'US'})`);
+
+    return {
+      projectId,
+      hubId,
+      eventType,
+      region: effectiveRegion || 'US',
+      folderCount: folders.length,
+      registeredCount: registrations.length,
+      errors,
+      registrations,
+    };
   }
 
   /**
@@ -166,7 +231,7 @@ class WebhookRegistrationService {
    * @param {string} projectId - ID du projet
    * @param {string} hubId - ID du hub (optionnel)
    */
-  async ensureFolderWebhook(accessToken, folderUrn, projectId, hubId = null) {
+  async ensureFolderWebhook(accessToken, folderUrn, projectId, hubId = null, region = null) {
     if (!this.isConfigured()) {
       logger.debug('[WebhookRegistration] Webhooks non configurés, skip');
       return null;
@@ -183,10 +248,19 @@ class WebhookRegistrationService {
       return existing;
     }
 
-    // Enregistrer le secret si pas encore fait
-    await this.registerSecret(accessToken);
+    const effectiveRegion = region ? String(region).toUpperCase() : null;
+    const apsRegion = effectiveRegion && effectiveRegion !== 'US' ? effectiveRegion : null;
+
+    // Enregistrer le secret dans la même région que le hook
+    await this.registerSecret(accessToken, apsRegion);
 
     try {
+      const headers = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      };
+      if (apsRegion) headers['x-ads-region'] = apsRegion;
+
       // Créer le webhook via l'API Autodesk
       const response = await axios.post(
         `${APS_WEBHOOKS_BASE}/systems/data/events/${eventType}/hooks`,
@@ -203,12 +277,7 @@ class WebhookRegistrationService {
           },
           autoReactivateHook: true,
         },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
+        { headers }
       );
 
       const hookData = response.data;
@@ -228,15 +297,79 @@ class WebhookRegistrationService {
           urn: hookData.urn,
           createdBy: hookData.createdBy,
           system: hookData.system,
+          region: effectiveRegion || 'US',
         },
       });
 
       return registration;
     } catch (error) {
+      const status = error.response?.status;
       const errorMsg = error.response?.data?.message || error.response?.data?.detail || error.message;
-      logger.error(`[WebhookRegistration] ❌ Erreur création webhook dossier: ${errorMsg}`);
-      return null;
+
+      // 409 = le hook existe déjà côté Autodesk : objectif atteint (hook actif).
+      // On tente de le retrouver pour l'enregistrer en base, sinon on le considère
+      // comme déjà actif (résultat non-bloquant).
+      if (status === 409) {
+        logger.info(`[WebhookRegistration] Webhook dossier déjà existant côté Autodesk (${folderUrn}), synchronisation...`);
+        const synced = await this.syncExistingWebhooks(accessToken, projectId, effectiveRegion);
+        if (synced) return synced;
+        return {
+          alreadyExists: true,
+          scopeType,
+          scopeValue,
+          projectId,
+          hubId,
+          eventType,
+          status: 'active',
+        };
+      }
+
+      logger.error(`[WebhookRegistration] ❌ Erreur création webhook dossier ${folderUrn}: ${status || ''} ${errorMsg}`);
+      const err = new Error(`APS ${status || 'error'}: ${errorMsg}`);
+      err.apsStatus = status;
+      err.apsBody = error.response?.data || null;
+      throw err;
     }
+  }
+
+  /**
+   * Détecte la région d'un dossier (= région de son projet) en sondant
+   * folderContents région par région. Utile quand on n'a pas le hubId.
+   */
+  async detectFolderRegion(accessToken, projectId, folderUrn) {
+    if (this.projectRegionCache.has(projectId)) {
+      return this.projectRegionCache.get(projectId);
+    }
+    for (const region of REGIONS) {
+      const r = region.toUpperCase();
+      try {
+        await apsDataService.getFolderContents(projectId, folderUrn, accessToken, r);
+        this.projectRegionCache.set(projectId, r);
+        return r;
+      } catch (_e) {
+        // mauvaise région -> suivante
+      }
+    }
+    this.projectRegionCache.set(projectId, 'US');
+    return 'US';
+  }
+
+  /**
+   * Enregistre un webhook folder en détectant automatiquement la région.
+   * Idempotent. Utilisé pour les tâches PDF (folderId) et Copie (destinationFolderId)
+   * où l'on connaît directement le dossier cible mais pas forcément le hubId.
+   */
+  async ensureFolderWebhookAnyRegion(accessToken, folderUrn, projectId, hubId = null) {
+    if (!this.isConfigured()) return null;
+    if (!folderUrn || !projectId) {
+      const err = new Error('folderUrn et projectId requis');
+      err.apsStatus = 400;
+      throw err;
+    }
+    const existing = await this.findExistingWebhook('folder', folderUrn, 'dm.version.added');
+    if (existing) return existing;
+    const region = await this.detectFolderRegion(accessToken, projectId, folderUrn);
+    return this.ensureFolderWebhook(accessToken, folderUrn, projectId, hubId, region);
   }
 
   /**
@@ -244,15 +377,15 @@ class WebhookRegistrationService {
    * @param {string} accessToken - Token Autodesk
    * @param {string} projectId - ID du projet (optionnel, pour filtrer)
    */
-  async syncExistingWebhooks(accessToken, projectId = null) {
+  async syncExistingWebhooks(accessToken, projectId = null, region = null) {
     try {
+      const headers = { 'Authorization': `Bearer ${accessToken}` };
+      const apsRegion = region && String(region).toUpperCase() !== 'US' ? String(region).toUpperCase() : null;
+      if (apsRegion) headers['x-ads-region'] = apsRegion;
+
       const response = await axios.get(
         `${APS_WEBHOOKS_BASE}/systems/data/hooks`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
+        { headers }
       );
 
       const hooks = response.data?.data || [];
@@ -321,13 +454,14 @@ class WebhookRegistrationService {
     }
 
     try {
+      const headers = { 'Authorization': `Bearer ${accessToken}` };
+      const storedRegion = registration.metadata?.region;
+      if (storedRegion && String(storedRegion).toUpperCase() !== 'US') {
+        headers['x-ads-region'] = String(storedRegion).toUpperCase();
+      }
       await axios.delete(
         `${APS_WEBHOOKS_BASE}/systems/data/events/${registration.eventType}/hooks/${registration.apsHookId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
+        { headers }
       );
       logger.info(`[WebhookRegistration] ✅ Webhook supprimé: ${registration.apsHookId}`);
     } catch (error) {

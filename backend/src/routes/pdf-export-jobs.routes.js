@@ -5,10 +5,13 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../config/logger');
 const cron = require('node-cron');
+const { Op } = require('sequelize');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { PDFExportJob, PDFExportRun, User } = require('../models');
 const scheduler = require('../services/scheduler.service');
 const apsAccessService = require('../services/apsAccess.service');
+const apsAuthService = require('../services/apsAuth.service');
+const webhookRegistrationService = require('../services/webhookRegistration.service');
 
 const {
   asyncHandler,
@@ -18,6 +21,20 @@ const {
 } = require('../middleware/errorHandler.middleware');
 
 // ============= HELPERS =============
+
+// 🆕 Construit un filtre Sequelize sur createdAt a partir de query params from/to (ISO)
+function buildDateRange(from, to) {
+  const range = {};
+  if (from) {
+    const d = new Date(from);
+    if (!Number.isNaN(d.getTime())) range[Op.gte] = d;
+  }
+  if (to) {
+    const d = new Date(to);
+    if (!Number.isNaN(d.getTime())) range[Op.lte] = d;
+  }
+  return Object.getOwnPropertySymbols(range).length > 0 ? range : null;
+}
 
 function validTz(tz) {
   if (!tz) return false;
@@ -163,6 +180,19 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
   console.log('✅ Job créé:', { id: job.id, name: job.name });
   if (job.scheduleEnabled) await scheduler.scheduleJob(job);
 
+  // 🆕 Auto-enregistrement webhook sur le dossier cible (non bloquant)
+  (async () => {
+    try {
+      if (webhookRegistrationService.isConfigured() && job.folderId && job.projectId) {
+        const token = await apsAuthService.ensureValidToken(user.id);
+        await webhookRegistrationService.ensureFolderWebhookAnyRegion(token, job.folderId, job.projectId, null);
+        logger.info(`[PDFExport] Webhook auto-enregistré pour dossier ${job.folderId}`);
+      }
+    } catch (e) {
+      logger.warn(`[PDFExport] Auto-enregistrement webhook échoué: ${e.message}`);
+    }
+  })();
+
   logger.info(`[PDFExportJobs] Job créé: ${job.id} - nextRun: ${job.nextRun?.toISOString() || 'N/A'}`);
   return res.json({ success: true, data: job });
 }));
@@ -293,7 +323,13 @@ router.get('/runs', asyncHandler(async (req, res) => {
   if (req.query.jobId) where.jobId = String(req.query.jobId);
   if (req.query.projectId) where.projectId = String(req.query.projectId);
   if (req.query.status) where.status = String(req.query.status);
-  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+
+  // 🆕 Filtrage par plage de dates (createdAt) pour les metriques du Dashboard
+  const createdAt = buildDateRange(req.query.from, req.query.to);
+  if (createdAt) where.createdAt = createdAt;
+
+  const maxLimit = createdAt ? 5000 : 200;
+  const limit = Math.min(parseInt(req.query.limit || '50', 10), maxLimit);
 
   const runs = await PDFExportRun.findAll({
     where,

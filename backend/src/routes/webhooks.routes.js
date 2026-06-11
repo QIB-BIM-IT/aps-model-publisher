@@ -17,6 +17,11 @@ const {
 // Middleware pour parser le body en string (pour vérification signature)
 const rawBodyParser = express.raw({ type: 'application/json', limit: '2mb' });
 
+// ⚠️ Ce routeur est monté AVANT express.json() (pour préserver le body brut du
+// callback /aps). Les routes de registration attendent du JSON: on leur applique
+// donc un parser JSON local.
+const jsonParser = express.json({ limit: '2mb' });
+
 /**
  * POST /api/webhooks/aps
  * Endpoint principal pour recevoir les webhooks Autodesk APS
@@ -35,7 +40,11 @@ router.post('/aps', rawBodyParser, asyncHandler(async (req, res) => {
     });
   }
 
-  const signature = req.headers['x-webhook-signature'] || req.headers['x-autodesk-signature'];
+  // Autodesk APS envoie la signature dans le header x-adsk-signature
+  // (on garde les anciens noms en repli au cas ou)
+  const signature = req.headers['x-adsk-signature']
+    || req.headers['x-webhook-signature']
+    || req.headers['x-autodesk-signature'];
   const payloadString = req.body.toString('utf8');
 
   if (!signature) {
@@ -107,7 +116,7 @@ router.get('/status', asyncHandler(async (req, res) => {
  * Endpoint de test (développement uniquement)
  * Permet de tester la logique sans passer par Autodesk
  */
-router.post('/test', asyncHandler(async (req, res) => {
+router.post('/test', jsonParser, asyncHandler(async (req, res) => {
   if (process.env.NODE_ENV === 'production') {
     throw new ValidationError('Endpoint de test non disponible en production');
   }
@@ -156,7 +165,7 @@ router.get('/registrations', authenticateToken, asyncHandler(async (req, res) =>
  * POST /api/webhooks/registrations/sync
  * Synchronise les webhooks existants côté Autodesk avec notre base
  */
-router.post('/registrations/sync', authenticateToken, asyncHandler(async (req, res) => {
+router.post('/registrations/sync', authenticateToken, jsonParser, asyncHandler(async (req, res) => {
   if (!webhookRegistrationService.isConfigured()) {
     throw new ValidationError('Webhooks non configurés. Définissez WEBHOOKS_ENABLED, WEBHOOK_SECRET et WEBHOOK_CALLBACK_URL');
   }
@@ -178,28 +187,38 @@ router.post('/registrations/sync', authenticateToken, asyncHandler(async (req, r
  * POST /api/webhooks/registrations/project
  * Créer manuellement un webhook pour un projet
  */
-router.post('/registrations/project', authenticateToken, asyncHandler(async (req, res) => {
-  if (!webhookRegistrationService.isConfigured()) {
-    throw new ValidationError('Webhooks non configurés. Définissez WEBHOOKS_ENABLED, WEBHOOK_SECRET et WEBHOOK_CALLBACK_URL');
-  }
+router.post('/registrations/project', authenticateToken, jsonParser, asyncHandler(async (req, res) => {
+  const { projectId, hubId, region } = req.body || {};
+  try {
+    if (!webhookRegistrationService.isConfigured()) {
+      return res.status(400).json({ success: false, message: 'Webhooks non configurés (WEBHOOKS_ENABLED/WEBHOOK_SECRET/WEBHOOK_CALLBACK_URL)' });
+    }
+    if (!projectId) {
+      return res.status(400).json({ success: false, message: 'projectId requis' });
+    }
 
-  const { projectId, hubId } = req.body;
-  if (!projectId) {
-    throw new ValidationError('projectId requis');
-  }
+    const accessToken = await apsAuthService.ensureValidToken(req.userId);
+    const webhook = await webhookRegistrationService.ensureProjectWebhook(accessToken, projectId, hubId, region || null);
 
-  const accessToken = await apsAuthService.ensureValidToken(req.userId);
-  const webhook = await webhookRegistrationService.ensureProjectWebhook(accessToken, projectId, hubId);
-  
-  if (!webhook) {
-    throw new ValidationError('Impossible de créer le webhook');
-  }
+    if (!webhook) {
+      return res.status(502).json({ success: false, message: 'Impossible de créer le webhook (résultat vide)' });
+    }
 
-  res.json({
-    success: true,
-    message: 'Webhook créé',
-    data: webhook,
-  });
+    return res.json({
+      success: true,
+      message: 'Webhook créé',
+      data: webhook,
+    });
+  } catch (err) {
+    // Le errorHandler global est désactivé: on renvoie nous-mêmes un JSON exploitable.
+    logger.error(`[Webhooks] Echec enregistrement projet ${projectId}: ${err.message}\n${err.stack}`);
+    return res.status(err.apsStatus || 500).json({
+      success: false,
+      message: err.message || 'Erreur inconnue',
+      aps: err.apsBody || null,
+      stack: String(err.stack || '').split('\n').slice(0, 4),
+    });
+  }
 }));
 
 /**

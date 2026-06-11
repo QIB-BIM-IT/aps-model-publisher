@@ -12,17 +12,19 @@ class APSDataService {
     return { Authorization: `Bearer ${accessToken}` };
   }
 
-  async _get(url, accessToken, params) {
+  async _get(url, accessToken, params, extraHeaders) {
     try {
       const { data } = await axios.get(url, {
-        headers: this._headers(accessToken),
+        headers: { ...this._headers(accessToken), ...(extraHeaders || {}) },
         params,
       });
       return data;
     } catch (err) {
       const msg = err?.response?.data ? JSON.stringify(err.response.data) : err.message;
       logger.error(`APS GET ${url} failed: ${msg}`);
-      throw new Error(`Impossible d'appeler ACC (${msg})`);
+      const wrapped = new Error(`Impossible d'appeler ACC (${msg})`);
+      wrapped.response = err?.response;
+      throw wrapped;
     }
   }
 
@@ -42,22 +44,29 @@ class APSDataService {
   }
 
   // --------- Top Folders (root) ----------
-  async getTopFolders(hubId, projectId, accessToken) {
+  async getTopFolders(hubId, projectId, accessToken, region = null) {
     const path = apsConfig.apis.dataManagement.topFolders
       .replace('{hub_id}', encodeURIComponent(hubId))
       .replace('{project_id}', encodeURIComponent(projectId));
     const url = `${this.baseUrl}${path}`;
-    const data = await this._get(url, accessToken);
+    // Les projets hors US (CAN/EMEA/...) exigent l'en-tête de région, sinon 404 BIM360DM.
+    const extraHeaders = region && String(region).toUpperCase() !== 'US'
+      ? { 'x-ads-region': String(region).toUpperCase() }
+      : undefined;
+    const data = await this._get(url, accessToken, undefined, extraHeaders);
     return Array.isArray(data?.data) ? data.data : data;
   }
 
   // --------- Folder Contents (subfolders + items) ----------
-  async getFolderContents(projectId, folderId, accessToken) {
+  async getFolderContents(projectId, folderId, accessToken, region = null) {
     const path = apsConfig.apis.dataManagement.folderContents
       .replace('{project_id}', encodeURIComponent(projectId))
       .replace('{folder_id}', encodeURIComponent(folderId));
     const url = `${this.baseUrl}${path}`;
-    const data = await this._get(url, accessToken);
+    const extraHeaders = region && String(region).toUpperCase() !== 'US'
+      ? { 'x-ads-region': String(region).toUpperCase() }
+      : undefined;
+    const data = await this._get(url, accessToken, undefined, extraHeaders);
     return Array.isArray(data?.data) ? data.data : data;
   }
 }

@@ -2,15 +2,32 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../config/logger');
 const cron = require('node-cron');
+const { Op } = require('sequelize');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const { CopyJob, CopyRun, User } = require('../models');
 const scheduler = require('../services/scheduler.service');
+const apsAuthService = require('../services/apsAuth.service');
+const webhookRegistrationService = require('../services/webhookRegistration.service');
 
 const {
   asyncHandler,
   ValidationError,
   NotFoundError,
 } = require('../middleware/errorHandler.middleware');
+
+// 🆕 Construit un filtre Sequelize sur createdAt a partir de query params from/to (ISO)
+function buildDateRange(from, to) {
+  const range = {};
+  if (from) {
+    const d = new Date(from);
+    if (!Number.isNaN(d.getTime())) range[Op.gte] = d;
+  }
+  if (to) {
+    const d = new Date(to);
+    if (!Number.isNaN(d.getTime())) range[Op.lte] = d;
+  }
+  return Object.getOwnPropertySymbols(range).length > 0 ? range : null;
+}
 
 function validTz(tz) {
   if (!tz) return false;
@@ -114,6 +131,20 @@ router.post('/jobs', rateLimit, asyncHandler(async (req, res) => {
 
   if (job.scheduleEnabled) await scheduler.scheduleJob(job);
 
+  // 🆕 Auto-enregistrement webhook sur le dossier de destination (non bloquant)
+  // La nouvelle version (fichier copié) apparaît dans le dossier destination.
+  (async () => {
+    try {
+      if (webhookRegistrationService.isConfigured() && job.destinationFolderId && job.destinationProjectId) {
+        const token = await apsAuthService.ensureValidToken(user.id);
+        await webhookRegistrationService.ensureFolderWebhookAnyRegion(token, job.destinationFolderId, job.destinationProjectId, job.hubId || null);
+        logger.info(`[CopyJobs] Webhook auto-enregistré pour dossier destination ${job.destinationFolderId}`);
+      }
+    } catch (e) {
+      logger.warn(`[CopyJobs] Auto-enregistrement webhook échoué: ${e.message}`);
+    }
+  })();
+
   logger.info(`[CopyJobs] Job créé: ${job.id} - ${(payload.files || []).length} fichier(s)`);
   return res.json({ success: true, data: job });
 }));
@@ -189,7 +220,13 @@ router.get('/runs', asyncHandler(async (req, res) => {
   if (req.query.jobId) where.jobId = String(req.query.jobId);
   if (req.query.projectId) where.projectId = String(req.query.projectId);
   if (req.query.status) where.status = String(req.query.status);
-  const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
+
+  // 🆕 Filtrage par plage de dates (createdAt) pour les metriques du Dashboard
+  const createdAt = buildDateRange(req.query.from, req.query.to);
+  if (createdAt) where.createdAt = createdAt;
+
+  const maxLimit = createdAt ? 5000 : 200;
+  const limit = Math.min(parseInt(req.query.limit || '50', 10), maxLimit);
 
   const runs = await CopyRun.findAll({ where, order: [['createdAt', 'DESC']], limit });
   return res.json({ success: true, data: runs });
