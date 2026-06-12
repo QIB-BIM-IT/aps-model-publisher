@@ -279,8 +279,8 @@ export default function HistoriqueTable({ runs }) {
         const confirmed = !!(row.original.stats?.webhookReceived || row.original.stats?.webhookEndTime);
         return (
           <span title={confirmed
-            ? 'Durée réelle confirmée par webhook (publié sur ACC)'
-            : 'Durée de traitement interne (pas de confirmation ACC — ex. maquette sans modification)'}>
+            ? 'Durée réelle confirmée par webhook (document publié sur ACC)'
+            : "Durée de traitement interne — en attente de confirmation webhook ACC (document pas encore (re)publié sur ACC, ou webhook non reçu/associé)"}>
             {txt}{confirmed ? ' ✅' : ''}
           </span>
         );

@@ -642,8 +642,11 @@ async function sendFailureEmailIfNeeded(job, run, jobType, reason = 'failed') {
 // ===== Watchdog : détection des tâches "bloquées" / trop longues =====
 // Un run resté en 'running' au-delà du seuil est considéré bloqué : on le marque
 // 'failed' et on envoie une alerte 'stuck' au propriétaire.
-const STUCK_THRESHOLD_MS = Math.max(5, parseInt(process.env.STUCK_RUN_THRESHOLD_MIN || '120', 10)) * 60 * 1000;
-const STUCK_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérification toutes les 5 minutes
+// Seuil en minutes (accepte les décimales, ex: 0.1 = 6s pour tester). Plancher 0.05 min (3s).
+const STUCK_THRESHOLD_MIN = Math.max(0.05, parseFloat(process.env.STUCK_RUN_THRESHOLD_MIN || '120') || 120);
+const STUCK_THRESHOLD_MS = STUCK_THRESHOLD_MIN * 60 * 1000;
+// Cadence de vérification adaptée au seuil (bornée entre 10s et 5min) : un petit seuil → vérifs fréquentes.
+const STUCK_CHECK_INTERVAL_MS = Math.min(5 * 60 * 1000, Math.max(10 * 1000, Math.floor(STUCK_THRESHOLD_MS / 2)));
 let stuckTimer = null;
 
 async function checkStuckRuns() {
@@ -701,8 +704,8 @@ function startStuckWatchdog() {
     checkStuckRuns().catch((e) => logger.error(`[Watchdog] ${e.message}`));
   }, STUCK_CHECK_INTERVAL_MS);
   // Première vérification rapide après le démarrage
-  setTimeout(() => checkStuckRuns().catch(() => {}), 60 * 1000);
-  logger.info(`[Watchdog] Surveillance des tâches bloquées active (seuil ${STUCK_THRESHOLD_MS / 60000} min)`);
+  setTimeout(() => checkStuckRuns().catch(() => {}), Math.min(60 * 1000, STUCK_CHECK_INTERVAL_MS));
+  logger.info(`[Watchdog] Surveillance des tâches bloquées active (seuil ${STUCK_THRESHOLD_MIN} min, vérif ${Math.round(STUCK_CHECK_INTERVAL_MS / 1000)}s)`);
 }
 
 module.exports = {

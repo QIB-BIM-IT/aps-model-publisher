@@ -3042,10 +3042,23 @@ export default function PlanningPage() {
                     const totalFiles = Array.isArray(r.items) ? r.items.length : 0;
                     const jobIdShort = r.jobId ? String(r.jobId).slice(0, 8) : String(r.id).slice(0, 8);
 
+                    // Durée réelle (du lancement jusqu'à la confirmation webhook ACC si dispo),
+                    // sinon durée de traitement interne. Le crochet ✅ indique une confirmation webhook.
                     let durationText = '-';
-                    if (r.stats?.durationMs) {
-                      const seconds = Math.round(r.stats.durationMs / 1000);
-                      durationText = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+                    let durationConfirmed = false;
+                    {
+                      const s = r.stats || {};
+                      let ms = 0;
+                      if (s.webhookEndTime && r.startedAt) {
+                        ms = new Date(s.webhookEndTime) - new Date(r.startedAt);
+                      } else {
+                        ms = s.realDurationMs || s.durationMs || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
+                      }
+                      durationConfirmed = !!(s.webhookReceived || s.webhookEndTime);
+                      if (ms) {
+                        const seconds = Math.round(ms / 1000);
+                        durationText = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+                      }
                     }
 
                     let statusColor = '#6b7280';
@@ -3140,7 +3153,11 @@ export default function PlanningPage() {
                             borderRight: '1px solid rgba(148, 163, 184, 0.1)',
                           }}
                         >
-                          {durationText}
+                          <span title={durationConfirmed
+                            ? 'Durée réelle confirmée par webhook (document publié sur ACC)'
+                            : "Durée de traitement interne — en attente de confirmation webhook ACC (document pas encore (re)publié sur ACC, ou webhook non reçu/associé)"}>
+                            {durationText}{durationConfirmed ? ' ✅' : ''}
+                          </span>
                         </td>
                         <td
                           style={{
