@@ -130,6 +130,44 @@ router.get('/me', async (req, res) => {
   }
 });
 
+/**
+ * PUT /api/auth/preferences
+ * Met à jour les préférences de l'utilisateur (ex: notificationEmail).
+ * Body: { notificationEmail?: boolean, theme?: string, defaultHub?, defaultProject? }
+ */
+router.put('/preferences', async (req, res) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    const token = m ? m[1] : null;
+    if (!token) return res.status(401).json({ success: false, message: 'Non authentifié' });
+
+    let payload = null;
+    try { payload = jwt.verify(token, process.env.JWT_SECRET); } catch { payload = null; }
+    if (!payload?.id) return res.status(401).json({ success: false, message: 'Non authentifié' });
+
+    const user = await User.findByPk(payload.id);
+    if (!user) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+
+    const body = req.body || {};
+    const current = user.preferences || {};
+    const next = { ...current };
+    if (typeof body.notificationEmail === 'boolean') next.notificationEmail = body.notificationEmail;
+    if (typeof body.theme === 'string') next.theme = body.theme;
+    if ('defaultHub' in body) next.defaultHub = body.defaultHub;
+    if ('defaultProject' in body) next.defaultProject = body.defaultProject;
+
+    user.preferences = next;
+    user.changed('preferences', true); // JSONB: forcer la détection du changement
+    await user.save();
+
+    return res.json({ success: true, preferences: user.preferences });
+  } catch (err) {
+    logger.error('Erreur /preferences:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Erreur préférences' });
+  }
+});
+
 router.post('/logout', (req, res) => {
   try {
     return res.json({ success: true });

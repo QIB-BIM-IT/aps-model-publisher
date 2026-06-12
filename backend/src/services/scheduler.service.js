@@ -6,6 +6,7 @@
 
 const cron = require('node-cron');
 const cronParser = require('cron-parser');
+const { Op } = require('sequelize');
 const logger = require('../config/logger');
 const { PublishJob, PublishRun, PDFExportJob, PDFExportRun, CopyJob, CopyRun, User } = require('../models');
 const apsPublishService = require('./apsPublish.service');
@@ -573,33 +574,40 @@ async function init() {
   } catch (e) {
     logger.error(`[Scheduler] Erreur init CopyJobs: ${e.message}`);
   }
+
+  // Démarrer la surveillance des tâches bloquées / trop longues
+  startStuckWatchdog();
 }
 
 /**
- * Envoie un email de notification si la tâche a échoué et que les notifications sont activées
+ * Envoie un email d'alerte (échec ou tâche bloquée) au propriétaire de la tâche.
+ * Gating "niveau A" : on envoie par défaut, sauf si le propriétaire a désactivé
+ * la préférence globale `preferences.notificationEmail`.
+ * @param {'failed'|'stuck'} reason
  */
-async function sendFailureEmailIfNeeded(job, run, jobType) {
+async function sendFailureEmailIfNeeded(job, run, jobType, reason = 'failed') {
   try {
-    // Vérifier si les notifications sont activées pour cet échec
-    if (!job.notifyOnFailure) {
-      logger.debug(`[Scheduler] Notifications désactivées pour job ${job.id}`);
+    if (!emailService.isEnabled()) return; // service ACS non configuré → on ne fait rien
+
+    // Récupérer le propriétaire de la tâche
+    let owner = null;
+    if (job.userId) {
+      try { owner = await User.findByPk(job.userId); } catch {}
+    }
+
+    // Préférence globale du propriétaire (défaut: activé)
+    const ownerOptedOut = owner && owner.preferences && owner.preferences.notificationEmail === false;
+    if (ownerOptedOut) {
+      logger.debug(`[Scheduler] Notifications email désactivées par le propriétaire (job ${job.id})`);
       return;
     }
 
-    // Récupérer les destinataires
+    // Destinataires : override explicite par tâche, sinon l'email du propriétaire
     let recipients = [];
-    
-    // Si des destinataires sont spécifiés dans le job, les utiliser
-    if (job.notificationRecipients && Array.isArray(job.notificationRecipients) && job.notificationRecipients.length > 0) {
-      recipients = job.notificationRecipients.filter(email => email && typeof email === 'string');
-    }
-    
-    // Sinon, utiliser l'email de l'utilisateur propriétaire du job
-    if (recipients.length === 0 && job.userId) {
-      const user = await User.findByPk(job.userId);
-      if (user && user.email) {
-        recipients = [user.email];
-      }
+    if (Array.isArray(job.notificationRecipients) && job.notificationRecipients.length > 0) {
+      recipients = job.notificationRecipients.filter((email) => email && typeof email === 'string');
+    } else if (owner && owner.email) {
+      recipients = [owner.email];
     }
 
     if (recipients.length === 0) {
@@ -607,38 +615,94 @@ async function sendFailureEmailIfNeeded(job, run, jobType) {
       return;
     }
 
-    // Préparer les détails du job selon le type
     const jobDetails = {
       projectName: job.projectName || 'N/A',
       hubName: job.hubName || 'N/A',
     };
-
     if (jobType === 'pdf-export') {
       jobDetails.fileName = job.fileName || job.fileUrn || 'N/A';
-      jobDetails.fileUrn = job.fileUrn;
     }
 
-    // Préparer les détails du run
-    const runDetails = {
-      stats: run.stats || {},
-      results: run.results || [],
-      items: run.items || [],
-    };
-
-    // Envoyer l'email
-    await emailService.sendFailureNotification({
+    await emailService.sendTaskAlert({
+      reason,
       jobName: job.name || 'Tâche sans nom',
-      jobType: jobType,
+      jobType,
       jobId: job.id,
-      runId: run.id,
-      errorMessage: run.message || 'Erreur inconnue',
-      runDetails,
+      runId: run?.id,
+      errorMessage: run?.message || (reason === 'stuck' ? "Délai d'exécution dépassé." : 'Erreur inconnue'),
+      occurredAt: run?.endedAt || new Date(),
       recipients,
       jobDetails,
     });
   } catch (error) {
     logger.error(`[Scheduler] Erreur envoi notification email: ${error.message}`);
   }
+}
+
+// ===== Watchdog : détection des tâches "bloquées" / trop longues =====
+// Un run resté en 'running' au-delà du seuil est considéré bloqué : on le marque
+// 'failed' et on envoie une alerte 'stuck' au propriétaire.
+const STUCK_THRESHOLD_MS = Math.max(5, parseInt(process.env.STUCK_RUN_THRESHOLD_MIN || '120', 10)) * 60 * 1000;
+const STUCK_CHECK_INTERVAL_MS = 5 * 60 * 1000; // vérification toutes les 5 minutes
+let stuckTimer = null;
+
+async function checkStuckRuns() {
+  const now = Date.now();
+  const cutoff = new Date(now - STUCK_THRESHOLD_MS);
+  const configs = [
+    { RunModel: PublishRun, JobModel: PublishJob, jobType: 'publish' },
+    { RunModel: PDFExportRun, JobModel: PDFExportJob, jobType: 'pdf-export' },
+    { RunModel: CopyRun, JobModel: CopyJob, jobType: 'file-copy' },
+  ];
+
+  for (const { RunModel, JobModel, jobType } of configs) {
+    let stuckRuns = [];
+    try {
+      stuckRuns = await RunModel.findAll({
+        where: { status: 'running', startedAt: { [Op.lt]: cutoff } },
+      });
+    } catch (e) {
+      logger.error(`[Watchdog] Erreur recherche runs bloqués (${jobType}): ${e.message}`);
+      continue;
+    }
+
+    for (const run of stuckRuns) {
+      try {
+        const mins = Math.round((now - new Date(run.startedAt).getTime()) / 60000);
+        run.status = 'failed';
+        run.endedAt = new Date();
+        run.message = `Tâche bloquée : aucune fin après ${mins} min (seuil ${STUCK_THRESHOLD_MS / 60000} min). Interrompue automatiquement.`;
+        await run.save();
+
+        let job = null;
+        try { job = await JobModel.findByPk(run.jobId); } catch {}
+        if (job) {
+          try {
+            job.status = 'error';
+            job.history = [
+              ...(job.history || []),
+              { at: new Date(), status: 'stuck', message: run.message },
+            ];
+            await job.save();
+          } catch {}
+          await sendFailureEmailIfNeeded(job, run, jobType, 'stuck');
+        }
+        logger.warn(`[Watchdog] Run ${run.id} (${jobType}) marqué 'failed' (bloqué ${mins} min)`);
+      } catch (e) {
+        logger.error(`[Watchdog] Erreur traitement run bloqué ${run?.id}: ${e.message}`);
+      }
+    }
+  }
+}
+
+function startStuckWatchdog() {
+  if (stuckTimer) return;
+  stuckTimer = setInterval(() => {
+    checkStuckRuns().catch((e) => logger.error(`[Watchdog] ${e.message}`));
+  }, STUCK_CHECK_INTERVAL_MS);
+  // Première vérification rapide après le démarrage
+  setTimeout(() => checkStuckRuns().catch(() => {}), 60 * 1000);
+  logger.info(`[Watchdog] Surveillance des tâches bloquées active (seuil ${STUCK_THRESHOLD_MS / 60000} min)`);
 }
 
 module.exports = {

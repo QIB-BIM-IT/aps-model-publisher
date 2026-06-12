@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getPublishJobs, getPDFExportJobs, getCopyJobs, getRuns, getPDFExportRuns, getCopyRuns } from '../services/api';
+import { getPublishJobs, getPDFExportJobs, getCopyJobs, getRuns, getPDFExportRuns, getCopyRuns, me, updatePreferences } from '../services/api';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Durée RÉELLE end-to-end d'un run = début -> confirmation de publication sur ACC
@@ -95,6 +95,32 @@ export default function GlobalDashboard() {
   const [timeFilter, setTimeFilter] = React.useState('forever'); // day, week, month, year, forever
   const [jobSearch, setJobSearch] = React.useState(''); // recherche dans le tableau récapitulatif
   const [jobSort, setJobSort] = React.useState({ key: null, direction: 'asc' }); // tri des colonnes
+  const [emailNotif, setEmailNotif] = React.useState(true); // préférence: recevoir un email en cas d'échec
+  const [emailNotifSaving, setEmailNotifSaving] = React.useState(false);
+
+  // Charger la préférence de notification email de l'utilisateur courant
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await me();
+      const pref = res?.user?.preferences?.notificationEmail;
+      if (!cancelled && typeof pref === 'boolean') setEmailNotif(pref);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function toggleEmailNotif() {
+    const next = !emailNotif;
+    setEmailNotif(next); // optimiste
+    setEmailNotifSaving(true);
+    try {
+      await updatePreferences({ notificationEmail: next });
+    } catch (e) {
+      setEmailNotif(!next); // rollback en cas d'erreur
+    } finally {
+      setEmailNotifSaving(false);
+    }
+  }
 
   function handleJobClick(job, jobType) {
     if (!job) return;
@@ -596,6 +622,28 @@ export default function GlobalDashboard() {
                 {refreshing ? '🔄 Mise à jour…' : `Mis à jour à ${lastUpdated.toLocaleTimeString('fr-CA')}`}
               </span>
             )}
+            <button
+              onClick={toggleEmailNotif}
+              disabled={emailNotifSaving}
+              title={emailNotif
+                ? 'Tu reçois un courriel quand une de tes tâches échoue ou se bloque. Cliquer pour désactiver.'
+                : 'Notifications par courriel désactivées. Cliquer pour activer.'}
+              style={{
+                padding: '12px 18px',
+                borderRadius: 10,
+                border: emailNotif ? '1px solid rgba(96, 165, 250, 0.5)' : '1px solid rgba(148, 163, 184, 0.3)',
+                background: emailNotif ? 'rgba(37, 99, 235, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                color: emailNotif ? '#60a5fa' : '#94a3b8',
+                fontSize: 15,
+                fontWeight: 600,
+                cursor: emailNotifSaving ? 'wait' : 'pointer',
+                opacity: emailNotifSaving ? 0.6 : 1,
+                whiteSpace: 'nowrap',
+                transition: 'all 0.2s'
+              }}
+            >
+              {emailNotif ? '🔔 Alertes courriel : ON' : '🔕 Alertes courriel : OFF'}
+            </button>
             <button
               onClick={() => loadAllData({ silent: true })}
               disabled={refreshing}

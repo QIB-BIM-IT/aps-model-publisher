@@ -1,269 +1,203 @@
 // src/services/email.service.js
-// Service pour envoyer des emails de notification d'erreur
+// Service d'envoi d'emails d'alerte via Azure Communication Services (ACS) Email.
+// Deux types d'alerte : 'failed' (la tâche a échoué) et 'stuck' (tâche bloquée / trop longue).
+// Piloté par variables d'environnement :
+//   EMAIL_ENABLED          : 'true' pour activer l'envoi
+//   ACS_CONNECTION_STRING  : connection string de la ressource Communication Services
+//   EMAIL_FROM             : adresse expéditrice (ex: DoNotReply@<sous-domaine>.azurecomm.net)
+//   APP_BASE_URL           : URL publique de l'app pour le lien (fallback: CORS_ORIGIN)
 
-const nodemailer = require('nodemailer');
+const { EmailClient } = require('@azure/communication-email');
 const logger = require('../config/logger');
 
-// Configuration depuis les variables d'environnement
-const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com';
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10);
-const SMTP_SECURE = String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true';
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const EMAIL_FROM = process.env.EMAIL_FROM || SMTP_USER || 'noreply@aps-model-publisher.com';
-// Service désactivé par défaut - l'infrastructure reste en place pour activation future
-const EMAIL_ENABLED = false;
+const APP_NAME = 'APS Model Publisher';
 
-let transporter = null;
+const EMAIL_ENABLED = String(process.env.EMAIL_ENABLED || 'false').toLowerCase() === 'true';
+const ACS_CONNECTION_STRING = process.env.ACS_CONNECTION_STRING || '';
+const EMAIL_FROM_RAW = process.env.EMAIL_FROM || '';
+const APP_BASE_URL = (process.env.APP_BASE_URL || process.env.CORS_ORIGIN || '').replace(/\/+$/, '');
 
-/**
- * Initialise le transporteur email
- */
-function initTransporter() {
-  if (!EMAIL_ENABLED) {
-    logger.info('[Email] Service email désactivé - Infrastructure en place pour activation future si nécessaire');
+// EMAIL_FROM peut être "Nom <adresse@domaine>" : on extrait l'adresse seule (requise par ACS).
+function parseSenderAddress(raw) {
+  if (!raw) return '';
+  const m = raw.match(/<([^>]+)>/);
+  return (m ? m[1] : raw).trim();
+}
+const SENDER_ADDRESS = parseSenderAddress(EMAIL_FROM_RAW);
+
+let client = null;
+function getClient() {
+  if (!EMAIL_ENABLED) return null;
+  if (!ACS_CONNECTION_STRING || !SENDER_ADDRESS) {
+    logger.warn('[Email] EMAIL_ENABLED=true mais ACS_CONNECTION_STRING ou EMAIL_FROM manquant — envoi désactivé.');
     return null;
   }
-
-  if (!SMTP_USER || !SMTP_PASS) {
-    logger.info('[Email] SMTP non configuré - les notifications email seront désactivées. Pour activer, configurez SMTP_USER et SMTP_PASS dans .env');
-    return null;
+  if (!client) {
+    try {
+      client = new EmailClient(ACS_CONNECTION_STRING);
+      logger.info('[Email] Client ACS Email initialisé.');
+    } catch (e) {
+      logger.error(`[Email] Erreur initialisation client ACS: ${e.message}`);
+      client = null;
+    }
   }
+  return client;
+}
 
+function isEnabled() {
+  return EMAIL_ENABLED && !!ACS_CONNECTION_STRING && !!SENDER_ADDRESS;
+}
+
+function jobTypeLabel(jobType) {
+  if (jobType === 'pdf-export') return 'Export PDF';
+  if (jobType === 'file-copy') return 'Copie de fichiers';
+  if (jobType === 'publish') return 'Publication';
+  return 'Tâche';
+}
+
+function formatDate(date) {
+  const d = date ? new Date(date) : new Date();
   try {
-    transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_SECURE,
-      auth: {
-        user: SMTP_USER,
-        pass: SMTP_PASS,
-      },
-    });
-
-    logger.info(`[Email] Transporteur initialisé (${SMTP_HOST}:${SMTP_PORT})`);
-    return transporter;
-  } catch (error) {
-    logger.error(`[Email] Erreur initialisation transporteur: ${error.message}`);
-    return null;
+    return d.toLocaleString('fr-CA', { timeZone: 'America/Toronto', dateStyle: 'long', timeStyle: 'short' });
+  } catch {
+    return d.toISOString();
   }
 }
 
-/**
- * Envoie un email de notification d'erreur pour une tâche qui a échoué
- * @param {Object} options - Options de l'email
- * @param {string} options.jobName - Nom de la tâche
- * @param {string} options.jobType - Type de tâche ('publish' ou 'pdf-export')
- * @param {string} options.jobId - ID de la tâche
- * @param {string} options.runId - ID du run
- * @param {string} options.errorMessage - Message d'erreur
- * @param {Object} options.runDetails - Détails du run (stats, results, etc.)
- * @param {Array<string>} options.recipients - Liste des destinataires (emails)
- * @param {Object} options.jobDetails - Détails supplémentaires du job (projectName, fileName, etc.)
- */
-async function sendFailureNotification({
-  jobName,
-  jobType,
-  jobId,
-  runId,
-  errorMessage,
-  runDetails = {},
-  recipients = [],
-  jobDetails = {},
-}) {
-  if (!EMAIL_ENABLED || !transporter) {
-    // Ne pas logger en mode debug pour éviter le spam - c'est normal si le service n'est pas configuré
-    return false;
-  }
+// Construit le sujet : Nom de l'app — Nom de la tâche — <Échec|Bloquée> — Date
+function buildSubject({ reason, jobName, occurredAt }) {
+  const reasonLabel = reason === 'stuck' ? 'Tâche bloquée' : 'Échec';
+  return `${APP_NAME} — ${jobName || 'Tâche'} — ${reasonLabel} — ${formatDate(occurredAt)}`;
+}
 
-  if (!recipients || recipients.length === 0) {
-    logger.warn('[Email] Aucun destinataire spécifié, notification non envoyée');
-    return false;
-  }
+function buildBody({ reason, jobName, jobType, jobId, runId, errorMessage, occurredAt, jobDetails = {} }) {
+  const isStuck = reason === 'stuck';
+  const typeLabel = jobTypeLabel(jobType);
+  const dateStr = formatDate(occurredAt);
+  const projectName = jobDetails.projectName || 'N/A';
+  const headerColor = isStuck ? '#d97706' : '#dc2626';
+  const headerColor2 = isStuck ? '#b45309' : '#991b1b';
+  const icon = isStuck ? '⏳' : '❌';
+  const title = isStuck
+    ? `${icon} Tâche bloquée (trop longue)`
+    : `${icon} Échec de la tâche`;
+  const intro = isStuck
+    ? `La tâche <b>${jobName || 'sans nom'}</b> (${typeLabel}) semble <b>bloquée</b> : elle s'exécute depuis trop longtemps et a été interrompue automatiquement. Une intervention peut être nécessaire.`
+    : `La tâche <b>${jobName || 'sans nom'}</b> (${typeLabel}) a <b>échoué</b>. Consulte le détail ci-dessous et l'application pour plus d'informations.`;
 
-  try {
-    const jobTypeLabel = jobType === 'pdf-export' ? 'Export PDF' : 'Publication';
-    const projectName = jobDetails.projectName || 'N/A';
-    const fileName = jobDetails.fileName || jobDetails.fileUrn || 'N/A';
-    const hubName = jobDetails.hubName || 'N/A';
+  const link = APP_BASE_URL || '';
+  const linkButton = link
+    ? `<div style="margin:24px 0;">
+         <a href="${link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600;display:inline-block;">Ouvrir ${APP_NAME}</a>
+       </div>`
+    : '';
 
-    // Formatage des stats
-    const stats = runDetails.stats || {};
-    const duration = stats.durationMs
-      ? `${Math.round(stats.durationMs / 1000)}s`
-      : 'N/A';
-    const successCount = stats.okCount || stats.uploaded || 0;
-    const failCount = stats.failCount || stats.failed || 0;
-    const totalFiles = stats.totalFiles || (runDetails.items?.length || 0);
-
-    // Construction du message HTML structuré
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; }
-    .content { background: #f9fafb; padding: 20px; border: 1px solid #e5e7eb; border-top: none; }
-    .section { margin-bottom: 20px; }
-    .section-title { font-weight: 600; color: #1f2937; margin-bottom: 8px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
-    .info-label { font-weight: 600; color: #6b7280; }
-    .info-value { color: #1f2937; }
-    .error-box { background: #fee2e2; border-left: 4px solid #dc2626; padding: 12px; margin: 16px 0; border-radius: 4px; }
-    .error-message { color: #991b1b; font-weight: 600; }
-    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-    .stat-box { background: white; padding: 12px; border-radius: 6px; border: 1px solid #e5e7eb; }
-    .stat-value { font-size: 24px; font-weight: 700; color: #1f2937; }
-    .stat-label { font-size: 12px; color: #6b7280; text-transform: uppercase; }
-    .footer { margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #9ca3af; text-align: center; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h2 style="margin: 0;">❌ Échec de la tâche ${jobTypeLabel}</h2>
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.6;color:#1f2937;background:#f3f4f6;padding:20px;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb;">
+    <div style="background:linear-gradient(135deg,${headerColor} 0%,${headerColor2} 100%);color:#fff;padding:20px 24px;">
+      <h2 style="margin:0;font-size:18px;">${title}</h2>
+      <div style="opacity:.9;font-size:13px;margin-top:4px;">${APP_NAME}</div>
     </div>
-    <div class="content">
-      <div class="section">
-        <div class="section-title">Informations de la tâche</div>
-        <div class="info-row">
-          <span class="info-label">Nom:</span>
-          <span class="info-value">${jobName || 'Sans nom'}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Type:</span>
-          <span class="info-value">${jobTypeLabel}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">ID Tâche:</span>
-          <span class="info-value">${jobId || 'N/A'}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">ID Run:</span>
-          <span class="info-value">${runId || 'N/A'}</span>
-        </div>
-        ${jobType === 'pdf-export' 
-          ? `<div class="info-row">
-              <span class="info-label">Fichier:</span>
-              <span class="info-value">${fileName}</span>
-            </div>`
-          : `<div class="info-row">
-              <span class="info-label">Hub:</span>
-              <span class="info-value">${hubName}</span>
-            </div>`
-        }
-        <div class="info-row">
-          <span class="info-label">Projet:</span>
-          <span class="info-value">${projectName}</span>
-        </div>
+    <div style="padding:24px;">
+      <p style="margin-top:0;">${intro}</p>
+      ${linkButton}
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <tr><td style="padding:6px 0;color:#6b7280;width:140px;">Tâche</td><td style="padding:6px 0;font-weight:600;">${jobName || 'Sans nom'}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Type</td><td style="padding:6px 0;">${typeLabel}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Projet</td><td style="padding:6px 0;">${projectName}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Date</td><td style="padding:6px 0;">${dateStr}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">ID tâche</td><td style="padding:6px 0;font-family:monospace;font-size:12px;">${jobId || 'N/A'}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">ID run</td><td style="padding:6px 0;font-family:monospace;font-size:12px;">${runId || 'N/A'}</td></tr>
+      </table>
+      <div style="margin-top:16px;background:${isStuck ? '#fef3c7' : '#fee2e2'};border-left:4px solid ${headerColor};padding:12px;border-radius:4px;">
+        <div style="font-weight:600;color:${headerColor2};">${isStuck ? 'Raison' : "Message d'erreur"}</div>
+        <div style="color:#374151;margin-top:4px;">${errorMessage || (isStuck ? 'Délai d\'exécution dépassé.' : 'Erreur inconnue.')}</div>
       </div>
-
-      <div class="section">
-        <div class="section-title">Résultats</div>
-        <div class="stats-grid">
-          <div class="stat-box">
-            <div class="stat-value" style="color: #dc2626;">${failCount}</div>
-            <div class="stat-label">Échecs</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-value" style="color: #059669;">${successCount}</div>
-            <div class="stat-label">Succès</div>
-          </div>
-        </div>
-        ${totalFiles > 0 ? `
-        <div class="info-row" style="margin-top: 12px;">
-          <span class="info-label">Total fichiers:</span>
-          <span class="info-value">${totalFiles}</span>
-        </div>
-        ` : ''}
-        <div class="info-row">
-          <span class="info-label">Durée:</span>
-          <span class="info-value">${duration}</span>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-title">Message d'erreur</div>
-        <div class="error-box">
-          <div class="error-message">${errorMessage || 'Erreur inconnue'}</div>
-        </div>
-      </div>
-
-      ${runDetails.results && Array.isArray(runDetails.results) && runDetails.results.length > 0 ? `
-      <div class="section">
-        <div class="section-title">Détails des résultats</div>
-        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #e5e7eb; max-height: 200px; overflow-y: auto;">
-          <pre style="margin: 0; font-size: 11px; color: #374151;">${JSON.stringify(runDetails.results, null, 2)}</pre>
-        </div>
-      </div>
-      ` : ''}
-
-      <div class="footer">
-        <p>Ce message a été généré automatiquement par APS Model Publisher</p>
-        <p>Date: ${new Date().toLocaleString('fr-CA', { timeZone: 'America/Toronto' })}</p>
+      <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;">
+        Message automatique de ${APP_NAME}. Tu reçois cet email car tu es le propriétaire de cette tâche.
       </div>
     </div>
   </div>
-</body>
-</html>
-    `.trim();
+</body></html>`;
 
-    // Version texte simple pour les clients qui ne supportent pas HTML
-    const textContent = `
-Échec de la tâche ${jobTypeLabel}
+  const text = [
+    title,
+    APP_NAME,
+    '',
+    intro.replace(/<[^>]+>/g, ''),
+    link ? `\nOuvrir l'application : ${link}` : '',
+    '',
+    `Tâche   : ${jobName || 'Sans nom'}`,
+    `Type    : ${typeLabel}`,
+    `Projet  : ${projectName}`,
+    `Date    : ${dateStr}`,
+    `ID tâche: ${jobId || 'N/A'}`,
+    `ID run  : ${runId || 'N/A'}`,
+    '',
+    `${isStuck ? 'Raison' : "Message d'erreur"}: ${errorMessage || (isStuck ? "Délai d'exécution dépassé." : 'Erreur inconnue.')}`,
+  ].join('\n');
 
-Informations de la tâche:
-- Nom: ${jobName || 'Sans nom'}
-- Type: ${jobTypeLabel}
-- ID Tâche: ${jobId || 'N/A'}
-- ID Run: ${runId || 'N/A'}
-${jobType === 'pdf-export' ? `- Fichier: ${fileName}` : `- Hub: ${hubName}`}
-- Projet: ${projectName}
+  return { html, text };
+}
 
-Résultats:
-- Échecs: ${failCount}
-- Succès: ${successCount}
-${totalFiles > 0 ? `- Total fichiers: ${totalFiles}` : ''}
-- Durée: ${duration}
+/**
+ * Envoie une alerte (échec ou tâche bloquée) au(x) destinataire(s).
+ * @param {Object} opts
+ * @param {'failed'|'stuck'} opts.reason
+ * @param {string} opts.jobName
+ * @param {string} opts.jobType - 'publish' | 'pdf-export' | 'file-copy'
+ * @param {string} opts.jobId
+ * @param {string} opts.runId
+ * @param {string} opts.errorMessage
+ * @param {Date|string} [opts.occurredAt]
+ * @param {Array<string>} opts.recipients
+ * @param {Object} [opts.jobDetails]
+ * @returns {Promise<boolean>}
+ */
+async function sendTaskAlert(opts) {
+  const { reason = 'failed', recipients = [] } = opts || {};
+  const c = getClient();
+  if (!c) return false;
 
-Message d'erreur:
-${errorMessage || 'Erreur inconnue'}
+  const toList = (recipients || []).filter((e) => e && typeof e === 'string');
+  if (toList.length === 0) {
+    logger.warn('[Email] Aucun destinataire valide, alerte non envoyée.');
+    return false;
+  }
 
-${runDetails.results && Array.isArray(runDetails.results) && runDetails.results.length > 0 
-  ? `\nDétails des résultats:\n${JSON.stringify(runDetails.results, null, 2)}` 
-  : ''}
+  const subject = buildSubject(opts);
+  const { html, text } = buildBody(opts);
 
----
-Ce message a été généré automatiquement par APS Model Publisher
-Date: ${new Date().toLocaleString('fr-CA', { timeZone: 'America/Toronto' })}
-    `.trim();
+  const message = {
+    senderAddress: SENDER_ADDRESS,
+    content: { subject, plainText: text, html },
+    recipients: { to: toList.map((address) => ({ address })) },
+  };
 
-    const mailOptions = {
-      from: EMAIL_FROM,
-      to: recipients.join(', '),
-      subject: `❌ Échec: ${jobName || 'Tâche'} (${jobTypeLabel})`,
-      text: textContent,
-      html: htmlContent,
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    logger.info(`[Email] Notification d'échec envoyée à ${recipients.length} destinataire(s) pour job ${jobId}`);
-    return true;
-  } catch (error) {
-    logger.error(`[Email] Erreur envoi notification: ${error.message}`);
+  try {
+    const poller = await c.beginSend(message);
+    const result = await poller.pollUntilDone();
+    if (result.status === 'Succeeded') {
+      logger.info(`[Email] Alerte '${reason}' envoyée à ${toList.length} destinataire(s) (job ${opts.jobId}).`);
+      return true;
+    }
+    logger.error(`[Email] Envoi non abouti (status=${result.status}) pour job ${opts.jobId}.`);
+    return false;
+  } catch (e) {
+    logger.error(`[Email] Erreur d'envoi ACS: ${e.message}`);
     return false;
   }
 }
 
-// Initialiser le transporteur au chargement du module
-initTransporter();
+// Compat : ancien point d'entrée (échec). Redirige vers sendTaskAlert.
+async function sendFailureNotification(opts) {
+  return sendTaskAlert({ ...opts, reason: 'failed' });
+}
 
 module.exports = {
+  isEnabled,
+  sendTaskAlert,
   sendFailureNotification,
-  initTransporter,
-  isEnabled: () => EMAIL_ENABLED && transporter !== null,
 };
-
