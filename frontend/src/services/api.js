@@ -43,6 +43,11 @@ export async function me() {
   catch { return null; }
 }
 
+export async function updatePreferences(prefs) {
+  const { data } = await api.put('/api/auth/preferences', prefs);
+  return data?.preferences || null;
+}
+
 export async function startLogin(opts = {}) {
   const redirect = window.location.origin + '/callback';
   const force = opts.forceLogin ? '&force=login' : '';
