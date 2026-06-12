@@ -1896,6 +1896,37 @@ export default function PlanningPage() {
     return () => clearInterval(interval);
   }, [shouldAutoRefresh, refreshRuns, refreshJobs, refreshPdfRuns, refreshPdfJobs, refreshCopyRuns, refreshCopyJobs]);
 
+  // Polling « léger » dédié à la confirmation webhook ACC : le webhook dm.version.added
+  // arrive APRÈS la fin du run (success/partial). On continue donc à rafraîchir les runs
+  // (toutes les 15s, fenêtre de 5 min après la fin) jusqu'à recevoir webhookReceived,
+  // pour que le ✅ « durée réelle » apparaisse sans action manuelle.
+  const hasPendingWebhook = React.useMemo(() => {
+    if (!selectedProject) return false;
+    const now = Date.now();
+    const WEBHOOK_WAIT_MS = 5 * 60 * 1000;
+    return runs.some((r) => {
+      if (r.status !== 'success' && r.status !== 'partial') return false;
+      const s = r.stats || {};
+      if (s.webhookReceived || s.webhookEndTime) return false;
+      const endedRaw = r.endedAt || r.updatedAt;
+      const endedAt = endedRaw ? new Date(endedRaw).getTime() : 0;
+      if (!endedAt) return false;
+      return (now - endedAt) < WEBHOOK_WAIT_MS;
+    });
+  }, [selectedProject, runs]);
+
+  React.useEffect(() => {
+    // Ne pas doubler le polling rapide : s'il tourne déjà, il couvre aussi ce besoin.
+    if (!hasPendingWebhook || shouldAutoRefresh) return undefined;
+    const tick = () => {
+      void refreshRuns({ silent: true });
+      void refreshPdfRuns({ silent: true });
+      void refreshCopyRuns({ silent: true });
+    };
+    const interval = setInterval(tick, 15000);
+    return () => clearInterval(interval);
+  }, [hasPendingWebhook, shouldAutoRefresh, refreshRuns, refreshPdfRuns, refreshCopyRuns]);
+
   React.useEffect(() => {
     if (!highlightJobId || jobs.length === 0) return;
     if (appliedHighlightJob.current === highlightJobId) return;
