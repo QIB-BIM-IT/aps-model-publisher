@@ -154,10 +154,15 @@ class PDFExportSchedulerService {
     const sheetCount = summary.sheetCount || uploaded; // Fallback sur uploaded si sheetCount absent
     const errors = summary.errors || [];
 
-    let finalStatus = 'success';
-    if (failed > 0 && uploaded === 0) {
+    let finalStatus;
+    if (summary.status) {
+      // Statut explicite fourni par l'appelant (ex. échec/exception remonté par runJob) :
+      // on le respecte au lieu de le recalculer (sinon un échec sans compteurs => 'success').
+      finalStatus = summary.status;
+    } else if (uploaded === 0) {
+      // Aucun PDF produit = ce n'est pas un succès (modèle non rendu, 0 sheet, etc.).
       finalStatus = 'failed';
-    } else if (failed > 0 && uploaded > 0) {
+    } else if (failed > 0) {
       finalStatus = 'partial';
     } else {
       finalStatus = 'success';
