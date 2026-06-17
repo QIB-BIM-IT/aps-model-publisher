@@ -403,6 +403,11 @@ async function runJob(jobId, jobInstance = null, options = {}) {
           ...(job.history || []),
           { at: new Date(), status: 'error', message: e.message },
         ];
+        // Recalculer nextRun même en cas d'échec (sinon l'heure affichée reste figée dans le passé)
+        if (job.scheduleEnabled) {
+          const nextRun = calculateNextRun(job.cronExpression, job.timezone || 'UTC');
+          if (nextRun) job.nextRun = nextRun;
+        }
         await job.save();
       }
     } catch {}
@@ -569,6 +574,39 @@ async function init() {
     logger.error(`[Scheduler] Crash-safety jobs error: ${e.message}`);
   }
 
+  // 🆕 Détecter les créneaux planifiés MANQUÉS pendant un downtime (déploiement,
+  // changement de variable d'env, crash...). node-cron ne rattrape jamais une
+  // occurrence ratée. On lit nextRun AVANT de replanifier (scheduleJob le
+  // recalcule vers le futur), et on relancera les jobs dont le créneau est
+  // dépassé mais encore dans la fenêtre de grâce.
+  const missedJobIds = [];
+  try {
+    const graceMin = Math.max(1, parseFloat(process.env.MISSED_RUN_GRACE_MIN || '120') || 120);
+    const graceMs = graceMin * 60 * 1000;
+    const now = Date.now();
+    const jobModels = [PublishJob, PDFExportJob, CopyJob];
+    for (const Model of jobModels) {
+      let jobs = [];
+      try {
+        jobs = await Model.findAll({ where: { scheduleEnabled: true } });
+      } catch { continue; }
+      for (const job of jobs) {
+        if (!job.nextRun) continue;
+        const next = new Date(job.nextRun).getTime();
+        if (next >= now) continue;             // créneau dans le futur → pas manqué
+        if ((now - next) > graceMs) continue;  // trop ancien → on ignore (pas de rattrapage massif)
+        const last = job.lastRun ? new Date(job.lastRun).getTime() : 0;
+        if (last >= next) continue;            // déjà exécuté pour ce créneau
+        missedJobIds.push(job.id);
+      }
+    }
+    if (missedJobIds.length) {
+      logger.warn(`[Scheduler] ${missedJobIds.length} créneau(x) planifié(s) manqué(s) détecté(s) (grâce ${graceMin} min) — rattrapage au démarrage`);
+    }
+  } catch (e) {
+    logger.error(`[Scheduler] Erreur détection créneaux manqués: ${e.message}`);
+  }
+
   // Au boot: planifie tous les jobs actifs (Publish + PDF Export + Copy)
   try {
     const publishJobs = await PublishJob.findAll({
@@ -605,6 +643,18 @@ async function init() {
 
   // Démarrer la surveillance des tâches bloquées / trop longues
   startStuckWatchdog();
+
+  // 🆕 Rattrapage des créneaux manqués, échelonné (5s entre chaque) pour éviter
+  // une rafale d'exécutions simultanées au démarrage. Le lock projet sérialise
+  // déjà les jobs d'un même projet.
+  if (missedJobIds.length) {
+    missedJobIds.forEach((jobId, i) => {
+      setTimeout(() => {
+        logger.info(`[Scheduler] Rattrapage du créneau manqué pour job ${jobId}`);
+        runJobNow(jobId).catch((e) => logger.error(`[Scheduler] Rattrapage job ${jobId} échec: ${e.message}`));
+      }, i * 5000);
+    });
+  }
 }
 
 /**
