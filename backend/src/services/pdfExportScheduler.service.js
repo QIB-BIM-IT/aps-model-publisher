@@ -72,9 +72,13 @@ class PDFExportSchedulerService {
 
       logger.debug(`[PDFExportScheduler] Payload: ${JSON.stringify(payload, null, 2)}`);
 
-      // Appeler /export-and-save (requête interne depuis le scheduler)
-      const apiUrl = process.env.API_URL || 'http://localhost:3000';
-      const url = `${apiUrl}/api/pdf-export/export-and-save`;
+      // Appel interne depuis le scheduler : on vise la BOUCLE LOCALE (127.0.0.1:PORT)
+      // pour NE PAS passer par le load-balancer Azure App Service, qui coupe toute
+      // requête au bout de ~230s (cause des exports longs « server restart »).
+      // INTERNAL_API_URL permet de surcharger si besoin ; on n'utilise PAS API_URL
+      // (souvent l'URL publique) pour cet appel interne.
+      const internalBase = process.env.INTERNAL_API_URL || `http://127.0.0.1:${process.env.PORT || 3000}`;
+      const url = `${internalBase}/api/pdf-export/export-and-save`;
       
       logger.debug(`[PDFExportScheduler] Appel interne vers ${url} avec userId=${run.userId}`);
       
