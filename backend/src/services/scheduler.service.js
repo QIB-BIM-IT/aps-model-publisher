@@ -541,6 +541,34 @@ async function init() {
     logger.error(`[Scheduler] Crash-safety CopyRun error: ${e.message}`);
   }
 
+  // Crash safety pour les JOBS : un job resté en 'running' après un redémarrage
+  // est forcément orphelin (aucune exécution en mémoire après reboot). On le
+  // réinitialise à 'idle' pour qu'il ne reste pas bloqué à l'affichage et qu'il
+  // puisse être replanifié normalement.
+  try {
+    const jobModels = [
+      { Model: PublishJob, label: 'PublishJob' },
+      { Model: PDFExportJob, label: 'PDFExportJob' },
+      { Model: CopyJob, label: 'CopyJob' },
+    ];
+    for (const { Model, label } of jobModels) {
+      const stuckJobs = await Model.findAll({ where: { status: 'running' } });
+      for (const j of stuckJobs) {
+        j.status = 'idle';
+        j.history = [
+          ...(j.history || []),
+          { at: new Date(), status: 'recovered', message: 'Statut "running" orphelin réinitialisé après redémarrage serveur' },
+        ];
+        await j.save();
+      }
+      if (stuckJobs.length) {
+        logger.warn(`[Scheduler] ${stuckJobs.length} ${label}(s) 'running' orphelin(s) réinitialisé(s) à 'idle' au démarrage`);
+      }
+    }
+  } catch (e) {
+    logger.error(`[Scheduler] Crash-safety jobs error: ${e.message}`);
+  }
+
   // Au boot: planifie tous les jobs actifs (Publish + PDF Export + Copy)
   try {
     const publishJobs = await PublishJob.findAll({
@@ -693,6 +721,39 @@ async function checkStuckRuns() {
         logger.warn(`[Watchdog] Run ${run.id} (${jobType}) marqué 'failed' (bloqué ${mins} min)`);
       } catch (e) {
         logger.error(`[Watchdog] Erreur traitement run bloqué ${run?.id}: ${e.message}`);
+      }
+    }
+
+    // Filet : jobs restés 'running' mais sans run actif (orphelins, ex. crash
+    // entre la fin/échec du run et la mise à jour du statut du job).
+    let orphanJobs = [];
+    try {
+      orphanJobs = await JobModel.findAll({
+        where: { status: 'running', lastRun: { [Op.lt]: cutoff } },
+      });
+    } catch (e) {
+      logger.error(`[Watchdog] Erreur recherche jobs orphelins (${jobType}): ${e.message}`);
+      continue;
+    }
+
+    for (const job of orphanJobs) {
+      // Ne pas toucher si la tâche tourne réellement dans ce process, ou si un run est encore actif.
+      if (RUNNING.has(String(job.id))) continue;
+      let activeRun = null;
+      try {
+        activeRun = await RunModel.findOne({ where: { jobId: job.id, status: 'running' } });
+      } catch {}
+      if (activeRun) continue;
+      try {
+        job.status = 'idle';
+        job.history = [
+          ...(job.history || []),
+          { at: new Date(), status: 'recovered', message: "Statut 'running' orphelin réinitialisé (aucun run actif)" },
+        ];
+        await job.save();
+        logger.warn(`[Watchdog] Job ${job.id} (${jobType}) 'running' orphelin réinitialisé à 'idle'`);
+      } catch (e) {
+        logger.error(`[Watchdog] Erreur réinitialisation job orphelin ${job?.id}: ${e.message}`);
       }
     }
   }
