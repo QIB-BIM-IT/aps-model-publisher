@@ -493,58 +493,47 @@ async function runJobNow(jobId, options = {}) {
   }
 }
 
+// Récupère les runs restés 'running' après un crash/redémarrage : les marque
+// 'failed' et envoie une alerte courriel pour les crashs RÉCENTS (< fenêtre),
+// afin de couvrir le cas "tâche échouée par redémarrage serveur" qui, avant,
+// ne notifiait personne.
+async function recoverHangingRuns(RunModel, JobModel, jobType) {
+  let hanging = [];
+  try {
+    hanging = await RunModel.findAll({ where: { status: 'running' } });
+  } catch (e) {
+    logger.error(`[Scheduler] Crash-safety ${jobType} error: ${e.message}`);
+    return;
+  }
+  // N'alerter que pour les crashs récents pour éviter un flot d'emails sur un vieux backlog.
+  const recentCutoff = Date.now() - 2 * 60 * 60 * 1000;
+  for (const r of hanging) {
+    try {
+      r.status = 'failed';
+      r.message = 'Process restart while running';
+      r.endedAt = new Date();
+      await r.save();
+
+      const startedMs = r.startedAt ? new Date(r.startedAt).getTime() : 0;
+      if (startedMs && startedMs >= recentCutoff) {
+        let job = null;
+        try { job = await JobModel.findByPk(r.jobId); } catch {}
+        if (job) await sendFailureEmailIfNeeded(job, r, jobType, 'failed');
+      }
+    } catch (e) {
+      logger.error(`[Scheduler] Crash-safety ${jobType} run ${r?.id}: ${e.message}`);
+    }
+  }
+  if (hanging.length) {
+    logger.warn(`[Scheduler] ${hanging.length} ${jobType} run(s) marqués failed (crash) au démarrage`);
+  }
+}
+
 async function init() {
-  // Crash safety pour PublishRun
-  try {
-    const hangingPublish = await PublishRun.findAll({ where: { status: 'running' } });
-    for (const r of hangingPublish) {
-      r.status = 'failed';
-      r.message = 'Process restart while running';
-      r.endedAt = new Date();
-      await r.save();
-    }
-    if (hangingPublish.length) {
-      logger.warn(
-        `[Scheduler] ${hangingPublish.length} PublishRun(s) marqués failed (crash) au démarrage`
-      );
-    }
-  } catch (e) {
-    logger.error(`[Scheduler] Crash-safety PublishRun error: ${e.message}`);
-  }
-
-  // Crash safety pour PDFExportRun
-  try {
-    const hangingPDF = await PDFExportRun.findAll({ where: { status: 'running' } });
-    for (const r of hangingPDF) {
-      r.status = 'failed';
-      r.message = 'Process restart while running';
-      r.endedAt = new Date();
-      await r.save();
-    }
-    if (hangingPDF.length) {
-      logger.warn(
-        `[Scheduler] ${hangingPDF.length} PDFExportRun(s) marqués failed (crash) au démarrage`
-      );
-    }
-  } catch (e) {
-    logger.error(`[Scheduler] Crash-safety PDFExportRun error: ${e.message}`);
-  }
-
-  // Crash safety pour CopyRun
-  try {
-    const hangingCopy = await CopyRun.findAll({ where: { status: 'running' } });
-    for (const r of hangingCopy) {
-      r.status = 'failed';
-      r.message = 'Process restart while running';
-      r.endedAt = new Date();
-      await r.save();
-    }
-    if (hangingCopy.length) {
-      logger.warn(`[Scheduler] ${hangingCopy.length} CopyRun(s) marqués failed (crash) au démarrage`);
-    }
-  } catch (e) {
-    logger.error(`[Scheduler] Crash-safety CopyRun error: ${e.message}`);
-  }
+  // Crash safety (runs orphelins) + alerte courriel pour les crashs récents
+  await recoverHangingRuns(PublishRun, PublishJob, 'publish');
+  await recoverHangingRuns(PDFExportRun, PDFExportJob, 'pdf-export');
+  await recoverHangingRuns(CopyRun, CopyJob, 'file-copy');
 
   // Crash safety pour les JOBS : un job resté en 'running' après un redémarrage
   // est forcément orphelin (aucune exécution en mémoire après reboot). On le
