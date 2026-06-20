@@ -39,7 +39,7 @@ class ACCExportService {
   /**
    * Attend la complétion d'un job d'export PDF
    */
-  async waitForJobCompletion(jobId, accessToken, maxWaitMs = 300000) {
+  async waitForJobCompletion(jobId, accessToken, maxWaitMs = parseInt(process.env.ACC_EXPORT_WAIT_MS || '300000', 10)) {
     if (!jobId) {
       throw new Error('jobId requis');
     }
@@ -325,7 +325,7 @@ class ACCExportService {
   /**
    * Polling pour attendre la completion de l'export
    */
-  async waitForCompletion(projectId, jobId, accessToken, maxWaitMs = 300000) {
+  async waitForCompletion(projectId, jobId, accessToken, maxWaitMs = parseInt(process.env.ACC_EXPORT_WAIT_MS || '300000', 10)) {
     const cleanProjectId = projectId.replace(/^b\./, '');
     const startTime = Date.now();
     const pollInterval = 5000; // 5 secondes
