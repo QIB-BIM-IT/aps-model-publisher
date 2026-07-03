@@ -7,8 +7,9 @@
   <CompanyDetails Name="Tetra Tech" />
   <Components Description="QC G408 extractor">
     <RuntimeRequirements OS="Win64" Platform="Revit" SeriesMin="R2024" SeriesMax="R2024" />
+    <!-- revitcoreconsole (DA) exige un manifeste .addin : ModuleName pointe vers lui, pas vers la DLL -->
     <ComponentEntry AppName="QcExtractor" Version="1.0.0"
-                    ModuleName="./Contents/QcExtractor.dll"
+                    ModuleName="./Contents/QcExtractor.addin"
                     AppDescription="Extraction des avertissements Revit (controle G408)"
                     LoadOnRevitStartup="True" LoadOnCommandInvocation="False" />
   </Components>

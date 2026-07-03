@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<RevitAddIns>
+  <AddIn Type="DBApplication">
+    <Name>QcExtractor</Name>
+    <Assembly>.\QcExtractor.dll</Assembly>
+    <AddInId>{3B2A1C0D-8E7F-4A6B-9C5D-2E1F0A9B8C7D}</AddInId>
+    <FullClassName>QcExtractor.QcExtractorApp</FullClassName>
+    <VendorId>TTQC</VendorId>
+    <VendorDescription>Tetra Tech - QC BIM</VendorDescription>
+  </AddIn>
+</RevitAddIns>

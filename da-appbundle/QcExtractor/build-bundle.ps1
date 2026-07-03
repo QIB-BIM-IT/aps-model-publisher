@@ -27,6 +27,7 @@ New-Item -ItemType Directory -Force $contentsDir | Out-Null
 Copy-Item (Join-Path $binDir "QcExtractor.dll") $contentsDir
 Copy-Item (Join-Path $binDir "DesignAutomationBridge.dll") $contentsDir
 Copy-Item (Join-Path $binDir "Newtonsoft.Json.dll") $contentsDir
+Copy-Item (Join-Path $root "QcExtractor.addin") $contentsDir
 Copy-Item (Join-Path $root "PackageContents.xml") $bundleDir
 
 $zipPath = Join-Path $outDir "QcExtractor.bundle.zip"
