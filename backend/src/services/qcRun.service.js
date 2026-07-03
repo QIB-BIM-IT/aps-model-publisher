@@ -12,20 +12,22 @@
 //    invitant l'utilisateur à se reconnecter ; aucune session existante n'est cassée.
 
 const crypto = require('crypto');
-const axios = require('axios');
 const logger = require('../config/logger');
 const apsAuthService = require('./apsAuth.service');
 const qcDa = require('./qcDesignAutomation.service');
-const { apsConfig } = require('../config/aps.config');
 
 const POLL_INTERVAL_MS = parseInt(process.env.QC_POLL_INTERVAL_MS || '30000', 10);
 const POLL_TIMEOUT_MS = parseInt(process.env.QC_POLL_TIMEOUT_MS || '1200000', 10); // 20 min
 const CONTROL_CODE = 'G408';
-const REVIT_VERSION = '2024'; // engine unique de cette tranche (Autodesk.Revit+2024)
 
-// Régions supportées par l'ouverture cloud directe (Q3 : pilote US/EMEA ;
-// le repli download+copie détachée pour CAN se branchera dans l'addin, pas ici).
+// Régions supportées par l'ouverture cloud directe (le repli download+copie détachée
+// pour CAN se branchera dans l'addin via IModelSource, pas ici).
 const SUPPORTED_REGIONS = ['US', 'EMEA'];
+
+// Sentinelle pour les runs refusés AVANT identification du modèle cloud (garde
+// workshared) : accModelGuid est NOT NULL en base, mais un modèle non workshared
+// n'a pas de GUID de modèle cloud. Le contexte réel est dans stats.itemUrn.
+const NIL_GUID = '00000000-0000-0000-0000-000000000000';
 
 class QcRunService {
   constructor() {
@@ -112,34 +114,19 @@ class QcRunService {
     }
   }
 
-  // ======== Lancement d'un run ========
+  // ======== Lancement d'un run (désignation lisible → resolver → garde → routage) ========
 
   /**
    * @param {object} p
-   * @param {object} p.user      - contexte du token 3 legs (req.user) : {id, name, autodeskId}
-   * @param {string} p.region    - 'US' | 'EMEA'
-   * @param {string} p.projectGuid - GUID ACC nu du projet
-   * @param {string} p.modelGuid   - GUID ACC nu du modèle
+   * @param {object} p.user        - contexte du token 3 legs (req.user) : {id, name, autodeskId}
+   * @param {object} p.designation - { accUrl } | { hubName|hubId, projectName|projectId, fileName }
+   *                                 | { projectId, itemUrn } — aucun GUID codé en dur
    * @param {string} [p.runType]   - 'quotidien' (défaut) | 'jalon'
-   * @param {string} [p.projectId] - id Data Management (b.xxx) pour résoudre la version (optionnel)
-   * @param {string} [p.itemUrn]   - lineage URN pour résoudre la version (optionnel)
    * @param {string} [p.jobId]     - job qc à rattacher (optionnel)
    */
-  async startRun({ user, region, projectGuid, modelGuid, runType = 'quotidien', projectId = null, itemUrn = null, jobId = null }) {
+  async startRun({ user, designation, runType = 'quotidien', jobId = null }) {
     if (!this._ready) throw this._err(503, 'Module QC non initialisé');
     if (!qcDa.isConfigured()) throw this._err(503, qcDa.configurationHint());
-
-    const normRegion = String(region || '').toUpperCase();
-    if (!SUPPORTED_REGIONS.includes(normRegion)) {
-      throw this._err(
-        400,
-        `Région "${region}" non supportée dans cette tranche (attendu: ${SUPPORTED_REGIONS.join(' ou ')}). ` +
-          'Le repli pour la région Canada sera branché ultérieurement dans l\'addin (IModelSource).'
-      );
-    }
-    if (!this._isGuid(projectGuid) || !this._isGuid(modelGuid)) {
-      throw this._err(400, 'projectGuid et modelGuid doivent être des GUID ACC valides');
-    }
     if (!['quotidien', 'jalon'].includes(runType)) {
       throw this._err(400, `runType invalide: "${runType}" (attendu: quotidien | jalon)`);
     }
@@ -157,14 +144,51 @@ class QcRunService {
       );
     }
 
+    // Résolution : désignation → (projectId, itemUrn) → métadonnée C4RModel (UN GET DM,
+    // sans ouverture, sans Model Derivative)
+    const resolver = require('./qcModelResolver.service');
+    const ref = await resolver.resolveDesignation(designation || {}, accessToken);
+    const resolved = await resolver.resolveModel(ref, accessToken);
+
+    if (!SUPPORTED_REGIONS.includes(resolved.region)) {
+      throw this._err(
+        400,
+        `Région "${resolved.region}" non supportée pour l'ouverture cloud (attendu: ${SUPPORTED_REGIONS.join(' ou ')}). ` +
+          'Le repli pour la région Canada sera branché ultérieurement dans l\'addin (IModelSource).'
+      );
+    }
+
+    // GARDE workshared (double signal vérifié) : run failed, AUCUN workitem
+    if (!resolved.workshared) {
+      return this._createFailedRun({
+        user,
+        jobId,
+        runType,
+        resolved,
+        message:
+          `Hors périmètre CQ : modèle non workshared (extension.type=${resolved.extensionType || 'inconnu'}` +
+          `${resolved.modelType ? `, modelType=${resolved.modelType}` : ''}). Aucun workitem soumis.`,
+        guard: 'workshared',
+      });
+    }
+
+    // Routage par version résolue : version hors ensemble configuré → failed, AUCUN workitem
+    const version = resolved.revitVersion;
+    const activityId = qcDa.activityIdFor(version);
+    if (!activityId) {
+      return this._createFailedRun({
+        user,
+        jobId,
+        runType,
+        resolved,
+        message:
+          `Version Revit ${version || 'inconnue'} non supportée ` +
+          `(activities configurées: ${qcDa.configuredVersions().join(', ') || 'aucune'}). Aucun workitem soumis.`,
+        guard: 'version',
+      });
+    }
+
     const { QCRun } = this.getModels();
-
-    // Résolution best-effort de la version courante du modèle (non bloquante)
-    const versionInfo = await this._resolveTipVersion(projectId, itemUrn, accessToken, normRegion).catch((e) => {
-      logger.warn(`[QC] Résolution de version impossible (non bloquant): ${e.message}`);
-      return null;
-    });
-
     const run = await QCRun.create({
       jobId,
       userId: user.id,
@@ -172,14 +196,14 @@ class QcRunService {
       executedByAutodeskId: user.autodeskId || null,
       runType,
       startedAtUtc: new Date(),
-      revitVersion: REVIT_VERSION,
-      region: normRegion,
-      accProjectGuid: projectGuid,
-      accModelGuid: modelGuid,
-      modelVersion: versionInfo?.versionNumber ?? null,
-      versionUrn: versionInfo?.versionUrn ?? null,
+      revitVersion: version,
+      region: resolved.region,
+      accProjectGuid: resolved.projectGuid,
+      accModelGuid: resolved.modelGuid,
+      modelVersion: resolved.dmVersionNumber,
+      versionUrn: resolved.versionUrn,
       status: 'queued',
-      stats: {},
+      stats: { itemUrn: resolved.itemUrn, fileName: resolved.fileName, activityId },
     });
 
     try {
@@ -190,11 +214,12 @@ class QcRunService {
       const onCompleteUrl = this._buildCallbackUrl(run.id);
 
       const workitemId = await qcDa.submitWorkitem({
+        activityId,
         inputParams: {
           controlCode: CONTROL_CODE,
-          region: normRegion,
-          projectGuid,
-          modelGuid,
+          region: resolved.region,
+          projectGuid: resolved.projectGuid,
+          modelGuid: resolved.modelGuid,
         },
         resultUrl,
         threeLeggedToken: accessToken,
@@ -209,7 +234,9 @@ class QcRunService {
 
       this._startPolling(run.id, workitemId);
 
-      logger.info(`[QC] Run ${run.id} soumis (workitem=${workitemId}, region=${normRegion}, type=${runType})`);
+      logger.info(
+        `[QC] Run ${run.id} soumis (workitem=${workitemId}, activity=${activityId}, region=${resolved.region}, revit=${version}, type=${runType})`
+      );
       return run;
     } catch (e) {
       await run
@@ -217,6 +244,44 @@ class QcRunService {
         .catch(() => {});
       throw e;
     }
+  }
+
+  /**
+   * Run refusé par une garde AVANT toute soumission : trace ISO 19650 conservée
+   * (snapshots, contexte modèle dans stats), daWorkitemId NULL, statut failed.
+   */
+  async _createFailedRun({ user, jobId, runType, resolved, message, guard }) {
+    const { QCRun } = this.getModels();
+    // accProjectGuid réel dérivable du projectId DM (b.<guid>) ; accModelGuid n'existe
+    // pas pour un non-workshared → sentinelle NIL_GUID (colonnes NOT NULL, zéro ALTER).
+    const projectGuidFromDm = String(resolved.projectId || '').replace(/^b\./, '');
+    const now = new Date();
+    const run = await QCRun.create({
+      jobId,
+      userId: user.id,
+      executedByName: user.name || null,
+      executedByAutodeskId: user.autodeskId || null,
+      runType,
+      startedAtUtc: now,
+      endedAtUtc: now,
+      revitVersion: resolved.revitVersion || null,
+      region: resolved.region,
+      accProjectGuid: resolved.projectGuid || (this._isGuid(projectGuidFromDm) ? projectGuidFromDm : NIL_GUID),
+      accModelGuid: resolved.modelGuid || NIL_GUID,
+      modelVersion: resolved.dmVersionNumber,
+      versionUrn: resolved.versionUrn,
+      status: 'failed',
+      message,
+      stats: {
+        guard,
+        itemUrn: resolved.itemUrn,
+        fileName: resolved.fileName,
+        extensionType: resolved.extensionType,
+        modelType: resolved.modelType,
+      },
+    });
+    logger.warn(`[QC] Run ${run.id} refusé (garde=${guard}): ${message}`);
+    return run;
   }
 
   // ======== Complétion (double canal, verrou EN BASE) ========
@@ -257,10 +322,11 @@ class QcRunService {
       if (wiStatus === 'success') {
         await this._finalizeSuccess(run, workitem);
       } else {
+        const message = await this._buildFailureMessage(run, workitem, wiStatus);
         await run.update({
           status: 'failed',
           endedAtUtc: new Date(),
-          message: `Workitem DA terminé en ${wiStatus}`,
+          message,
           stats: { ...run.stats, reportUrl: workitem.reportUrl || null, daStats: workitem.stats || null },
         });
         logger.warn(`[QC] Run ${runId} échoué (workitem ${wiStatus}) — report: ${workitem.reportUrl || 'n/a'}`);
@@ -412,18 +478,37 @@ class QcRunService {
     return `${base.replace(/\/+$/, '')}/api/qc/da-callback?runId=${encodeURIComponent(runId)}&sig=${sig}`;
   }
 
-  // ======== Résolution de version DM (best-effort) ========
+  // ======== Diagnostic post-mortem d'un workitem échoué ========
 
-  async _resolveTipVersion(projectId, itemUrn, accessToken, region) {
-    if (!projectId || !itemUrn) return null;
-    const url = `${apsConfig.apis.baseUrl}/data/v1/projects/${encodeURIComponent(projectId)}/items/${encodeURIComponent(itemUrn)}/tip`;
-    const headers = { Authorization: `Bearer ${accessToken}` };
-    if (region && region !== 'US') headers['x-ads-region'] = region;
-    const { data } = await axios.get(url, { headers, timeout: 30_000 });
-    return {
-      versionNumber: data?.data?.attributes?.versionNumber ?? null,
-      versionUrn: data?.data?.id ?? null,
-    };
+  /**
+   * Décision #4 (plan approuvé) : si l'engine annoncé refuse l'ouverture pour cause
+   * de release (« not saved in current release »), message DÉDIÉ signalant
+   * l'incohérence entre revitProjectVersion annoncé et la release réelle.
+   * Cas réel confirmé (gabarit 2024). Aucun essai d'engine adjacent, aucune
+   * réparation silencieuse — le run reste failed.
+   */
+  async _buildFailureMessage(run, workitem, wiStatus) {
+    const generic = `Workitem DA terminé en ${wiStatus}`;
+    const report = await qcDa.downloadReport(workitem.reportUrl);
+    if (!report) return generic;
+
+    if (/not saved in current release/i.test(report)) {
+      return (
+        `Le moteur Revit ${run.revitVersion} a refusé l'ouverture : la release réelle du modèle ` +
+        `diffère de revitProjectVersion=${run.revitVersion} annoncé par la métadonnée ACC ` +
+        `(incohérence connue, ex. gabarit migré). Aucun autre moteur n'est essayé — corriger le ` +
+        `modèle ou sa métadonnée côté ACC.`
+      );
+    }
+
+    // Sinon, remonter la première exception Revit du report pour un diagnostic direct
+    const exLine = report
+      .split('\n')
+      .find((l) => /Autodesk\.Revit\.Exceptions|System\.[A-Za-z.]*Exception/.test(l));
+    if (exLine) {
+      return `${generic} — ${exLine.replace(/^\[[^\]]*\]\s*/, '').trim().slice(0, 300)}`;
+    }
+    return generic;
   }
 
   // ======== Utils ========

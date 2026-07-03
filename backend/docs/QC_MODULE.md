@@ -33,7 +33,7 @@ POST /api/qc/runs (JWT)                       [qc.routes.js]
 
 | Variable | Obligatoire | Description |
 |---|---|---|
-| `QC_DA_ACTIVITY_ID` | **oui** (active le module DA) | Id qualifié de l'activity, ex. `MonNickname.QcExtractG408+prod`. Affiché par `setup-da.js`. Absent ⇒ mode dégradé explicite (503), le reste de l'app n'est pas affecté. |
+| `QC_DA_ACTIVITY_ID_2024` / `QC_DA_ACTIVITY_ID_2025` | **au moins une** (active le module DA) | Ids qualifiés des activities par version Revit, ex. `<nickname>.qc_extractor_activity_2025+prod`. Affichés par `setup-da.js --engine-version <v>`. Le routage choisit l'activity selon la version résolue du modèle ; version sans activity configurée ⇒ run `failed` explicite, aucun workitem. L'ancien `QC_DA_ACTIVITY_ID` reste lu comme alias 2024 (compat). |
 | `QC_OSS_BUCKET` | non | Bucket OSS transient des résultats (défaut dérivé du client id). |
 | `QC_CALLBACK_BASE_URL` | non | Base publique pour le callback `onComplete` (ex. `https://<app>.azurewebsites.net`). Absent ⇒ polling seul. |
 | `QC_CALLBACK_SECRET` | non | Secret HMAC du callback (défaut : `WEBHOOK_SECRET` puis `JWT_SECRET`). |
@@ -45,21 +45,40 @@ demandé automatiquement par le token 2 legs privé du module QC. Montée progre
 session existante n'est cassée ; un utilisateur QC dont le token ne porte pas `code:all`
 reçoit une erreur explicite l'invitant à se reconnecter.
 
-## Mise en route
+## Mise en route (multimoteur 2024/2025)
 
-1. **Build de l'addin** (nécessite Revit 2024 + dotnet SDK) :
-   `pwsh da-appbundle/QcExtractor/build-bundle.ps1`
-2. **Provisioning DA** (nickname, AppBundle, Activity, alias, bucket — idempotent) :
-   `node backend/scripts/setup-da.js --zip da-appbundle/QcExtractor/output/QcExtractor.bundle.zip`
-   puis poser `QC_DA_ACTIVITY_ID` (valeur affichée en fin de script).
+1. **Build de l'addin** (Revit 2024 → net48, Revit 2025 → **net8.0-windows** ; dotnet SDK 8 requis) :
+   `pwsh da-appbundle/QcExtractor/build-bundle.ps1 -EngineVersion 2024` puis `-EngineVersion 2025`
+2. **Provisioning DA** (AppBundle + Activity par version, alias, bucket — idempotent, nickname jamais modifié) :
+   `node backend/scripts/setup-da.js --engine-version 2024` puis `--engine-version 2025`
+   puis poser `QC_DA_ACTIVITY_ID_2024` / `QC_DA_ACTIVITY_ID_2025` (valeurs affichées).
 3. **Migrations** : appliquées automatiquement au boot (après `connectDB()`/sync), ou à la main :
    `node backend/scripts/qc-migrate.js up | down | down-all | status`
    (`down-all` = rollback complet : tables + types + schéma qc supprimés).
-4. **Lancer un run** :
+4. **Lancer un run** — désignation lisible, la version et la garde workshared sont résolues par
+   métadonnée DM (un seul GET Version, sans ouverture, sans Model Derivative) :
    ```
    POST /api/qc/runs   (Authorization: Bearer <JWT applicatif>)
-   { "region": "US", "projectGuid": "<guid ACC>", "modelGuid": "<guid ACC>", "runType": "quotidien" }
+   { "accUrl": "https://acc.autodesk.com/docs/files/projects/<guid>?...&entityId=<urn>" }
+   ou { "hubName": "...", "projectName": "...", "fileName": "xxx.rvt" }
+   ou { "projectId": "b.xxx", "itemUrn": "urn:adsk.wipprod:dm.lineage:..." }
+   (+ "runType": "quotidien" | "jalon")
    ```
+   `POST /api/qc/resolve` (même body) : résolution seule, aucun run ni workitem — diagnostic.
+
+## Gardes du resolver
+
+- **Workshared (double signal DM vérifié)** : `extension.type === 'versions:autodesk.bim360:C4RModel'`
+  ET `extension.data.modelType === 'multiuser'`. Sinon : run `failed` « hors périmètre, non
+  workshared », `daWorkitemId` NULL, aucun workitem. (`accModelGuid` reçoit la sentinelle
+  `00000000-…` : un non-workshared n'a pas de GUID de modèle cloud ; contexte réel dans `stats.itemUrn`.)
+- **Version** : `extension.data.revitProjectVersion` (number JSON, normalisé en chaîne) fait foi,
+  sans ouverture de confirmation. Version sans activity configurée → run `failed` explicite.
+- **Incohérence métadonnée** (cas réel confirmé — gabarit) : si l'engine annoncé refuse avec
+  « cloud model is not saved in current release », le run est `failed` avec un message dédié
+  signalant l'incohérence. Aucun essai d'engine adjacent, aucune réparation silencieuse.
+- `qc.projects` (migration 0002) : attributs projet uniquement (region, hub, ids), upsert par le
+  resolver ; PAS de version, PAS de FK depuis `qc.runs` (jointure sur `accProjectGuid`).
 
 ## Intégrité des données (ISO 19650)
 
