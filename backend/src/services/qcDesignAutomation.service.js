@@ -37,8 +37,10 @@ class QcDesignAutomationService {
     const clientId = process.env.APS_CLIENT_ID || '';
     return {
       nickname: process.env.QC_DA_NICKNAME || clientId,
-      appBundleName: process.env.QC_DA_APPBUNDLE || 'QcExtractor',
-      activityName: process.env.QC_DA_ACTIVITY || 'QcExtractG408',
+      // Préfixe qc_extractor : cloisonnement des ressources DA du module QC sur le
+      // compte APS partagé (les ids DA n'acceptent que [a-zA-Z0-9_], pas de tirets).
+      appBundleName: process.env.QC_DA_APPBUNDLE || 'qc_extractor_appbundle',
+      activityName: process.env.QC_DA_ACTIVITY || 'qc_extractor_activity',
       alias: process.env.QC_DA_ALIAS || 'prod',
       engine: process.env.QC_DA_ENGINE || 'Autodesk.Revit+2024',
       // Id complet qualifié de l'activity (ex: MonNickname.QcExtractG408+prod).

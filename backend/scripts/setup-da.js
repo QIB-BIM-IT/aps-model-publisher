@@ -1,15 +1,14 @@
 // scripts/setup-da.js
 // Provisioning one-shot Design Automation pour le module QC (idempotent, relançable).
 //
-// Étapes :
-//   1. (optionnel) nickname du client APS       --set-nickname <nom>
-//   2. AppBundle QcExtractor (create ou new version) + upload du zip + alias
-//   3. Activity QcExtractG408 (create ou new version) + alias
+// Étapes (ressources préfixées qc_extractor uniquement — cloisonnement) :
+//   1. Lecture du nickname (JAMAIS de PATCH : compte APS partagé, nickname global quasi irréversible)
+//   2. AppBundle (create ou new version) + upload du zip + alias
+//   3. Activity (create ou new version) + alias
 //   4. Bucket OSS transient pour les result.json
 //
 // Usage :
 //   node scripts/setup-da.js --zip ../da-appbundle/QcExtractor/output/QcExtractor.bundle.zip
-//   node scripts/setup-da.js --zip <path> --set-nickname MonNickname
 //
 // À la fin, le script affiche la valeur de QC_DA_ACTIVITY_ID à poser dans l'environnement.
 // Prérequis env : APS_CLIENT_ID, APS_CLIENT_SECRET (le token 2 legs demandé porte code:all).
@@ -51,23 +50,14 @@ function fail(step, r) {
   throw new Error(`${step} → HTTP ${r.status}: ${JSON.stringify(r.data)}`);
 }
 
-async function ensureNickname(token, desired) {
+// ⚠️ Le compte APS est PARTAGÉ avec le publisher et le nickname est global et quasi
+// irréversible : ce script ne fait JAMAIS de PATCH forgeapps/me. Lecture seule,
+// uniquement pour construire les identifiants qualifiés (par défaut = client id).
+async function readNickname(token) {
   const me = await daFetch('GET', `${BASE}/da/us-east/v3/forgeapps/me`, null, token);
   if (me.status !== 200) fail('GET forgeapps/me', me);
-  const current = me.data;
-  console.log(`Nickname actuel: ${current}`);
-  if (!desired || desired === current) return current;
-
-  const patch = await daFetch('PATCH', `${BASE}/da/us-east/v3/forgeapps/me`, { nickname: desired }, token);
-  if (patch.status === 409) {
-    console.warn(
-      `⚠️ Nickname non modifiable (409): le client possède déjà des données DA. On garde "${current}".`
-    );
-    return current;
-  }
-  if (patch.status >= 300) fail('PATCH forgeapps/me', patch);
-  console.log(`Nickname défini: ${desired}`);
-  return desired;
+  console.log(`Nickname du compte (lecture seule, jamais modifié ici): ${me.data}`);
+  return me.data;
 }
 
 async function createOrVersion(kind, listPath, id, payload, token) {
@@ -105,7 +95,6 @@ async function uploadBundleZip(uploadParameters, zipPath) {
 async function main() {
   const cfg = qcDa.config;
   const zipPath = arg('--zip') || path.join(__dirname, '../../da-appbundle/QcExtractor/output/QcExtractor.bundle.zip');
-  const desiredNickname = arg('--set-nickname');
 
   if (!process.env.APS_CLIENT_ID || !process.env.APS_CLIENT_SECRET) {
     throw new Error('APS_CLIENT_ID / APS_CLIENT_SECRET manquants dans l\'environnement');
@@ -116,8 +105,8 @@ async function main() {
 
   const token = await qcDa.getToken();
 
-  // 1. Nickname
-  const nickname = await ensureNickname(token, desiredNickname || (process.env.QC_DA_NICKNAME || null));
+  // 1. Nickname : lecture seule (jamais de PATCH — compte partagé avec le publisher)
+  const nickname = await readNickname(token);
 
   // 2. AppBundle + upload + alias
   const bundleData = await createOrVersion(
