@@ -1,0 +1,17 @@
+[
+  {
+    "label": "Exemple par noms",
+    "hubName": "Mon Hub",
+    "projectName": "Mon Projet",
+    "fileName": "MonModele.rvt"
+  },
+  {
+    "label": "Exemple par identifiants DM",
+    "projectId": "b.00000000-0000-0000-0000-000000000000",
+    "itemUrn": "urn:adsk.wipprod:dm.lineage:XXXXXXXXXXXXXXXXXXXXXX"
+  },
+  {
+    "label": "Exemple par URL ACC Docs",
+    "accUrl": "https://acc.autodesk.com/docs/files/projects/<guid>?folderUrn=...&entityId=urn%3Aadsk.wipprod%3Adm.lineage%3A..."
+  }
+]

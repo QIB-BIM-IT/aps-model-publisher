@@ -97,6 +97,13 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   `valeur_json = { total, critical: <nb critiques>, parNiveau: {critique, faible} }`,
   `statut` = `non_conforme` si critiques > criticalMax OU total > totalMax, sinon `conforme`.
   Recalcul des runs existants sans DA : `node scripts/qc-rescore.js` (déterministe, en place).
+- **Inventaire des Guids** (remplissage de la grille) :
+  `node scripts/qc-batch-inventory.js --models <liste.json>` lance l'extraction normale sur un
+  lot de modèles (désignations lisibles, non-workshared/versions non supportées sautés proprement ;
+  voir `scripts/qc-inventory-models.example.json`), puis
+  `node scripts/qc-inventory-export.js` exporte `exports/qc-guid-inventory-<date>.csv`
+  (tous runs confondus, groupé par Guid, à annoter dans Excel — les re-runs d'un même
+  modèle gonflent la colonne occurrences ; `nb_modeles` est dédoublonné).
 - **Règle** : extraction toujours ; scoring seulement si une grille est disponible (elle est
   livrée avec le code ; si illisible → log + comportement tranche 1, colonnes à NULL).
   La signature humaine reste NULL sur run automatique.
