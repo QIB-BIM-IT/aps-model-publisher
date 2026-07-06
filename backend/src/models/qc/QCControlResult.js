@@ -21,13 +21,23 @@ QCControlResult.init(
     valeur_text: { type: DataTypes.TEXT, allowNull: true },
     valeur_json: { type: DataTypes.JSONB, allowNull: true },
 
-    // Chantier 2 : statut selon les seuils de volume de la grille (conforme | non_conforme).
-    // NULL = résultat antérieur au scoring ou grille indisponible.
+    // Chantier 2/3 : verdict MÉTIER (conforme | non_conforme), NULL si pas de cible en
+    // config OU si l'extraction a échoué (règle absolue : un échec technique n'est
+    // jamais une non-conformité).
     statut: {
       type: DataTypes.STRING(16),
       allowNull: true,
       validate: { isIn: [['conforme', 'non_conforme']] },
     },
+
+    // Chantier 3 : axe TECHNIQUE, jamais mélangé au statut métier.
+    etat_extraction: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+      defaultValue: 'extrait',
+      validate: { isIn: [['extrait', 'echec']] },
+    },
+    erreur_extraction: { type: DataTypes.TEXT, allowNull: true },
 
     // Signature humaine — vide sur run automatique
     controleur: { type: DataTypes.STRING, allowNull: true },

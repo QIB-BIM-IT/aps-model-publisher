@@ -187,6 +187,8 @@ class QcModelResolverService {
       dmVersionNumber: attrs.versionNumber ?? null,
       versionUrn: tip.data?.id || null,
       fileName: attrs.name || null,
+      // Chantier 3 : métadonnée des contrôles MÉTA (déjà dans la réponse lue, zéro appel en plus)
+      storageSize: Number.isFinite(attrs.storageSize) ? attrs.storageSize : null,
       region,
       hubId: hubInfo.hubId,
       hubName: hubInfo.hubName,

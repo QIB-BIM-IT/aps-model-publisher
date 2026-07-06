@@ -23,6 +23,13 @@ namespace QcExtractor
         [JsonProperty("modelGuid")]
         public Guid ModelGuid { get; set; }
 
+        /// <summary>
+        /// TEST UNIQUEMENT (chantier 3) : code du contrôle dont l'extraction doit être
+        /// simulée en échec, pour prouver l'isolation des extracteurs. Vide en usage normal.
+        /// </summary>
+        [JsonProperty("simulerEchec")]
+        public string SimulerEchec { get; set; }
+
         public static InputParams Load(string path)
         {
             if (!File.Exists(path))

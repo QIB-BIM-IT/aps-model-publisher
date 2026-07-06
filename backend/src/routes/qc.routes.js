@@ -47,12 +47,13 @@ function extractDesignation(body) {
 router.post('/runs', authenticateToken, async (req, res) => {
   if (!qcRunService.isReady()) return notReady(res);
   try {
-    const { runType, jobId } = req.body || {};
+    const { runType, jobId, simulerEchec } = req.body || {};
     const run = await qcRunService.startRun({
       user: req.user,
       designation: extractDesignation(req.body),
       runType: runType || 'quotidien',
       jobId: jobId || null,
+      simulerEchec: simulerEchec || null, // TEST uniquement (isolation des extracteurs)
     });
     // Un run refusé par une garde est créé failed sans workitem : 200 avec le run,
     // le client lit run.status / run.message.

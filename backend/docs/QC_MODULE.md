@@ -108,6 +108,30 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   livrée avec le code ; si illisible → log + comportement tranche 1, colonnes à NULL).
   La signature humaine reste NULL sur run automatique.
 
+## Multi-contrôles (chantier 3)
+
+- **Registre d'extracteurs** (addin, `IControlExtractor` + `ControlRunner`) : chaque contrôle
+  MODÈLE tourne dans son propre try — un échec produit une ligne `etat_extraction='echec'`
+  + `erreur_extraction`, les autres continuent. Payload v2 (`{schemaVersion:2, controls:[…]}`),
+  compat lecture v1 (G408 seul) conservée côté backend.
+- **Fork MÉTA/MODÈLE** : contrôles MÉTA calculés dans le backend depuis la métadonnée DM du
+  resolver (`qcMetaControls.service`, ex. G102 via `storageSize` — zéro workitem), contrôles
+  MODÈLE dans l'addin. TOUTES les lignes sont persistées dans UNE transaction à la
+  finalisation, même runId — un run échoué n'a AUCUNE ligne.
+- **Deux axes jamais mélangés** sur `qc.control_results` (migration 0004) :
+  `etat_extraction` technique ('extrait'|'echec') et `statut` métier
+  ('conforme'|'non_conforme'|NULL). RÈGLE ABSOLUE : un échec d'extraction force
+  `statut` NULL, aucun scoreur appelé. Trois cas lisibles : jugé / relevé sans cible /
+  bug d'extraction.
+- **Catalogue** [config/qc-controls-catalog.json](../config/qc-controls-catalog.json)
+  (code → source meta|modele, forme) et **scoreurs par forme** (`seuil`, `comptage`,
+  `presence` ; `pourcentage`/`liste` déclarés). Cibles EXCLUSIVEMENT depuis
+  `qc.project_config.config.controles[code].cible` — sans cible : statut NULL. G408
+  garde son scoring par Guid, inchangé.
+- Contrôles actuels : G408 (modèle/guid), G102 (méta/seuil, octets), G411 (modèle/comptage,
+  groupes inutilisés), G502 (modèle/presence, paramètres de projet — lecture des noms
+  uniquement, `Definition.ParameterGroup` interdit car supprimé de l'API 2025).
+
 ## Intégrité des données (ISO 19650)
 
 - Jamais de `ON DELETE CASCADE` de `qc` vers `public` : `qc.jobs.userId` et `qc.runs.userId`

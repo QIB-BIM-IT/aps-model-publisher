@@ -32,7 +32,7 @@ namespace QcExtractor
             if (data == null) throw new ArgumentNullException(nameof(data));
 
             InputParams input = InputParams.Load("params.json");
-            Console.WriteLine($"[QcExtractor] Contrôle {input.ControlCode} — region={input.Region} project={input.ProjectGuid} model={input.ModelGuid}");
+            Console.WriteLine($"[QcExtractor] Extraction multi-contrôles — region={input.Region} project={input.ProjectGuid} model={input.ModelGuid}");
 
             // Q3 : point de bascule unique pour l'acquisition du modèle.
             // Aujourd'hui : ouverture cloud directe (US/EMEA). Demain : repli download+copie
@@ -42,10 +42,10 @@ namespace QcExtractor
             Document doc = modelSource.OpenDocument(data.RevitApp, input.Region, input.ProjectGuid, input.ModelGuid);
             try
             {
-                ResultPayload result = G408Extractor.Extract(doc);
-                result.ControlCode = input.ControlCode;
+                // Chantier 3 : registre d'extracteurs, chaque contrôle dans son propre try.
+                ResultPayload result = ControlRunner.RunAll(doc, input);
                 result.Save("result.json");
-                Console.WriteLine($"[QcExtractor] G408: total={result.Total} critical={result.Critical}");
+                Console.WriteLine($"[QcExtractor] {result.Controls.Count} contrôle(s) émis (payload v{result.SchemaVersion})");
                 return true;
             }
             finally

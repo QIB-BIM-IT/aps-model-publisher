@@ -26,12 +26,30 @@ const fs = require('fs');
 const logger = require('../config/logger');
 
 const GRID_PATH = path.join(__dirname, '..', '..', 'config', 'qc-criticality-grid.json');
+const CATALOG_PATH = path.join(__dirname, '..', '..', 'config', 'qc-controls-catalog.json');
 const LEVELS = ['critique', 'faible'];
 const DEFAULT_LEVEL = 'faible';
 
 class QcScoringService {
   constructor() {
     this._grid = null; // cache process (fichier versionné, invariant au runtime)
+    this._catalog = null;
+  }
+
+  // ======== Catalogue des contrôles (chantier 3) ========
+
+  loadCatalog() {
+    if (this._catalog) return this._catalog;
+    const raw = JSON.parse(fs.readFileSync(CATALOG_PATH, 'utf8'));
+    if (!raw || typeof raw.controles !== 'object') {
+      throw new Error(`Catalogue des contrôles invalide: ${CATALOG_PATH}`);
+    }
+    this._catalog = raw;
+    return raw;
+  }
+
+  catalogEntry(controlCode) {
+    return this.loadCatalog().controles?.[controlCode] || null;
   }
 
   // ======== Grille maison ========
@@ -60,22 +78,84 @@ class QcScoringService {
   // ======== Surcharge projet ========
 
   /**
-   * Charge la surcharge projet depuis qc.project_config.config.criticite.
+   * Charge la config projet complète depuis qc.project_config.config :
+   * { criticite: surcharge de la grille G408, controles: cibles des autres contrôles }.
    * Le projet est retrouvé via qc.projects (accProjectGuid → projectId DM).
-   * Projet sans config → null (héritage complet de la grille maison).
+   * Projet sans config → { criticite: null, controles: null }.
    */
-  async loadProjectOverride(accProjectGuid) {
+  async loadProjectConfig(accProjectGuid) {
+    const empty = { criticite: null, controles: null };
     try {
       const { QCProject, QCProjectConfig } = require('../models/qc');
-      if (!accProjectGuid) return null;
+      if (!accProjectGuid) return empty;
       const project = await QCProject.findOne({ where: { accProjectGuid } });
-      if (!project) return null;
+      if (!project) return empty;
       const pc = await QCProjectConfig.findOne({ where: { projectId: project.projectId } });
-      const crit = pc?.config?.criticite;
-      return crit && typeof crit === 'object' ? crit : null;
+      const cfg = pc?.config || {};
+      return {
+        criticite: cfg.criticite && typeof cfg.criticite === 'object' ? cfg.criticite : null,
+        controles: cfg.controles && typeof cfg.controles === 'object' ? cfg.controles : null,
+      };
     } catch (e) {
-      logger.warn(`[QC][Scoring] Lecture surcharge projet échouée (non bloquant): ${e.message}`);
-      return null;
+      logger.warn(`[QC][Scoring] Lecture config projet échouée (non bloquant): ${e.message}`);
+      return empty;
+    }
+  }
+
+  /** Compat : surcharge criticité seule (chemin G408 historique). */
+  async loadProjectOverride(accProjectGuid) {
+    return (await this.loadProjectConfig(accProjectGuid)).criticite;
+  }
+
+  // ======== Scoreurs par forme (chantier 3) ========
+
+  /**
+   * Score un contrôle non-G408 selon la forme du catalogue et la cible projet.
+   * AUCUN seuil maison : la cible vient EXCLUSIVEMENT de la config projet.
+   * Pas de cible → statut null (valeur relevée, pas de verdict).
+   * NE DOIT JAMAIS être appelé sur un échec d'extraction (règle des deux axes,
+   * garantie par l'appelant).
+   *
+   * @param {string} controlCode
+   * @param {{valeurNum?: number, valeurJson?: object}} outcome
+   * @param {object|null} controles - qc.project_config.config.controles
+   * @returns {string|null} 'conforme' | 'non_conforme' | null
+   */
+  scoreByForme(controlCode, outcome, controles) {
+    const entry = this.catalogEntry(controlCode);
+    if (!entry) return null;
+    const cible = controles?.[controlCode]?.cible;
+    if (cible === undefined || cible === null) return null;
+
+    const sens = entry.sens || 'max';
+    const num = outcome.valeurNum;
+
+    switch (entry.forme) {
+      case 'seuil':
+      case 'comptage':
+      case 'pourcentage': {
+        if (!Number.isFinite(num)) return null;
+        const ok = sens === 'min' ? num >= Number(cible) : num <= Number(cible);
+        return ok ? 'conforme' : 'non_conforme';
+      }
+      case 'presence': {
+        if (!Array.isArray(cible)) return null;
+        const champ = entry.champListe || 'parametres';
+        const presents = Array.isArray(outcome.valeurJson?.[champ]) ? outcome.valeurJson[champ] : [];
+        const lower = new Set(presents.map((p) => String(p).toLowerCase()));
+        return cible.every((c) => lower.has(String(c).toLowerCase())) ? 'conforme' : 'non_conforme';
+      }
+      case 'liste': {
+        // Déclaré pour les lots futurs : égalité d'ensembles attendu/relevé
+        if (!Array.isArray(cible)) return null;
+        const champ = entry.champListe || 'liste';
+        const presents = Array.isArray(outcome.valeurJson?.[champ]) ? outcome.valeurJson[champ] : [];
+        const a = new Set(cible.map((x) => String(x).toLowerCase()));
+        const b = new Set(presents.map((x) => String(x).toLowerCase()));
+        return a.size === b.size && [...a].every((x) => b.has(x)) ? 'conforme' : 'non_conforme';
+      }
+      default:
+        return null;
     }
   }
 

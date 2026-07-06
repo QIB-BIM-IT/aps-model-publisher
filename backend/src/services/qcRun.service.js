@@ -123,8 +123,10 @@ class QcRunService {
    *                                 | { projectId, itemUrn } — aucun GUID codé en dur
    * @param {string} [p.runType]   - 'quotidien' (défaut) | 'jalon'
    * @param {string} [p.jobId]     - job qc à rattacher (optionnel)
+   * @param {string} [p.simulerEchec] - TEST UNIQUEMENT : code du contrôle MODÈLE à faire
+   *                                    échouer dans l'addin (preuve d'isolation)
    */
-  async startRun({ user, designation, runType = 'quotidien', jobId = null }) {
+  async startRun({ user, designation, runType = 'quotidien', jobId = null, simulerEchec = null }) {
     if (!this._ready) throw this._err(503, 'Module QC non initialisé');
     if (!qcDa.isConfigured()) throw this._err(503, qcDa.configurationHint());
     if (!['quotidien', 'jalon'].includes(runType)) {
@@ -203,7 +205,15 @@ class QcRunService {
       modelVersion: resolved.dmVersionNumber,
       versionUrn: resolved.versionUrn,
       status: 'queued',
-      stats: { itemUrn: resolved.itemUrn, fileName: resolved.fileName, activityId },
+      stats: {
+        itemUrn: resolved.itemUrn,
+        fileName: resolved.fileName,
+        activityId,
+        // Chantier 3 : snapshot métadonnée pour les contrôles MÉTA — calculés tôt,
+        // persistés SEULEMENT à la finalisation, avec les lignes MODÈLE (amendement :
+        // un run échoué n'a AUCUNE ligne, pas de MÉTA orphelines).
+        meta: { storageSize: resolved.storageSize ?? null },
+      },
     });
 
     try {
@@ -220,6 +230,7 @@ class QcRunService {
           region: resolved.region,
           projectGuid: resolved.projectGuid,
           modelGuid: resolved.modelGuid,
+          ...(simulerEchec ? { simulerEchec } : {}),
         },
         resultUrl,
         threeLeggedToken: accessToken,
@@ -341,66 +352,136 @@ class QcRunService {
     }
   }
 
+  /**
+   * Normalise le result.json en liste d'outcomes, quel que soit son schéma :
+   *  - v2 (chantier 3) : { schemaVersion: 2, controls: [...] }
+   *  - v1 (tranches 1-2, compat retour arrière d'alias bundle) : G408 seul à la racine
+   */
+  _normalizeResultPayload(result) {
+    if (result && Array.isArray(result.controls)) {
+      return result.controls;
+    }
+    if (result && typeof result.total === 'number') {
+      return [
+        {
+          controlCode: result.controlCode || CONTROL_CODE,
+          etatExtraction: 'extrait',
+          total: result.total,
+          critical: result.critical ?? 0,
+          warnings: Array.isArray(result.warnings) ? result.warnings : [],
+        },
+      ];
+    }
+    throw new Error('result.json invalide (ni payload v2 controls[], ni payload v1 G408)');
+  }
+
   async _finalizeSuccess(run, workitem) {
     const { sequelize } = require('../config/database');
     const { QCRun, QCControlResult, QCWarning } = this.getModels();
     const qcScoring = require('./qcScoring.service');
+    const qcMetaControls = require('./qcMetaControls.service');
 
     const resultUrl = run.stats?.resultUrl;
     if (!resultUrl) throw new Error('URL du résultat absente des stats du run');
 
     const result = await qcDa.downloadResult(resultUrl);
-    if (!result || typeof result.total !== 'number') {
-      throw new Error('result.json invalide (champ total manquant)');
-    }
 
-    const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+    // Fusion MÉTA + MODÈLE sous le même runId. AMENDEMENT chantier 3 : TOUT est
+    // persisté ici, dans UNE transaction — un run échoué n'a aucune ligne.
+    const modelOutcomes = this._normalizeResultPayload(result);
+    const metaOutcomes = qcMetaControls.computeMetaControls(run.stats?.meta || {});
+    const outcomes = [...metaOutcomes, ...modelOutcomes];
 
-    // Chantier 2 — scoring de criticité (Guid d'abord, surcharge projet, seuils).
-    // Règle : extraction TOUJOURS, scoring seulement si une grille est disponible
-    // (la grille maison est livrée avec le code ; si illisible, on conserve le
-    // résultat d'extraction tel quel, critical du bundle, statut/criticite NULL).
-    let scoring = null;
-    if (qcScoring.isGridAvailable()) {
-      const override = await qcScoring.loadProjectOverride(run.accProjectGuid);
-      scoring = qcScoring.scoreWarnings(warnings, override);
-      logger.info(
-        `[QC][Scoring] Run ${run.id}: critique=${scoring.counts.critique} faible=${scoring.counts.faible} ` +
-          `statut=${scoring.statut}${override ? ' (surcharge projet appliquée)' : ''}`
-      );
-    }
+    const projectConfig = await qcScoring.loadProjectConfig(run.accProjectGuid);
+    const gridAvailable = qcScoring.isGridAvailable();
 
-    const criticalCount = scoring ? scoring.critical : result.critical ?? 0;
+    const statsControls = {};
+    let g408 = null; // { outcome, scoring } pour les stats du run (compat historique)
 
     // Un run automatique : signature humaine (controleur, date_controle, regle) laissée à NULL.
     await sequelize.transaction(async (t) => {
-      const controlResult = await QCControlResult.create(
-        {
-          runId: run.id,
-          controlCode: CONTROL_CODE,
-          // total INCHANGÉ (extraction) ; critical = nombre de high selon la grille
-          valeur_num: result.total,
-          valeur_json: scoring
-            ? { total: result.total, critical: criticalCount, parNiveau: scoring.counts }
-            : { total: result.total, critical: criticalCount },
-          statut: scoring ? scoring.statut : null,
-        },
-        { transaction: t }
-      );
+      for (const outcome of outcomes) {
+        const code = outcome.controlCode || '(inconnu)';
 
-      if (warnings.length) {
-        await QCWarning.bulkCreate(
-          warnings.map((w, i) => ({
-            controlResultId: controlResult.id,
+        // RÈGLE ABSOLUE des deux axes : un échec d'extraction ne produit JAMAIS de
+        // statut — aucun scoreur n'est appelé, les colonnes de valeur restent vides.
+        if (outcome.etatExtraction === 'echec') {
+          await QCControlResult.create(
+            {
+              runId: run.id,
+              controlCode: code,
+              etat_extraction: 'echec',
+              erreur_extraction: String(outcome.erreur || 'Erreur d\'extraction non détaillée'),
+              statut: null,
+            },
+            { transaction: t }
+          );
+          statsControls[code] = { etat: 'echec' };
+          logger.warn(`[QC] Run ${run.id}: contrôle ${code} en échec d'extraction — ${outcome.erreur}`);
+          continue;
+        }
+
+        if (code === CONTROL_CODE) {
+          // G408 — chemin historique INCHANGÉ (scoring par Guid, grille + surcharge)
+          const warnings = Array.isArray(outcome.warnings) ? outcome.warnings : [];
+          let scoring = null;
+          if (gridAvailable) {
+            scoring = qcScoring.scoreWarnings(warnings, projectConfig.criticite);
+            logger.info(
+              `[QC][Scoring] Run ${run.id}: critique=${scoring.counts.critique} faible=${scoring.counts.faible} ` +
+                `statut=${scoring.statut}${projectConfig.criticite ? ' (surcharge projet appliquée)' : ''}`
+            );
+          }
+          const criticalCount = scoring ? scoring.critical : outcome.critical ?? 0;
+
+          const controlResult = await QCControlResult.create(
+            {
+              runId: run.id,
+              controlCode: code,
+              etat_extraction: 'extrait',
+              valeur_num: outcome.total,
+              valeur_json: { total: outcome.total, critical: criticalCount, parNiveau: scoring ? scoring.counts : undefined },
+              statut: scoring ? scoring.statut : null,
+            },
+            { transaction: t }
+          );
+
+          if (warnings.length) {
+            await QCWarning.bulkCreate(
+              warnings.map((w, i) => ({
+                controlResultId: controlResult.id,
+                runId: run.id,
+                severity: w.severity === 'critical' ? 'critical' : 'warning',
+                criticite: scoring ? scoring.levels[i] : null,
+                description: String(w.description || '(sans description)'),
+                elementIds: Array.isArray(w.elementIds) ? w.elementIds : [],
+                raw: w,
+              })),
+              { transaction: t }
+            );
+          }
+
+          g408 = { outcome, criticalCount, scoring };
+          statsControls[code] = { etat: 'extrait', statut: scoring ? scoring.statut : null, total: outcome.total };
+          continue;
+        }
+
+        // Contrôles génériques (MÉTA ou MODÈLE) : scoreur par forme, cible projet
+        // exclusivement — pas de cible => statut NULL (valeur relevée, pas de verdict).
+        const statut = qcScoring.scoreByForme(code, outcome, projectConfig.controles);
+        await QCControlResult.create(
+          {
             runId: run.id,
-            severity: w.severity === 'critical' ? 'critical' : 'warning',
-            criticite: scoring ? scoring.levels[i] : null,
-            description: String(w.description || '(sans description)'),
-            elementIds: Array.isArray(w.elementIds) ? w.elementIds : [],
-            raw: w,
-          })),
+            controlCode: code,
+            etat_extraction: 'extrait',
+            valeur_num: Number.isFinite(outcome.valeurNum) ? outcome.valeurNum : null,
+            valeur_text: outcome.valeurText ?? null,
+            valeur_json: outcome.valeurJson ?? null,
+            statut,
+          },
           { transaction: t }
         );
+        statsControls[code] = { etat: 'extrait', statut, valeurNum: outcome.valeurNum ?? null };
       }
 
       await QCRun.update(
@@ -410,11 +491,13 @@ class QcRunService {
           message: null,
           stats: {
             ...run.stats,
-            total: result.total,
-            critical: criticalCount,
-            parNiveau: scoring ? scoring.counts : undefined,
-            statut: scoring ? scoring.statut : undefined,
-            warningsCount: warnings.length,
+            // Compat historique : les champs G408 restent au premier niveau des stats
+            total: g408?.outcome.total,
+            critical: g408?.criticalCount,
+            parNiveau: g408?.scoring ? g408.scoring.counts : undefined,
+            statut: g408?.scoring ? g408.scoring.statut : undefined,
+            warningsCount: g408 ? (g408.outcome.warnings || []).length : undefined,
+            controls: statsControls,
             reportUrl: workitem.reportUrl || null,
           },
         },
@@ -423,8 +506,11 @@ class QcRunService {
     });
 
     logger.info(
-      `[QC] ✅ Run ${run.id} succès: G408 total=${result.total} critical=${criticalCount}` +
-        `${scoring ? ` (grille: critique=${scoring.counts.critique}/faible=${scoring.counts.faible}, statut=${scoring.statut})` : ' (sans scoring)'}`
+      `[QC] ✅ Run ${run.id} succès: ${outcomes.length} contrôle(s) — ` +
+        Object.entries(statsControls)
+          .map(([c, s]) => `${c}:${s.etat}${s.statut ? `/${s.statut}` : ''}`)
+          .join(' ') +
+        (g408 ? ` — G408 total=${g408.outcome.total} critical=${g408.criticalCount}` : '')
     );
   }
 
