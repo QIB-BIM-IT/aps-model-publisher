@@ -17,6 +17,11 @@
       "niveau": "critique",
       "libelle": "Multiple Spaces are in the same enclosed region",
       "raffinements": []
+    },
+    "b4176cef-6086-45a8-a066-c3fd424c9412": {
+      "niveau": "critique",
+      "libelle": "There are identical instances in the same place",
+      "raffinements": []
     }
   }
 }
