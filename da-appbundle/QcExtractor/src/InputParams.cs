@@ -23,6 +23,14 @@ namespace QcExtractor
         [JsonProperty("modelGuid")]
         public Guid ModelGuid { get; set; }
 
+        /// <summary>
+        /// SPIKE chantier 2 : émet en plus un diagnostic détaillé par avertissement
+        /// (Guid de définition, texte, sévérité native, agrégation par Guid).
+        /// N'altère PAS le résultat G408 (total/critical/warnings identiques).
+        /// </summary>
+        [JsonProperty("diagnostic")]
+        public bool Diagnostic { get; set; } = false;
+
         public static InputParams Load(string path)
         {
             if (!File.Exists(path))

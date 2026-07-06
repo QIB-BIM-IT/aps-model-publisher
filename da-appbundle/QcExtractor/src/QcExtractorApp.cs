@@ -42,10 +42,14 @@ namespace QcExtractor
             Document doc = modelSource.OpenDocument(data.RevitApp, input.Region, input.ProjectGuid, input.ModelGuid);
             try
             {
-                ResultPayload result = G408Extractor.Extract(doc);
+                // SPIKE chantier 2 : langue du moteur, utile pour l'expérience ENU/FRA (best-effort)
+                string engineLanguage = null;
+                try { engineLanguage = data.RevitApp.Language.ToString(); } catch { }
+
+                ResultPayload result = G408Extractor.Extract(doc, input.Diagnostic, engineLanguage);
                 result.ControlCode = input.ControlCode;
                 result.Save("result.json");
-                Console.WriteLine($"[QcExtractor] G408: total={result.Total} critical={result.Critical}");
+                Console.WriteLine($"[QcExtractor] G408: total={result.Total} critical={result.Critical} (diagnostic={input.Diagnostic})");
                 return true;
             }
             finally
