@@ -5,14 +5,18 @@
 //  - La clé de classification est le Guid de définition (FailureDefinitionId.Guid),
 //    stable entre modèles et indépendant de la langue du moteur. Pas de normalisation
 //    de texte : le Guid regroupe déjà.
+//  - DEUX niveaux, libellés français définitifs stockés en base (décision assumée,
+//    une couche de traduction viendra plus tard si besoin) :
+//      'critique' = touche la performance ou l'intégrité (listé dans la grille)
+//      'faible'   = tout le reste, et DÉFAUT pour tout Guid absent de la grille
 //  - Résolution du niveau d'un avertissement, dans l'ordre :
 //      1. surcharge projet (qc.project_config.config.criticite.guids[guid])
 //      2. grille maison (config/qc-criticality-grid.json, versionnée dans le repo)
-//      3. défaut: 'moyen'
+//      3. défaut: 'faible'
 //    puis raffinement optionnel par pattern texte À L'INTÉRIEUR du Guid retenu
 //    (surcharge projet prioritaire sur la grille pour les raffinements aussi).
 //  - Seuils de volume (projet sinon grille) → statut du contrôle :
-//      'non_conforme' si high > criticalMax OU total > totalMax, sinon 'conforme'.
+//      'non_conforme' si critiques > criticalMax OU total > totalMax, sinon 'conforme'.
 //  - Extraction toujours, scoring seulement si une grille est disponible : la grille
 //    maison est livrée avec le code, donc toujours présente ; si sa lecture échoue,
 //    on logge et on n'altère PAS le résultat d'extraction (comportement tranche 1).
@@ -22,8 +26,8 @@ const fs = require('fs');
 const logger = require('../config/logger');
 
 const GRID_PATH = path.join(__dirname, '..', '..', 'config', 'qc-criticality-grid.json');
-const LEVELS = ['high', 'moyen', 'ignorable'];
-const DEFAULT_LEVEL = 'moyen';
+const LEVELS = ['critique', 'faible'];
+const DEFAULT_LEVEL = 'faible';
 
 class QcScoringService {
   constructor() {
@@ -82,7 +86,7 @@ class QcScoringService {
    * @param {string} text       - texte descriptif (pour le raffinement optionnel)
    * @param {object} grid       - grille maison chargée
    * @param {object|null} override - surcharge projet ({guids, seuils}) ou null
-   * @returns {string} 'high' | 'moyen' | 'ignorable'
+   * @returns {string} 'critique' | 'faible'
    */
   resolveLevel(guid, text, grid, override) {
     const key = String(guid || '').toLowerCase();
@@ -121,19 +125,19 @@ class QcScoringService {
    *
    * @param {Array<{failureDefinitionId?: string, description: string}>} warnings - entrées du result.json
    * @param {object|null} override - surcharge projet
-   * @returns {{ levels: string[], counts: {high:number, moyen:number, ignorable:number},
+   * @returns {{ levels: string[], counts: {critique:number, faible:number},
    *             critical: number, statut: string, thresholds: object }}
    */
   scoreWarnings(warnings, override) {
     const grid = this.loadGrid();
-    const counts = { high: 0, moyen: 0, ignorable: 0 };
+    const counts = { critique: 0, faible: 0 };
     const levels = warnings.map((w) => {
       const level = this.resolveLevel(w.failureDefinitionId, w.description, grid, override);
       counts[level]++;
       return level;
     });
     const thresholds = this.resolveThresholds(grid, override);
-    const critical = counts.high;
+    const critical = counts.critique;
     const total = warnings.length;
     const statut = critical > thresholds.criticalMax || total > thresholds.totalMax ? 'non_conforme' : 'conforme';
     return { levels, counts, critical, statut, thresholds };

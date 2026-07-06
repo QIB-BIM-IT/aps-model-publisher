@@ -84,16 +84,19 @@ reçoit une erreur explicite l'invitant à se reconnecter.
 
 - **Grille maison** : [config/qc-criticality-grid.json](../config/qc-criticality-grid.json),
   versionnée dans le repo. Clé = **Guid de définition** (stable, indépendant de la langue —
-  voir docs/SPIKE_WARNING_IDENTITY.md sur la branche spike). Niveaux : `high` (listé),
-  `ignorable` (listé), `moyen` (défaut pour tout Guid absent). Raffinement optionnel par
-  pattern texte à l'intérieur d'un Guid. Seuils de volume : `totalMax`, `criticalMax`.
+  voir docs/SPIKE_WARNING_IDENTITY.md sur la branche spike). **Deux niveaux, libellés
+  français définitifs stockés en base** : `critique` (touche la performance ou l'intégrité —
+  seuls les critiques sont listés dans la grille) et `faible` (tout le reste, **défaut** pour
+  tout Guid absent). Raffinement optionnel par pattern texte à l'intérieur d'un Guid.
+  Seuils de volume : `totalMax`, `criticalMax`.
 - **Surcharge projet** : `qc.project_config.config.criticite` (jsonb), ne porte que les
   écarts : `{ "criticite": { "guids": { "<guid>": { "niveau": "high" } }, "seuils": { … } } }`.
   Projet sans config → héritage complet de la grille maison.
 - **Effets sur un run** (`qcScoring.service`, appelé dans la transaction de finalisation) :
   `qc.warnings.criticite` par ligne ; `qc.control_results` : `valeur_num` = total (inchangé),
-  `valeur_json = { total, critical: <nb high>, parNiveau: {high, moyen, ignorable} }`,
-  `statut` = `non_conforme` si high > criticalMax OU total > totalMax, sinon `conforme`.
+  `valeur_json = { total, critical: <nb critiques>, parNiveau: {critique, faible} }`,
+  `statut` = `non_conforme` si critiques > criticalMax OU total > totalMax, sinon `conforme`.
+  Recalcul des runs existants sans DA : `node scripts/qc-rescore.js` (déterministe, en place).
 - **Règle** : extraction toujours ; scoring seulement si une grille est disponible (elle est
   livrée avec le code ; si illisible → log + comportement tranche 1, colonnes à NULL).
   La signature humaine reste NULL sur run automatique.

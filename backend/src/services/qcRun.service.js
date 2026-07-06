@@ -365,9 +365,8 @@ class QcRunService {
       const override = await qcScoring.loadProjectOverride(run.accProjectGuid);
       scoring = qcScoring.scoreWarnings(warnings, override);
       logger.info(
-        `[QC][Scoring] Run ${run.id}: high=${scoring.counts.high} moyen=${scoring.counts.moyen} ` +
-          `ignorable=${scoring.counts.ignorable} statut=${scoring.statut}` +
-          `${override ? ' (surcharge projet appliquée)' : ''}`
+        `[QC][Scoring] Run ${run.id}: critique=${scoring.counts.critique} faible=${scoring.counts.faible} ` +
+          `statut=${scoring.statut}${override ? ' (surcharge projet appliquée)' : ''}`
       );
     }
 
@@ -425,7 +424,7 @@ class QcRunService {
 
     logger.info(
       `[QC] ✅ Run ${run.id} succès: G408 total=${result.total} critical=${criticalCount}` +
-        `${scoring ? ` (grille: high=${scoring.counts.high}/moyen=${scoring.counts.moyen}/ignorable=${scoring.counts.ignorable}, statut=${scoring.statut})` : ' (sans scoring)'}`
+        `${scoring ? ` (grille: critique=${scoring.counts.critique}/faible=${scoring.counts.faible}, statut=${scoring.statut})` : ' (sans scoring)'}`
     );
   }
 
