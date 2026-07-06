@@ -80,6 +80,24 @@ reçoit une erreur explicite l'invitant à se reconnecter.
 - `qc.projects` (migration 0002) : attributs projet uniquement (region, hub, ids), upsert par le
   resolver ; PAS de version, PAS de FK depuis `qc.runs` (jointure sur `accProjectGuid`).
 
+## Scoring de criticité (chantier 2)
+
+- **Grille maison** : [config/qc-criticality-grid.json](../config/qc-criticality-grid.json),
+  versionnée dans le repo. Clé = **Guid de définition** (stable, indépendant de la langue —
+  voir docs/SPIKE_WARNING_IDENTITY.md sur la branche spike). Niveaux : `high` (listé),
+  `ignorable` (listé), `moyen` (défaut pour tout Guid absent). Raffinement optionnel par
+  pattern texte à l'intérieur d'un Guid. Seuils de volume : `totalMax`, `criticalMax`.
+- **Surcharge projet** : `qc.project_config.config.criticite` (jsonb), ne porte que les
+  écarts : `{ "criticite": { "guids": { "<guid>": { "niveau": "high" } }, "seuils": { … } } }`.
+  Projet sans config → héritage complet de la grille maison.
+- **Effets sur un run** (`qcScoring.service`, appelé dans la transaction de finalisation) :
+  `qc.warnings.criticite` par ligne ; `qc.control_results` : `valeur_num` = total (inchangé),
+  `valeur_json = { total, critical: <nb high>, parNiveau: {high, moyen, ignorable} }`,
+  `statut` = `non_conforme` si high > criticalMax OU total > totalMax, sinon `conforme`.
+- **Règle** : extraction toujours ; scoring seulement si une grille est disponible (elle est
+  livrée avec le code ; si illisible → log + comportement tranche 1, colonnes à NULL).
+  La signature humaine reste NULL sur run automatique.
+
 ## Intégrité des données (ISO 19650)
 
 - Jamais de `ON DELETE CASCADE` de `qc` vers `public` : `qc.jobs.userId` et `qc.runs.userId`

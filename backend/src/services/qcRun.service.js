@@ -344,6 +344,7 @@ class QcRunService {
   async _finalizeSuccess(run, workitem) {
     const { sequelize } = require('../config/database');
     const { QCRun, QCControlResult, QCWarning } = this.getModels();
+    const qcScoring = require('./qcScoring.service');
 
     const resultUrl = run.stats?.resultUrl;
     if (!resultUrl) throw new Error('URL du résultat absente des stats du run');
@@ -353,25 +354,48 @@ class QcRunService {
       throw new Error('result.json invalide (champ total manquant)');
     }
 
+    const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+
+    // Chantier 2 — scoring de criticité (Guid d'abord, surcharge projet, seuils).
+    // Règle : extraction TOUJOURS, scoring seulement si une grille est disponible
+    // (la grille maison est livrée avec le code ; si illisible, on conserve le
+    // résultat d'extraction tel quel, critical du bundle, statut/criticite NULL).
+    let scoring = null;
+    if (qcScoring.isGridAvailable()) {
+      const override = await qcScoring.loadProjectOverride(run.accProjectGuid);
+      scoring = qcScoring.scoreWarnings(warnings, override);
+      logger.info(
+        `[QC][Scoring] Run ${run.id}: high=${scoring.counts.high} moyen=${scoring.counts.moyen} ` +
+          `ignorable=${scoring.counts.ignorable} statut=${scoring.statut}` +
+          `${override ? ' (surcharge projet appliquée)' : ''}`
+      );
+    }
+
+    const criticalCount = scoring ? scoring.critical : result.critical ?? 0;
+
     // Un run automatique : signature humaine (controleur, date_controle, regle) laissée à NULL.
     await sequelize.transaction(async (t) => {
       const controlResult = await QCControlResult.create(
         {
           runId: run.id,
           controlCode: CONTROL_CODE,
+          // total INCHANGÉ (extraction) ; critical = nombre de high selon la grille
           valeur_num: result.total,
-          valeur_json: { total: result.total, critical: result.critical ?? 0 },
+          valeur_json: scoring
+            ? { total: result.total, critical: criticalCount, parNiveau: scoring.counts }
+            : { total: result.total, critical: criticalCount },
+          statut: scoring ? scoring.statut : null,
         },
         { transaction: t }
       );
 
-      const warnings = Array.isArray(result.warnings) ? result.warnings : [];
       if (warnings.length) {
         await QCWarning.bulkCreate(
-          warnings.map((w) => ({
+          warnings.map((w, i) => ({
             controlResultId: controlResult.id,
             runId: run.id,
             severity: w.severity === 'critical' ? 'critical' : 'warning',
+            criticite: scoring ? scoring.levels[i] : null,
             description: String(w.description || '(sans description)'),
             elementIds: Array.isArray(w.elementIds) ? w.elementIds : [],
             raw: w,
@@ -388,7 +412,9 @@ class QcRunService {
           stats: {
             ...run.stats,
             total: result.total,
-            critical: result.critical ?? 0,
+            critical: criticalCount,
+            parNiveau: scoring ? scoring.counts : undefined,
+            statut: scoring ? scoring.statut : undefined,
             warningsCount: warnings.length,
             reportUrl: workitem.reportUrl || null,
           },
@@ -398,7 +424,8 @@ class QcRunService {
     });
 
     logger.info(
-      `[QC] ✅ Run ${run.id} succès: G408 total=${result.total} critical=${result.critical ?? 0} warnings=${(result.warnings || []).length}`
+      `[QC] ✅ Run ${run.id} succès: G408 total=${result.total} critical=${criticalCount}` +
+        `${scoring ? ` (grille: high=${scoring.counts.high}/moyen=${scoring.counts.moyen}/ignorable=${scoring.counts.ignorable}, statut=${scoring.statut})` : ' (sans scoring)'}`
     );
   }
 

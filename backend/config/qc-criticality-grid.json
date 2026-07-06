@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "description": "Grille maison de criticité des avertissements Revit (contrôle G408). Clé primaire = Guid de définition (FailureDefinitionId.Guid, stable et indépendant de la langue — voir docs/SPIKE_WARNING_IDENTITY.md). Tout Guid absent de cette grille est classé 'moyen' par défaut. Les niveaux effectifs sont: high (listé), ignorable (listé), moyen (défaut). La config par projet (qc.project_config.config.criticite) ne porte que les écarts à cette grille.",
+  "seuils": {
+    "_commentaire": "Seuils de volume du statut G408: non_conforme si (nombre de high > criticalMax) OU (total d'avertissements > totalMax).",
+    "totalMax": 200,
+    "criticalMax": 0
+  },
+  "guids": {
+    "ce3275c6-1c51-402e-8de3-df3a3d566f5c": {
+      "niveau": "high",
+      "libelle": "Space is not in a properly enclosed region"
+    },
+    "9ce8825a-7718-4533-af93-194b475f9008": {
+      "niveau": "high",
+      "libelle": "Multiple Spaces are in the same enclosed region"
+    },
+    "6e1efefe-c8e0-483d-8482-150b9f1da21a": {
+      "niveau": "ignorable",
+      "libelle": "Elements have duplicate Number/Mark values",
+      "_commentaire_raffinements": "Raffinement optionnel par pattern texte À L'INTÉRIEUR d'un Guid (le Guid est plus grossier que le texte, ex. Number ET Mark). Format: [{\"pattern\": \"sous-chaîne insensible à la casse\", \"niveau\": \"high|moyen|ignorable\"}]. Premier pattern qui matche gagne. Vide dans l'amorce.",
+      "raffinements": []
+    }
+  }
+}

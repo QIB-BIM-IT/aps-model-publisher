@@ -21,6 +21,14 @@ QCControlResult.init(
     valeur_text: { type: DataTypes.TEXT, allowNull: true },
     valeur_json: { type: DataTypes.JSONB, allowNull: true },
 
+    // Chantier 2 : statut selon les seuils de volume de la grille (conforme | non_conforme).
+    // NULL = résultat antérieur au scoring ou grille indisponible.
+    statut: {
+      type: DataTypes.STRING(16),
+      allowNull: true,
+      validate: { isIn: [['conforme', 'non_conforme']] },
+    },
+
     // Signature humaine — vide sur run automatique
     controleur: { type: DataTypes.STRING, allowNull: true },
     date_controle: { type: DataTypes.DATE, allowNull: true },
