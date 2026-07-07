@@ -68,6 +68,7 @@ app.use('/api/pdf-export', pdfExportRoutes);
 app.use('/api/pdf-export', require('./routes/pdf-export-jobs.routes'));
 app.use('/api/admin', adminRoutes);
 app.use('/api/copy', require('./routes/copy-jobs.routes'));
+app.use('/api/qc', require('./routes/qc.routes')); // 🆕 QC BIM (module additif, schéma qc)
 
 // -------- Serve React frontend in production
 if (process.env.NODE_ENV === 'production') {
@@ -108,6 +109,8 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 
     // 🆕 Démarrer le backfill webhooks (enregistrement auto en arrière-plan)
     webhookBackfill.start();
+
+    await require('./services/qcRun.service').init().catch((e) => logger.error(`⚠️ Module QC non initialisé (mode dégradé, fonctionnalités existantes intactes): ${e.message}`)); // 🆕 QC BIM — chargé APRÈS sync(), schéma qc géré par umzug
 
     const server = app.listen(PORT, () => {
       logger.info(`🚀 Serveur démarré sur le port ${PORT}`);

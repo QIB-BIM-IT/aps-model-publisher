@@ -1,0 +1,4 @@
+# Artefacts de build de l'AppBundle (fichier additif, ne modifie pas le .gitignore racine)
+**/bin/
+**/obj/
+**/output/
