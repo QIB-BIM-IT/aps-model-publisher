@@ -139,6 +139,13 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   (modèle/comptage — variantes présentes, jugement de superfluité humain), G410
   (modèle/comptage — vues `NotPlaced` hors gabarits, liste plafonnée à 200 noms).
   API vérifiée identique 2024/2025 pour toutes ces lectures.
+- **Lot 2** : G406 (modèle/presence — noms de phases, liste ORDONNÉE via `Document.Phases`),
+  G407 (modèle/**`sequence`** — même lecture que G406 partagée par `PhaseReader`, une seule
+  traversée ; règle : la cible doit être une sous-séquence ordonnée de la liste réelle,
+  éléments intercalés tolérés, ordre relatif exigé), G507 (modèle/presence —
+  `SharedParameterElement`+`GuidValue` ; distinction documentée : G502 = liaisons de
+  paramètres de PROJET via ParameterBindings, G507 = définitions de paramètres PARTAGÉS
+  identifiées par leur Guid de fichier partagé). API vérifiée identique 2024/2025.
 
 ## Intégrité des données (ISO 19650)
 

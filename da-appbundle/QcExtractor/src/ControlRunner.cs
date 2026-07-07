@@ -22,6 +22,10 @@ namespace QcExtractor
                 new Extractors.G310OpenConnectorsExtractor(),
                 new Extractors.G402DesignOptionsExtractor(),
                 new Extractors.G410UnplacedViewsExtractor(),
+                // Lot 2 — G406/G407 partagent la lecture des phases via PhaseReader
+                new Extractors.G406PhaseNamesExtractor(),
+                new Extractors.G407PhaseOrderExtractor(),
+                new Extractors.G507SharedParametersExtractor(),
             };
         }
 

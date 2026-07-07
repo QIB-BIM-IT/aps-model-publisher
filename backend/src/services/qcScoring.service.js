@@ -154,6 +154,27 @@ class QcScoringService {
         const b = new Set(presents.map((x) => String(x).toLowerCase()));
         return a.size === b.size && [...a].every((x) => b.has(x)) ? 'conforme' : 'non_conforme';
       }
+      case 'sequence': {
+        // Lot 2 (G407) : l'ordre réel doit respecter une séquence de référence.
+        // RÈGLE RETENUE (documentée) : la cible doit apparaître comme SOUS-SÉQUENCE
+        // ORDONNÉE de la liste réelle — l'ordre relatif des éléments attendus est
+        // exigé, mais des éléments supplémentaires peuvent s'intercaler (un modèle
+        // peut avoir des phases en plus sans violer l'ordre de référence). Un élément
+        // attendu ABSENT ou dans le mauvais ordre => non_conforme. Comparaison
+        // insensible à la casse, espaces bord tronqués.
+        if (!Array.isArray(cible) || cible.length === 0) return null;
+        const champ = entry.champListe || 'liste';
+        const reels = Array.isArray(outcome.valeurJson?.[champ]) ? outcome.valeurJson[champ] : [];
+        const norm = (x) => String(x).trim().toLowerCase();
+        const reelsNorm = reels.map(norm);
+        let i = 0;
+        for (const attendu of cible.map(norm)) {
+          const pos = reelsNorm.indexOf(attendu, i);
+          if (pos === -1) return 'non_conforme';
+          i = pos + 1;
+        }
+        return 'conforme';
+      }
       case 'egalite': {
         // Lot 1 (G101) : conforme si la valeur relevée est STRICTEMENT égale à la
         // cible (comparaison en texte : détecte un écart de version, dans les deux sens
