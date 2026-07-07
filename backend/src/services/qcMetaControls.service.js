@@ -12,12 +12,32 @@ const logger = require('../config/logger');
 
 class QcMetaControlsService {
   /**
-   * @param {object} meta - snapshot métadonnée du run (run.stats.meta) : { storageSize, fileName }
+   * @param {object} meta - snapshot métadonnée du run (run.stats.meta) :
+   *                        { storageSize, revitVersion, fileName }
    * @returns {Array<object>} outcomes au même format que ceux de l'addin
-   *          ({ controlCode, etatExtraction, valeurNum?, valeurJson?, erreur? })
+   *          ({ controlCode, etatExtraction, valeurNum?, valeurText?, valeurJson?, erreur? })
    */
   computeMetaControls(meta) {
     const outcomes = [];
+
+    // G101 — version du logiciel (revitProjectVersion résolue par le resolver).
+    // Sert à détecter un écart entre version PEB attendue (cible projet) et version
+    // réelle — pas seulement à l'afficher. Sans cible : statut NULL (relevé).
+    try {
+      const version = meta?.revitVersion;
+      if (!version) {
+        throw new Error('revitVersion absente de la métadonnée capturée au lancement du run');
+      }
+      outcomes.push({
+        controlCode: 'G101',
+        etatExtraction: 'extrait',
+        valeurNum: Number(version),
+        valeurText: String(version),
+      });
+    } catch (e) {
+      outcomes.push({ controlCode: 'G101', etatExtraction: 'echec', erreur: e.message });
+      logger.warn(`[QC][Meta] G101 en échec d'extraction: ${e.message}`);
+    }
 
     // G102 — taille du fichier (storageSize de la version DM)
     try {
@@ -34,6 +54,23 @@ class QcMetaControlsService {
     } catch (e) {
       outcomes.push({ controlCode: 'G102', etatExtraction: 'echec', erreur: e.message });
       logger.warn(`[QC][Meta] G102 en échec d'extraction: ${e.message}`);
+    }
+
+    // G103 — nom du fichier (attribut DM). Conformité à la convention de nommage via
+    // pattern en config projet (forme 'pattern') ; sans cible : statut NULL.
+    try {
+      const nom = meta?.fileName;
+      if (!nom) {
+        throw new Error('fileName absent de la métadonnée capturée au lancement du run');
+      }
+      outcomes.push({
+        controlCode: 'G103',
+        etatExtraction: 'extrait',
+        valeurText: String(nom),
+      });
+    } catch (e) {
+      outcomes.push({ controlCode: 'G103', etatExtraction: 'echec', erreur: e.message });
+      logger.warn(`[QC][Meta] G103 en échec d'extraction: ${e.message}`);
     }
 
     return outcomes;

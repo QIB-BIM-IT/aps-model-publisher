@@ -154,6 +154,25 @@ class QcScoringService {
         const b = new Set(presents.map((x) => String(x).toLowerCase()));
         return a.size === b.size && [...a].every((x) => b.has(x)) ? 'conforme' : 'non_conforme';
       }
+      case 'egalite': {
+        // Lot 1 (G101) : conforme si la valeur relevée est STRICTEMENT égale à la
+        // cible (comparaison en texte : détecte un écart de version, dans les deux sens
+        // — un seuil laisserait passer les versions antérieures).
+        const releve = outcome.valeurText ?? (Number.isFinite(num) ? String(num) : null);
+        if (releve === null) return null;
+        return String(releve).trim() === String(cible).trim() ? 'conforme' : 'non_conforme';
+      }
+      case 'pattern': {
+        // Lot 1 (G103) : conforme si valeur_text matche la regex cible (convention de
+        // nommage). Regex invalide en config => statut NULL + warn (pas de faux verdict).
+        if (typeof outcome.valeurText !== 'string') return null;
+        try {
+          return new RegExp(String(cible)).test(outcome.valeurText) ? 'conforme' : 'non_conforme';
+        } catch (e) {
+          logger.warn(`[QC][Scoring] Pattern invalide en config pour ${controlCode}: ${e.message}`);
+          return null;
+        }
+      }
       default:
         return null;
     }

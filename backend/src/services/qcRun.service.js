@@ -212,7 +212,11 @@ class QcRunService {
         // Chantier 3 : snapshot métadonnée pour les contrôles MÉTA — calculés tôt,
         // persistés SEULEMENT à la finalisation, avec les lignes MODÈLE (amendement :
         // un run échoué n'a AUCUNE ligne, pas de MÉTA orphelines).
-        meta: { storageSize: resolved.storageSize ?? null },
+        meta: {
+          storageSize: resolved.storageSize ?? null,
+          revitVersion: version,
+          fileName: resolved.fileName ?? null,
+        },
       },
     });
 

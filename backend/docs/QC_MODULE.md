@@ -131,6 +131,14 @@ reçoit une erreur explicite l'invitant à se reconnecter.
 - Contrôles actuels : G408 (modèle/guid), G102 (méta/seuil, octets), G411 (modèle/comptage,
   groupes inutilisés), G502 (modèle/presence, paramètres de projet — lecture des noms
   uniquement, `Definition.ParameterGroup` interdit car supprimé de l'API 2025).
+- **Lot 1** : G101 (méta/`egalite` — écart entre version PEB cible et `revitProjectVersion`
+  réelle), G103 (méta/`pattern` — nom de fichier vs regex de convention), G309
+  (modèle/comptage — Duct/Pipe/FlexDuct/FlexPipe avec `MEPSystem` null ; CableTray/Conduit
+  exclus, sans notion de système), G310 (modèle/comptage — `UnusedConnectors`, **compte brut
+  indicatif et bruyant**, aucun tri légitime/fautif dans cette tranche), G402
+  (modèle/comptage — variantes présentes, jugement de superfluité humain), G410
+  (modèle/comptage — vues `NotPlaced` hors gabarits, liste plafonnée à 200 noms).
+  API vérifiée identique 2024/2025 pour toutes ces lectures.
 
 ## Intégrité des données (ISO 19650)
 

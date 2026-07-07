@@ -17,6 +17,11 @@ namespace QcExtractor
                 new Extractors.G408WarningsExtractor(),
                 new Extractors.G411UnusedGroupsExtractor(),
                 new Extractors.G502ProjectParametersExtractor(),
+                // Lot 1 (chantier 3)
+                new Extractors.G309UnassignedMepSystemsExtractor(),
+                new Extractors.G310OpenConnectorsExtractor(),
+                new Extractors.G402DesignOptionsExtractor(),
+                new Extractors.G410UnplacedViewsExtractor(),
             };
         }
 
