@@ -9,8 +9,11 @@
     "G309": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "elements", "libelle": "Éléments MEP sans système assigné (Duct/Pipe/Flex)" },
     "G310": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "connecteurs", "libelle": "Connecteurs ouverts (compte brut indicatif)" },
     "G402": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "variantes", "libelle": "Variantes présentes (indicatif, jugement humain)" },
+    "G406": { "source": "modele", "forme": "presence", "champListe": "phases", "libelle": "Phases du document (noms, liste ordonnée)" },
+    "G407": { "source": "modele", "forme": "sequence", "champListe": "phases", "libelle": "Phases du document (ordre vs séquence de référence)" },
     "G410": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "vues", "libelle": "Vues non placées sur feuille" },
     "G411": { "source": "modele", "forme": "comptage", "sens": "max", "libelle": "Types de groupes inutilisés" },
-    "G502": { "source": "modele", "forme": "presence", "champListe": "parametres", "libelle": "Paramètres de projet présents" }
+    "G502": { "source": "modele", "forme": "presence", "champListe": "parametres", "libelle": "Paramètres de projet présents" },
+    "G507": { "source": "modele", "forme": "presence", "champListe": "parametresPartages", "libelle": "Paramètres partagés intégrés (SharedParameterElement)" }
   }
 }
