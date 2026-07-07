@@ -1,32 +1,48 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Revit 2024 = .NET Framework 4.8 -->
-    <TargetFramework>net48</TargetFramework>
+    <!-- Multimoteur : Revit 2024 = .NET Framework 4.8 ; Revit 2025 = .NET 8 (Windows).
+         Le code métier est identique, seul le targeting change. -->
+    <TargetFrameworks>net48;net8.0-windows</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <RootNamespace>QcExtractor</RootNamespace>
     <AssemblyName>QcExtractor</AssemblyName>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <PlatformTarget>x64</PlatformTarget>
-    <!-- Chemin de l'API Revit 2024 (surchargez avec -p:RevitApiDir=... si besoin) -->
-    <RevitApiDir Condition="'$(RevitApiDir)' == ''">C:\Program Files\Autodesk\Revit 2024</RevitApiDir>
+    <!-- Chemins des API Revit (surchargez avec -p:RevitApiDir2024=... / -p:RevitApiDir2025=...) -->
+    <RevitApiDir2024 Condition="'$(RevitApiDir2024)' == ''">C:\Program Files\Autodesk\Revit 2024</RevitApiDir2024>
+    <RevitApiDir2025 Condition="'$(RevitApiDir2025)' == ''">C:\Program Files\Autodesk\Revit 2025</RevitApiDir2025>
+    <!-- Le bundle DA doit embarquer les DLLs NuGet (bridge, Newtonsoft). En .NET 8 elles ne
+         sont pas copiées dans bin par défaut pour une bibliothèque, contrairement à net48. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
-  <ItemGroup>
-    <!-- Fournie par le moteur DA / l'installation Revit : ne pas embarquer dans le bundle -->
+  <!-- ===== Cible Revit 2024 (net48) ===== -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <Reference Include="RevitAPI">
-      <HintPath>$(RevitApiDir)\RevitAPI.dll</HintPath>
+      <HintPath>$(RevitApiDir2024)\RevitAPI.dll</HintPath>
       <Private>false</Private>
     </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Bridge Design Automation for Revit (DesignAutomationFramework) : embarqué dans le bundle -->
     <PackageReference Include="Autodesk.Forge.DesignAutomation.Revit" Version="2024.*" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <!-- ===== Cible Revit 2025 (net8.0-windows) ===== -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0-windows'">
+    <Reference Include="RevitAPI">
+      <HintPath>$(RevitApiDir2025)\RevitAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="Autodesk.Forge.DesignAutomation.Revit" Version="2025.*" />
+    <!-- Revit 2025 est une application WPF .NET 8 : RevitAPI.dll dépend de WindowsBase 8.0
+         (Windows Desktop). Sans cette référence de framework, la résolution retombe sur le
+         stub WindowsBase 4.0 du runtime de base → MSB3277. Référence de fond, pas un NoWarn. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
 </Project>

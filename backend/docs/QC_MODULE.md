@@ -33,7 +33,7 @@ POST /api/qc/runs (JWT)                       [qc.routes.js]
 
 | Variable | Obligatoire | Description |
 |---|---|---|
-| `QC_DA_ACTIVITY_ID` | **oui** (active le module DA) | Id qualifié de l'activity, ex. `MonNickname.QcExtractG408+prod`. Affiché par `setup-da.js`. Absent ⇒ mode dégradé explicite (503), le reste de l'app n'est pas affecté. |
+| `QC_DA_ACTIVITY_ID_2024` / `QC_DA_ACTIVITY_ID_2025` | **au moins une** (active le module DA) | Ids qualifiés des activities par version Revit, ex. `<nickname>.qc_extractor_activity_2025+prod`. Affichés par `setup-da.js --engine-version <v>`. Le routage choisit l'activity selon la version résolue du modèle ; version sans activity configurée ⇒ run `failed` explicite, aucun workitem. L'ancien `QC_DA_ACTIVITY_ID` reste lu comme alias 2024 (compat). |
 | `QC_OSS_BUCKET` | non | Bucket OSS transient des résultats (défaut dérivé du client id). |
 | `QC_CALLBACK_BASE_URL` | non | Base publique pour le callback `onComplete` (ex. `https://<app>.azurewebsites.net`). Absent ⇒ polling seul. |
 | `QC_CALLBACK_SECRET` | non | Secret HMAC du callback (défaut : `WEBHOOK_SECRET` puis `JWT_SECRET`). |
@@ -45,21 +45,107 @@ demandé automatiquement par le token 2 legs privé du module QC. Montée progre
 session existante n'est cassée ; un utilisateur QC dont le token ne porte pas `code:all`
 reçoit une erreur explicite l'invitant à se reconnecter.
 
-## Mise en route
+## Mise en route (multimoteur 2024/2025)
 
-1. **Build de l'addin** (nécessite Revit 2024 + dotnet SDK) :
-   `pwsh da-appbundle/QcExtractor/build-bundle.ps1`
-2. **Provisioning DA** (nickname, AppBundle, Activity, alias, bucket — idempotent) :
-   `node backend/scripts/setup-da.js --zip da-appbundle/QcExtractor/output/QcExtractor.bundle.zip`
-   puis poser `QC_DA_ACTIVITY_ID` (valeur affichée en fin de script).
+1. **Build de l'addin** (Revit 2024 → net48, Revit 2025 → **net8.0-windows** ; dotnet SDK 8 requis) :
+   `pwsh da-appbundle/QcExtractor/build-bundle.ps1 -EngineVersion 2024` puis `-EngineVersion 2025`
+2. **Provisioning DA** (AppBundle + Activity par version, alias, bucket — idempotent, nickname jamais modifié) :
+   `node backend/scripts/setup-da.js --engine-version 2024` puis `--engine-version 2025`
+   puis poser `QC_DA_ACTIVITY_ID_2024` / `QC_DA_ACTIVITY_ID_2025` (valeurs affichées).
 3. **Migrations** : appliquées automatiquement au boot (après `connectDB()`/sync), ou à la main :
    `node backend/scripts/qc-migrate.js up | down | down-all | status`
    (`down-all` = rollback complet : tables + types + schéma qc supprimés).
-4. **Lancer un run** :
+4. **Lancer un run** — désignation lisible, la version et la garde workshared sont résolues par
+   métadonnée DM (un seul GET Version, sans ouverture, sans Model Derivative) :
    ```
    POST /api/qc/runs   (Authorization: Bearer <JWT applicatif>)
-   { "region": "US", "projectGuid": "<guid ACC>", "modelGuid": "<guid ACC>", "runType": "quotidien" }
+   { "accUrl": "https://acc.autodesk.com/docs/files/projects/<guid>?...&entityId=<urn>" }
+   ou { "hubName": "...", "projectName": "...", "fileName": "xxx.rvt" }
+   ou { "projectId": "b.xxx", "itemUrn": "urn:adsk.wipprod:dm.lineage:..." }
+   (+ "runType": "quotidien" | "jalon")
    ```
+   `POST /api/qc/resolve` (même body) : résolution seule, aucun run ni workitem — diagnostic.
+
+## Gardes du resolver
+
+- **Workshared (double signal DM vérifié)** : `extension.type === 'versions:autodesk.bim360:C4RModel'`
+  ET `extension.data.modelType === 'multiuser'`. Sinon : run `failed` « hors périmètre, non
+  workshared », `daWorkitemId` NULL, aucun workitem. (`accModelGuid` reçoit la sentinelle
+  `00000000-…` : un non-workshared n'a pas de GUID de modèle cloud ; contexte réel dans `stats.itemUrn`.)
+- **Version** : `extension.data.revitProjectVersion` (number JSON, normalisé en chaîne) fait foi,
+  sans ouverture de confirmation. Version sans activity configurée → run `failed` explicite.
+- **Incohérence métadonnée** (cas réel confirmé — gabarit) : si l'engine annoncé refuse avec
+  « cloud model is not saved in current release », le run est `failed` avec un message dédié
+  signalant l'incohérence. Aucun essai d'engine adjacent, aucune réparation silencieuse.
+- `qc.projects` (migration 0002) : attributs projet uniquement (region, hub, ids), upsert par le
+  resolver ; PAS de version, PAS de FK depuis `qc.runs` (jointure sur `accProjectGuid`).
+
+## Scoring de criticité (chantier 2)
+
+- **Grille maison** : [config/qc-criticality-grid.json](../config/qc-criticality-grid.json),
+  versionnée dans le repo. Clé = **Guid de définition** (stable, indépendant de la langue —
+  voir docs/SPIKE_WARNING_IDENTITY.md sur la branche spike). **Deux niveaux, libellés
+  français définitifs stockés en base** : `critique` (touche la performance ou l'intégrité —
+  seuls les critiques sont listés dans la grille) et `faible` (tout le reste, **défaut** pour
+  tout Guid absent). Raffinement optionnel par pattern texte à l'intérieur d'un Guid.
+  Seuils de volume : `totalMax`, `criticalMax`.
+- **Surcharge projet** : `qc.project_config.config.criticite` (jsonb), ne porte que les
+  écarts : `{ "criticite": { "guids": { "<guid>": { "niveau": "high" } }, "seuils": { … } } }`.
+  Projet sans config → héritage complet de la grille maison.
+- **Effets sur un run** (`qcScoring.service`, appelé dans la transaction de finalisation) :
+  `qc.warnings.criticite` par ligne ; `qc.control_results` : `valeur_num` = total (inchangé),
+  `valeur_json = { total, critical: <nb critiques>, parNiveau: {critique, faible} }`,
+  `statut` = `non_conforme` si critiques > criticalMax OU total > totalMax, sinon `conforme`.
+  Recalcul des runs existants sans DA : `node scripts/qc-rescore.js` (déterministe, en place).
+- **Inventaire des Guids** (remplissage de la grille) :
+  `node scripts/qc-batch-inventory.js --models <liste.json>` lance l'extraction normale sur un
+  lot de modèles (désignations lisibles, non-workshared/versions non supportées sautés proprement ;
+  voir `scripts/qc-inventory-models.example.json`), puis
+  `node scripts/qc-inventory-export.js` exporte `exports/qc-guid-inventory-<date>.csv`
+  (tous runs confondus, groupé par Guid, à annoter dans Excel — les re-runs d'un même
+  modèle gonflent la colonne occurrences ; `nb_modeles` est dédoublonné).
+- **Règle** : extraction toujours ; scoring seulement si une grille est disponible (elle est
+  livrée avec le code ; si illisible → log + comportement tranche 1, colonnes à NULL).
+  La signature humaine reste NULL sur run automatique.
+
+## Multi-contrôles (chantier 3)
+
+- **Registre d'extracteurs** (addin, `IControlExtractor` + `ControlRunner`) : chaque contrôle
+  MODÈLE tourne dans son propre try — un échec produit une ligne `etat_extraction='echec'`
+  + `erreur_extraction`, les autres continuent. Payload v2 (`{schemaVersion:2, controls:[…]}`),
+  compat lecture v1 (G408 seul) conservée côté backend.
+- **Fork MÉTA/MODÈLE** : contrôles MÉTA calculés dans le backend depuis la métadonnée DM du
+  resolver (`qcMetaControls.service`, ex. G102 via `storageSize` — zéro workitem), contrôles
+  MODÈLE dans l'addin. TOUTES les lignes sont persistées dans UNE transaction à la
+  finalisation, même runId — un run échoué n'a AUCUNE ligne.
+- **Deux axes jamais mélangés** sur `qc.control_results` (migration 0004) :
+  `etat_extraction` technique ('extrait'|'echec') et `statut` métier
+  ('conforme'|'non_conforme'|NULL). RÈGLE ABSOLUE : un échec d'extraction force
+  `statut` NULL, aucun scoreur appelé. Trois cas lisibles : jugé / relevé sans cible /
+  bug d'extraction.
+- **Catalogue** [config/qc-controls-catalog.json](../config/qc-controls-catalog.json)
+  (code → source meta|modele, forme) et **scoreurs par forme** (`seuil`, `comptage`,
+  `presence` ; `pourcentage`/`liste` déclarés). Cibles EXCLUSIVEMENT depuis
+  `qc.project_config.config.controles[code].cible` — sans cible : statut NULL. G408
+  garde son scoring par Guid, inchangé.
+- Contrôles actuels : G408 (modèle/guid), G102 (méta/seuil, octets), G411 (modèle/comptage,
+  groupes inutilisés), G502 (modèle/presence, paramètres de projet — lecture des noms
+  uniquement, `Definition.ParameterGroup` interdit car supprimé de l'API 2025).
+- **Lot 1** : G101 (méta/`egalite` — écart entre version PEB cible et `revitProjectVersion`
+  réelle), G103 (méta/`pattern` — nom de fichier vs regex de convention), G309
+  (modèle/comptage — Duct/Pipe/FlexDuct/FlexPipe avec `MEPSystem` null ; CableTray/Conduit
+  exclus, sans notion de système), G310 (modèle/comptage — `UnusedConnectors`, **compte brut
+  indicatif et bruyant**, aucun tri légitime/fautif dans cette tranche), G402
+  (modèle/comptage — variantes présentes, jugement de superfluité humain), G410
+  (modèle/comptage — vues `NotPlaced` hors gabarits, liste plafonnée à 200 noms).
+  API vérifiée identique 2024/2025 pour toutes ces lectures.
+- **Lot 2** : G406 (modèle/presence — noms de phases, liste ORDONNÉE via `Document.Phases`),
+  G407 (modèle/**`sequence`** — même lecture que G406 partagée par `PhaseReader`, une seule
+  traversée ; règle : la cible doit être une sous-séquence ordonnée de la liste réelle,
+  éléments intercalés tolérés, ordre relatif exigé), G507 (modèle/presence —
+  `SharedParameterElement`+`GuidValue` ; distinction documentée : G502 = liaisons de
+  paramètres de PROJET via ParameterBindings, G507 = définitions de paramètres PARTAGÉS
+  identifiées par leur Guid de fichier partagé). API vérifiée identique 2024/2025.
 
 ## Intégrité des données (ISO 19650)
 

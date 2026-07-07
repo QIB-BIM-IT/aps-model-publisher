@@ -28,27 +28,58 @@ function httpStatus(err) {
 }
 
 /**
+ * Extrait la désignation lisible du modèle depuis le body (aucun GUID codé en dur) :
+ *  { accUrl }                                        — URL ACC Docs du fichier
+ *  { hubName|hubId, projectName|projectId, fileName }— identifiants lisibles
+ *  { projectId, itemUrn }                            — identifiants directs DM
+ */
+function extractDesignation(body) {
+  const { accUrl, hubId, hubName, projectId, projectName, fileName, itemUrn } = body || {};
+  return { accUrl, hubId, hubName, projectId, projectName, fileName, itemUrn };
+}
+
+/**
  * POST /api/qc/runs
- * Body: { region: 'US'|'EMEA', projectGuid, modelGuid, runType?: 'quotidien'|'jalon',
- *         projectId?: 'b.xxx', itemUrn?: 'urn:adsk.wipprod:dm.lineage:...', jobId? }
+ * Body: désignation (voir extractDesignation) + { runType?: 'quotidien'|'jalon', jobId? }
+ * La version Revit et la garde workshared sont résolues par métadonnée DM (un seul GET,
+ * sans ouverture) ; routage vers l'activity 2024 ou 2025 selon la version résolue.
  */
 router.post('/runs', authenticateToken, async (req, res) => {
   if (!qcRunService.isReady()) return notReady(res);
   try {
-    const { region, projectGuid, modelGuid, runType, projectId, itemUrn, jobId } = req.body || {};
+    const { runType, jobId, simulerEchec } = req.body || {};
     const run = await qcRunService.startRun({
       user: req.user,
-      region,
-      projectGuid,
-      modelGuid,
+      designation: extractDesignation(req.body),
       runType: runType || 'quotidien',
-      projectId: projectId || null,
-      itemUrn: itemUrn || null,
       jobId: jobId || null,
+      simulerEchec: simulerEchec || null, // TEST uniquement (isolation des extracteurs)
     });
+    // Un run refusé par une garde est créé failed sans workitem : 200 avec le run,
+    // le client lit run.status / run.message.
     return res.status(202).json({ success: true, run });
   } catch (err) {
     logger.error(`[QC] POST /runs: ${err.message}`);
+    return res.status(httpStatus(err)).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/qc/resolve — résolution SEULE, lecture DM uniquement.
+ * Aucun run créé, aucun workitem soumis. Sert au diagnostic et aux tests
+ * (version annoncée, statut workshared, GUIDs, région).
+ */
+router.post('/resolve', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const apsAuthService = require('../services/apsAuth.service');
+    const resolver = require('../services/qcModelResolver.service');
+    const accessToken = await apsAuthService.ensureValidToken(req.userId);
+    const ref = await resolver.resolveDesignation(extractDesignation(req.body), accessToken);
+    const resolved = await resolver.resolveModel(ref, accessToken);
+    return res.json({ success: true, resolved });
+  } catch (err) {
+    logger.error(`[QC] POST /resolve: ${err.message}`);
     return res.status(httpStatus(err)).json({ success: false, message: err.message });
   }
 });

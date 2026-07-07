@@ -20,6 +20,15 @@ QCWarning.init(
       validate: { isIn: [['warning', 'critical']] },
     },
 
+    // Chantier 2 : niveau résolu par la grille de criticité (Guid d'abord).
+    // Deux niveaux, libellés français définitifs : 'critique' | 'faible'.
+    // NULL = run antérieur au scoring ou grille indisponible.
+    criticite: {
+      type: DataTypes.STRING(16),
+      allowNull: true,
+      validate: { isIn: [['critique', 'faible']] },
+    },
+
     description: { type: DataTypes.TEXT, allowNull: false },
     elementIds: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
     raw: { type: DataTypes.JSONB, allowNull: true },

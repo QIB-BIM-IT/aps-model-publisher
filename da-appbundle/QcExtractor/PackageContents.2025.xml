@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ApplicationPackage SchemaVersion="1.0" Version="1.0.0"
+                    ProductCode="{9C1E5B2A-4D3F-4E8B-A7C6-1F0D2E3A4B5C}"
+                    Name="QcExtractor"
+                    Description="QC BIM - extraction G408 (avertissements Revit) depuis modele cloud ACC"
+                    Author="Tetra Tech">
+  <CompanyDetails Name="Tetra Tech" />
+  <Components Description="QC G408 extractor">
+    <RuntimeRequirements OS="Win64" Platform="Revit" SeriesMin="R2025" SeriesMax="R2025" />
+    <!-- revitcoreconsole (DA) exige un manifeste .addin : ModuleName pointe vers lui, pas vers la DLL -->
+    <ComponentEntry AppName="QcExtractor" Version="1.0.0"
+                    ModuleName="./Contents/QcExtractor.addin"
+                    AppDescription="Extraction des avertissements Revit (controle G408)"
+                    LoadOnRevitStartup="True" LoadOnCommandInvocation="False" />
+  </Components>
+</ApplicationPackage>

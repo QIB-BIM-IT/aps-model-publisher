@@ -14,6 +14,7 @@ const QCRun = require('./QCRun');
 const QCControlResult = require('./QCControlResult');
 const QCWarning = require('./QCWarning');
 const QCProjectConfig = require('./QCProjectConfig');
+const QCProject = require('./QCProject'); // pas d'association contraignante — jointure sur accProjectGuid
 
 // User est déjà chargé par l'app à ce stade ; associations en lecture seule,
 // constraints: false → Sequelize ne crée/modifie AUCUNE contrainte (elles sont
@@ -40,4 +41,5 @@ module.exports = {
   QCControlResult,
   QCWarning,
   QCProjectConfig,
+  QCProject,
 };

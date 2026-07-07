@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "description": "Catalogue des contrôles QC : code → source d'extraction (meta = backend depuis la métadonnée Data Management, sans workitem ; modele = addin DA4R via l'API Revit) et forme du scoreur. Les cibles viennent EXCLUSIVEMENT de qc.project_config.config.controles[code].cible — aucun seuil maison codé en dur pour les contrôles non-G408 ; sans cible : extraction réussie, statut NULL. Formes disponibles : guid (cas particulier G408, grille de criticité), seuil, comptage, presence, pourcentage, liste (les deux dernières déclarées pour les lots futurs).",
+  "controles": {
+    "G408": { "source": "modele", "forme": "guid", "libelle": "Avertissements du modèle" },
+    "G101": { "source": "meta", "forme": "egalite", "unite": "version", "libelle": "Version du logiciel (écart PEB vs réel)" },
+    "G102": { "source": "meta", "forme": "seuil", "sens": "max", "unite": "octets", "libelle": "Taille du fichier (storageSize DM)" },
+    "G103": { "source": "meta", "forme": "pattern", "libelle": "Nom du fichier (convention de nommage)" },
+    "G309": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "elements", "libelle": "Éléments MEP sans système assigné (Duct/Pipe/Flex)" },
+    "G310": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "connecteurs", "libelle": "Connecteurs ouverts (compte brut indicatif)" },
+    "G402": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "variantes", "libelle": "Variantes présentes (indicatif, jugement humain)" },
+    "G406": { "source": "modele", "forme": "presence", "champListe": "phases", "libelle": "Phases du document (noms, liste ordonnée)" },
+    "G407": { "source": "modele", "forme": "sequence", "champListe": "phases", "libelle": "Phases du document (ordre vs séquence de référence)" },
+    "G410": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "vues", "libelle": "Vues non placées sur feuille" },
+    "G411": { "source": "modele", "forme": "comptage", "sens": "max", "libelle": "Types de groupes inutilisés" },
+    "G502": { "source": "modele", "forme": "presence", "champListe": "parametres", "libelle": "Paramètres de projet présents" },
+    "G507": { "source": "modele", "forme": "presence", "champListe": "parametresPartages", "libelle": "Paramètres partagés intégrés (SharedParameterElement)" }
+  }
+}
