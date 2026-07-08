@@ -473,6 +473,20 @@ class QcRunService {
         // Contrôles génériques (MÉTA ou MODÈLE) : scoreur par forme, cible projet
         // exclusivement — pas de cible => statut NULL (valeur relevée, pas de verdict).
         const statut = qcScoring.scoreByForme(code, outcome, projectConfig.controles);
+
+        // Lot NOMMAGE (option A validée) : le détail des noms fautifs est réinjecté
+        // dans valeur_json via la méthode PURE evaluerNommage — le contrat de
+        // scoreByForme (statut seul) reste intact, aucun effet de bord sur outcome.
+        let valeurJson = outcome.valeurJson ?? null;
+        const entry = qcScoring.catalogEntry(code);
+        const cibleNommage = projectConfig.controles?.[code]?.cible;
+        if (entry?.forme === 'nommage' && cibleNommage != null && statut !== null) {
+          const champ = entry.champListe || 'noms';
+          const noms = Array.isArray(outcome.valeurJson?.[champ]) ? outcome.valeurJson[champ] : [];
+          const { nomsNonConformes } = qcScoring.evaluerNommage(noms, cibleNommage, code);
+          valeurJson = { ...(outcome.valeurJson || {}), nommage: { nomsNonConformes } };
+        }
+
         await QCControlResult.create(
           {
             runId: run.id,
@@ -480,7 +494,7 @@ class QcRunService {
             etat_extraction: 'extrait',
             valeur_num: Number.isFinite(outcome.valeurNum) ? outcome.valeurNum : null,
             valeur_text: outcome.valeurText ?? null,
-            valeur_json: outcome.valeurJson ?? null,
+            valeur_json: valeurJson,
             statut,
           },
           { transaction: t }

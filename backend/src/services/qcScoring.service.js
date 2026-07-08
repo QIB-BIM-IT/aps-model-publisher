@@ -186,6 +186,7 @@ class QcScoringService {
       case 'pattern': {
         // Lot 1 (G103) : conforme si valeur_text matche la regex cible (convention de
         // nommage). Regex invalide en config => statut NULL + warn (pas de faux verdict).
+        // Forme RÉSERVÉE à G103 (cible chaîne) — les listes de noms passent par 'nommage'.
         if (typeof outcome.valeurText !== 'string') return null;
         try {
           return new RegExp(String(cible)).test(outcome.valeurText) ? 'conforme' : 'non_conforme';
@@ -194,9 +195,105 @@ class QcScoringService {
           return null;
         }
       }
+      case 'nommage': {
+        // Lot NOMMAGE (G404/G203/G205) : valide la LISTE de noms relevée contre la
+        // convention décrite en config (cible OBJET). Conforme si TOUS les noms
+        // passent. Le détail des fautifs (nomsNonConformes) est réinjecté dans
+        // valeur_json par la finalisation via evaluerNommage (option A validée).
+        const champ = entry.champListe || 'noms';
+        const noms = Array.isArray(outcome.valeurJson?.[champ]) ? outcome.valeurJson[champ] : [];
+        const { statut } = this.evaluerNommage(noms, cible, controlCode);
+        return statut;
+      }
       default:
         return null;
     }
+  }
+
+  /**
+   * Forme 'nommage' — méthode PURE (aucune écriture, aucun effet de bord), réutilisable.
+   * Valide une liste de noms contre une convention en config, éditable par un
+   * non-développeur. Cible (OBJET) :
+   *   { type: 'prefixe',  valeur: 'TT-' }
+   *   { type: 'segments', separateur: '-', nbMin: 3, nbMax: 5 }   (nbMax optionnel)
+   *   { type: 'regex',    motif: '^AX-[0-9]{2}$' }                (RegExp JavaScript, réservé développeur)
+   * Options communes : ignoreCasse (bool, défaut false — les conventions sont sensibles
+   * à la casse par défaut), exceptions (noms exacts exemptés, ex. « Niveaux et
+   * quadrillages partagés » pour G404).
+   * Règles validées : liste vide => conforme (vacuité) ; segment vide => non conforme.
+   * Cible malformée, type inconnu ou regex invalide => statut NULL + warn (jamais de
+   * faux verdict), aligné sur la forme 'pattern'.
+   *
+   * @param {string[]} noms
+   * @param {object} cible - config.controles[code].cible
+   * @param {string} [controlCode] - pour les logs uniquement
+   * @returns {{statut: string|null, nomsNonConformes: string[]}}
+   */
+  evaluerNommage(noms, cible, controlCode = '?') {
+    const aucun = { statut: null, nomsNonConformes: [] };
+    if (!cible || typeof cible !== 'object' || Array.isArray(cible)) {
+      logger.warn(`[QC][Scoring] Cible nommage malformée pour ${controlCode} (objet attendu) — statut NULL`);
+      return aucun;
+    }
+
+    const ignoreCasse = cible.ignoreCasse === true;
+    const norm = (x) => (ignoreCasse ? String(x).toLowerCase() : String(x));
+    const exceptions = new Set((Array.isArray(cible.exceptions) ? cible.exceptions : []).map(norm));
+
+    let estConforme;
+    switch (cible.type) {
+      case 'prefixe': {
+        if (typeof cible.valeur !== 'string' || !cible.valeur.length) {
+          logger.warn(`[QC][Scoring] Cible nommage/prefixe sans 'valeur' pour ${controlCode} — statut NULL`);
+          return aucun;
+        }
+        const prefixe = norm(cible.valeur);
+        estConforme = (nom) => norm(nom.trim()).startsWith(prefixe);
+        break;
+      }
+      case 'segments': {
+        const sep = cible.separateur;
+        const nbMin = Number.isFinite(cible.nbMin) ? cible.nbMin : 1;
+        const nbMax = Number.isFinite(cible.nbMax) ? cible.nbMax : Infinity;
+        if (typeof sep !== 'string' || !sep.length) {
+          logger.warn(`[QC][Scoring] Cible nommage/segments sans 'separateur' pour ${controlCode} — statut NULL`);
+          return aucun;
+        }
+        estConforme = (nom) => {
+          const segments = nom.trim().split(sep);
+          // Décision validée : un segment vide (« A--B », séparateur en bord) est non conforme
+          if (segments.some((s) => s.length === 0)) return false;
+          return segments.length >= nbMin && segments.length <= nbMax;
+        };
+        break;
+      }
+      case 'regex': {
+        if (typeof cible.motif !== 'string' || !cible.motif.length) {
+          logger.warn(`[QC][Scoring] Cible nommage/regex sans 'motif' pour ${controlCode} — statut NULL`);
+          return aucun;
+        }
+        let re;
+        try {
+          re = new RegExp(cible.motif, ignoreCasse ? 'i' : '');
+        } catch (e) {
+          logger.warn(`[QC][Scoring] Motif regex invalide en config pour ${controlCode}: ${e.message} — statut NULL`);
+          return aucun;
+        }
+        estConforme = (nom) => re.test(nom.trim());
+        break;
+      }
+      default:
+        logger.warn(`[QC][Scoring] Type de nommage inconnu "${cible.type}" pour ${controlCode} — statut NULL`);
+        return aucun;
+    }
+
+    const nomsNonConformes = [];
+    for (const nom of noms.map(String)) {
+      if (exceptions.has(norm(nom.trim()))) continue;
+      if (!estConforme(nom)) nomsNonConformes.push(nom);
+    }
+    // Liste vide (aucun nom, ou tous exemptés) => conforme par vacuité (décision validée)
+    return { statut: nomsNonConformes.length ? 'non_conforme' : 'conforme', nomsNonConformes };
   }
 
   // ======== Résolution du niveau d'un avertissement ========

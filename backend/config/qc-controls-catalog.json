@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Catalogue des contrôles QC : code → source d'extraction (meta = backend depuis la métadonnée Data Management, sans workitem ; modele = addin DA4R via l'API Revit) et forme du scoreur. Les cibles viennent EXCLUSIVEMENT de qc.project_config.config.controles[code].cible — aucun seuil maison codé en dur pour les contrôles non-G408 ; sans cible : extraction réussie, statut NULL. Formes disponibles : guid (cas particulier G408, grille de criticité), seuil, comptage, presence, pourcentage, liste (les deux dernières déclarées pour les lots futurs).",
+  "description": "Catalogue des contrôles QC : code → source d'extraction (meta = backend depuis la métadonnée Data Management, sans workitem ; modele = addin DA4R via l'API Revit) et forme du scoreur. Les cibles viennent EXCLUSIVEMENT de qc.project_config.config.controles[code].cible — aucun seuil maison codé en dur pour les contrôles non-G408 ; sans cible : extraction réussie, statut NULL. Formes disponibles : guid (cas particulier G408, grille de criticité), seuil, comptage, presence, pourcentage, liste (les deux dernières déclarées pour les lots futurs), pattern (regex brute sur valeur_text — RÉSERVÉ à G103, piste d'unification future vers nommage), nommage (lot NOMMAGE : valide une LISTE de noms contre une convention en config, cible OBJET {type: prefixe|segments|regex, ...} + options ignoreCasse/exceptions, sous-forme regex en sémantique RegExp JavaScript — voir QC_MODULE.md).",
   "controles": {
     "G408": { "source": "modele", "forme": "guid", "libelle": "Avertissements du modèle" },
     "G101": { "source": "meta", "forme": "egalite", "unite": "version", "libelle": "Version du logiciel (écart PEB vs réel)" },
@@ -14,6 +14,9 @@
     "G410": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "vues", "libelle": "Vues non placées sur feuille" },
     "G411": { "source": "modele", "forme": "comptage", "sens": "max", "libelle": "Types de groupes inutilisés" },
     "G502": { "source": "modele", "forme": "presence", "champListe": "parametres", "libelle": "Paramètres de projet présents" },
-    "G507": { "source": "modele", "forme": "presence", "champListe": "parametresPartages", "libelle": "Paramètres partagés intégrés (SharedParameterElement)" }
+    "G507": { "source": "modele", "forme": "presence", "champListe": "parametresPartages", "libelle": "Paramètres partagés intégrés (SharedParameterElement)" },
+    "G404": { "source": "modele", "forme": "nommage", "champListe": "sousProjets", "libelle": "Sous-projets utilisateur (convention de nommage)" },
+    "G203": { "source": "modele", "forme": "nommage", "champListe": "niveaux", "libelle": "Niveaux (convention de nommage)" },
+    "G205": { "source": "modele", "forme": "nommage", "champListe": "axes", "libelle": "Axes / quadrillages (convention de nommage)" }
   }
 }
