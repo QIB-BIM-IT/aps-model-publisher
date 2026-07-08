@@ -30,6 +30,13 @@ namespace QcExtractor
                 new Extractors.G404WorksetNamesExtractor(),
                 new Extractors.G203LevelNamesExtractor(),
                 new Extractors.G205GridNamesExtractor(),
+                // Lot COORDONNÉES — hôte seul, sans lien (API vérifiée 2024/2025) :
+                // unités, infos projet, base/origine, survey point, angle au nord vrai.
+                new Extractors.G104UnitSystemExtractor(),
+                new Extractors.G105ProjectInfoExtractor(),
+                new Extractors.G200BasePointOriginExtractor(),
+                new Extractors.G201SurveyPointExtractor(),
+                new Extractors.G202TrueNorthAngleExtractor(),
             };
         }
 

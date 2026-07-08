@@ -157,6 +157,16 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   multi-segments portent le même nom). API vérifiée identique 2024/2025.
   La forme `pattern` reste RÉSERVÉE à G103 (cible chaîne regex sur UNE valeur) ;
   piste d'unification future vers `nommage`, aucune action maintenant.
+- **Lot COORDONNÉES** (tous MODÈLE, hôte seul, sans lien ; API vérifiée identique
+  2024/2025 — preuves dans `da-appbundle/QcExtractor/spike/coord-controls/API_VERIFIED.md`) :
+  G104 (modèle/`egalite` — système d'unités longueur/aire/volume via `Document.GetUnits()`
+  → `SpecTypeId.Length/Area/Volume`, `valeur_text` = jeton canonique `« longueur|aire|volume »`),
+  G105 (modèle/`presence` — champs `ProjectInfo`, `champListe='champsRenseignes'` = clés non
+  vides), G200 (modèle/`seuil` — écart point de base projet vs origine interne, comparaison
+  INTERNE, `valeur_num` = plus grand écart absolu par axe en mètres), G201 (modèle/**`coordonnees`**
+  — **survey point** `BasePoint.GetSurveyPoint(doc).SharedPosition`, PAS le point de base ;
+  3 composantes ns/eo/elev en mètres), G202 (modèle/**`angle`** — angle au nord VRAI via
+  `ActiveProjectLocation.GetProjectPosition(XYZ.Zero).Angle`, degrés normalisés `[0,360)`).
 
 ## Forme de scoreur « nommage » (lot NOMMAGE)
 
@@ -208,6 +218,62 @@ Options communes aux trois sous-formes :
   } } } }
   ```
 
+## Formes de scoreur « coordonnees » et « angle » (lot COORDONNÉES)
+
+Deux nouvelles formes, dont les cibles viennent — comme toujours — EXCLUSIVEMENT de
+`qc.project_config.config.controles[<code>].cible`. Sans cible : extraction réussie,
+`statut` NULL (valeurs relevées, aucun verdict). Cible malformée ou incomplète :
+`statut` NULL + warn (jamais de faux verdict).
+
+### `coordonnees` — G201, géoréférencement (survey point vs PEB)
+
+L'extracteur relève les 3 composantes du **survey point** en mètres : `ns` (Nord/Sud),
+`eo` (Est/Ouest), `elev` (élévation). La cible décrit les coordonnées attendues du PEB
+(Plan d'Exécution BIM) et une **tolérance en distance** (mètres). Le contrôle est
+`conforme` si CHAQUE axe est à `|relevé − attendu| ≤ tolérance` ; sinon `non_conforme`,
+et `valeur_json.coordonnees.axesHorsTolerance` liste le ou les **axes fautifs** (avec
+le détail par axe dans `valeur_json.coordonnees.axes`).
+
+Cible lisible par un non-développeur — coordonnées attendues + une tolérance globale :
+
+```json
+{ "controles": { "G201": { "cible": {
+    "ns": 5039000.0, "eo": 300100.0, "elev": 52.5,
+    "tolerance": 0.05
+} } } }
+```
+
+- `ns`, `eo`, `elev` : les coordonnées réelles attendues du survey point, **en mètres**.
+- `tolerance` : écart maximal toléré, **en mètres** (ex. `0.05` = 5 cm), appliqué aux 3 axes.
+- Tolérance par axe (optionnelle, surcharge la globale) : `toleranceNs`, `toleranceEo`,
+  `toleranceElev`. Exemple — tolérance serrée en plan, plus large en altitude :
+
+  ```json
+  { "controles": { "G201": { "cible": {
+      "ns": 5039000.0, "eo": 300100.0, "elev": 52.5,
+      "toleranceNs": 0.02, "toleranceEo": 0.02, "toleranceElev": 0.10
+  } } } }
+  ```
+
+### `angle` — G202, angle au nord vrai (vs PEB)
+
+L'extracteur relève `valeur_num` = angle au nord vrai en degrés, normalisé sur
+`[0, 360)`. La cible est l'angle attendu du PEB + une **tolérance angulaire** en degrés.
+Le contrôle est `conforme` si la **distance angulaire** relevé↔attendu est ≤ tolérance.
+La distance angulaire gère le **wrap-around** : `359°` et `1°` sont distants de `2°`
+(et non `358°`), donc une cible proche de `0°` reste conforme pour un relevé proche de
+`360°` si l'écart réel est dans la tolérance.
+
+```json
+{ "controles": { "G202": { "cible": {
+    "angle": 0.0,
+    "tolerance": 0.5
+} } } }
+```
+
+- `angle` : l'angle attendu du PEB entre nord projet et nord vrai, **en degrés**.
+- `tolerance` : écart angulaire maximal toléré, **en degrés** (ex. `0.5`).
+
 ## Intégrité des données (ISO 19650)
 
 - Jamais de `ON DELETE CASCADE` de `qc` vers `public` : `qc.jobs.userId` et `qc.runs.userId`
@@ -224,6 +290,79 @@ Options communes aux trois sous-formes :
   `true`, donc chaque boot exécute `sync({alter:true})` sur le schéma public — ce qui
   invalide toute preuve de non-régression. Action d'infrastructure, aucun changement de code.
   Le test « snapshot du schéma public » n'est valide qu'une fois cette variable à `false`.
+
+## Lot COORDONNÉES — à exécuter par l'utilisateur EN LOCAL (procédure)
+
+Ces étapes touchent la base et/ou l'infra APS : elles sont **volontairement laissées
+au lancement manuel**, une fois la base **locale** active. Rappel du garde-fou : la
+connexion PostgreSQL doit être `localhost`/`127.0.0.1` (activer le bloc LOCAL de
+`backend/.env`, `DB_SSL=false`) — ne rien lancer contre une base distante.
+
+**0. Base locale (préalable, côté utilisateur).** Activer la base locale, s'assurer
+que PostgreSQL tourne, puis appliquer les migrations qc :
+
+```
+node backend/scripts/qc-migrate.js status
+node backend/scripts/qc-migrate.js up      # aucune migration nouvelle attendue : les colonnes existent déjà
+```
+
+Aucune migration n'est ajoutée par ce lot (schéma `qc` inchangé, schéma `public` jamais
+touché). `status` doit montrer 0004 déjà appliquée.
+
+**1. Confirmer l'hôte local.** Vérifier que l'application résout bien vers un hôte
+local avant tout run (sinon, arrêter).
+
+**2. Build zéro warning + re-provisioning DA (les 2 moteurs).** L'ajout de contrôles
+MODÈLE exige de rebuilder le bundle et de re-provisionner :
+
+```
+pwsh da-appbundle/QcExtractor/build-bundle.ps1 -EngineVersion 2024
+pwsh da-appbundle/QcExtractor/build-bundle.ps1 -EngineVersion 2025
+node backend/scripts/setup-da.js --engine-version 2024
+node backend/scripts/setup-da.js --engine-version 2025
+```
+
+Ressources `qc_extractor` suffixées par version, nickname en lecture seule (jamais de
+PATCH). Poser les `QC_DA_ACTIVITY_ID_2024/2025` affichés.
+
+**3. Non-régression des 16 (PRIORITÉ ABSOLUE).** Lancer un run sur chaque pilote et
+comparer valeurs + statuts des 16 contrôles existants à un run de référence
+pré-lot : ils doivent être identiques. Total attendu : **21 lignes** par run
+(16 + 5 nouveaux).
+
+```
+POST /api/qc/runs { "hubName": "...", "projectName": "...", "fileName": "ELEC 2024.rvt" }   # Revit 2024
+POST /api/qc/runs { "hubName": "...", "projectName": "...", "fileName": "M_PR 2025.rvt" }    # Revit 2025
+```
+
+**4. Valeurs relevées des 5 nouveaux (sans cible → `statut` NULL).** Sur chaque pilote,
+relever : G104 `valeur_text` (unités) + `valeur_json`, G105 `champsRenseignes`,
+G200 écart par axe + `ecartMaxAbs`, G201 `surveyPoint {ns,eo,elev}`, G202 angle en
+degrés. `etat_extraction='extrait'`, `statut` NULL tant qu'aucune cible n'est en config.
+
+**5. Preuves des scoreurs (insérer une cible de test dans `qc.project_config.config.controles`,
+lancer, puis la RETIRER).**
+
+- **G201 `coordonnees`** : cible proche du survey point réel + `tolerance` large ⇒ `conforme` ;
+  puis cible éloignée (ou tolérance serrée) ⇒ `non_conforme`, en vérifiant
+  `valeur_json.coordonnees.axesHorsTolerance` (axe fautif identifié).
+- **G202 `angle`** : cible avec tolérance ⇒ `conforme` ; prouver le **wrap-around**
+  (angle réel proche de 360°, cible proche de 0°, `tolerance` couvrant l'écart réel ⇒ `conforme`).
+- **G200 `seuil`** : tolérance serrée ⇒ `non_conforme`, tolérance large ⇒ `conforme`.
+
+Un re-scoring déterministe des runs existants (sans DA) est possible via
+`node backend/scripts/qc-rescore.js` après insertion/retrait de cible.
+
+**6. Isolation d'échec.** Lancer un run avec `simulerEchec` = l'un des 5 codes (ex. `G201`) :
+sa ligne doit être `etat_extraction='echec'`, `statut` NULL, les 20 autres intactes.
+
+```
+POST /api/qc/runs { "...": "...", "simulerEchec": "G201" }
+```
+
+**7. Additivité.** Vérifier que le diff est confiné au module QC + addin, que le schéma
+`public` est inchangé (snapshot — valide seulement si `DB_SYNC_ALTER=false`), qu'aucune
+migration n'a été ajoutée et que `backend/src/config/database.js` est intact.
 
 ## Limites assumées de la tranche
 

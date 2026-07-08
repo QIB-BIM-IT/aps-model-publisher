@@ -14,6 +14,10 @@
     <!-- Le bundle DA doit embarquer les DLLs NuGet (bridge, Newtonsoft). En .NET 8 elles ne
          sont pas copiées dans bin par défaut pour une bibliothèque, contrairement à net48. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- spike/ = outils de diagnostic autonomes (chacun son propre .csproj, ciblant
+         System.Reflection.Metadata). Ils ne font PAS partie de l'addin : les exclure des
+         globs par défaut, sinon le glob **/*.cs les compile dans le bundle (échec net48). -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);spike\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!-- ===== Cible Revit 2024 (net48) ===== -->

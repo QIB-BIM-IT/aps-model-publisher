@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Vérification d'API pour le lot COORDONNÉES (G104/G105/G200/G201/G202).
+       Décode les signatures exactes (méthodes, propriétés, champs) de types Revit
+       API par lecture PURE des métadonnées (System.Reflection.Metadata) : aucun
+       assembly Autodesk n'est chargé, aucun code Revit n'est exécuté. Généralise
+       ../../SigDump (qui filtrait par nom de membre) pour dumper TOUS les membres
+       publics des types demandés, dans les DLLs 2024 ET 2025. Outil de diagnostic,
+       non embarqué dans le bundle. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>ApiDump</AssemblyName>
+  </PropertyGroup>
+</Project>

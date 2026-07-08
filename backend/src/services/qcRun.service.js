@@ -479,12 +479,21 @@ class QcRunService {
         // scoreByForme (statut seul) reste intact, aucun effet de bord sur outcome.
         let valeurJson = outcome.valeurJson ?? null;
         const entry = qcScoring.catalogEntry(code);
-        const cibleNommage = projectConfig.controles?.[code]?.cible;
-        if (entry?.forme === 'nommage' && cibleNommage != null && statut !== null) {
+        const cibleGenerique = projectConfig.controles?.[code]?.cible;
+        if (entry?.forme === 'nommage' && cibleGenerique != null && statut !== null) {
           const champ = entry.champListe || 'noms';
           const noms = Array.isArray(outcome.valeurJson?.[champ]) ? outcome.valeurJson[champ] : [];
-          const { nomsNonConformes } = qcScoring.evaluerNommage(noms, cibleNommage, code);
+          const { nomsNonConformes } = qcScoring.evaluerNommage(noms, cibleGenerique, code);
           valeurJson = { ...(outcome.valeurJson || {}), nommage: { nomsNonConformes } };
+        }
+        // Lot COORDONNÉES (option A, comme 'nommage') : le détail par axe (dont l'axe fautif)
+        // est réinjecté dans valeur_json via la méthode PURE evaluerCoordonnees — contrat de
+        // scoreByForme (statut seul) intact, aucun effet de bord sur outcome.
+        if (entry?.forme === 'coordonnees' && cibleGenerique != null && statut !== null) {
+          const champ = entry.champObjet || 'coordonnees';
+          const releve = outcome.valeurJson?.[champ];
+          const { axes, axesHorsTolerance } = qcScoring.evaluerCoordonnees(releve, cibleGenerique, code);
+          valeurJson = { ...(outcome.valeurJson || {}), coordonnees: { axes, axesHorsTolerance } };
         }
 
         await QCControlResult.create(
