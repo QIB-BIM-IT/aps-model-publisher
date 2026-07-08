@@ -146,6 +146,67 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   `SharedParameterElement`+`GuidValue` ; distinction documentée : G502 = liaisons de
   paramètres de PROJET via ParameterBindings, G507 = définitions de paramètres PARTAGÉS
   identifiées par leur Guid de fichier partagé). API vérifiée identique 2024/2025.
+- **Lot NOMMAGE** : G404 (modèle/nommage — sous-projets UTILISATEUR via
+  `FilteredWorksetCollector.OfKind(WorksetKind.UserWorkset)` → `Workset.Name` ; les
+  sous-projets système vues/familles/normes sont exclus par `OfKind` ; « Niveaux et
+  quadrillages partagés » est classé `UserWorkset` par l'API sans drapeau d'exclusion
+  fiable — il reste dans la liste relevée et s'exempte via `exceptions` en config,
+  jamais par un filtre de nom codé en dur), G203 (modèle/nommage — niveaux via
+  `OfClass(Level)` → `Element.Name`), G205 (modèle/nommage — axes/quadrillages via
+  `OfClass(Grid)` → `Element.Name`, dédoublonné : les segments d'un quadrillage
+  multi-segments portent le même nom). API vérifiée identique 2024/2025.
+  La forme `pattern` reste RÉSERVÉE à G103 (cible chaîne regex sur UNE valeur) ;
+  piste d'unification future vers `nommage`, aucune action maintenant.
+
+## Forme de scoreur « nommage » (lot NOMMAGE)
+
+Valide une **liste de noms** relevée par l'extracteur (localisée par `champListe` du
+catalogue) contre une convention décrite dans
+`qc.project_config.config.controles[<code>].cible`. Chaque nom est marqué conforme ou
+non : le contrôle est `conforme` si TOUS les noms passent, `non_conforme` si au moins
+un échoue, et `valeur_json.nommage.nomsNonConformes` liste les noms à corriger.
+Sans cible : extraction réussie, `statut` NULL (comme partout). Liste vide (ou tous
+les noms exemptés) : `conforme` (vérité par vacuité). Cible malformée ou regex
+invalide : `statut` NULL + warn — jamais de faux verdict.
+
+La cible est un **objet** avec un champ `type` (trois sous-formes, de la plus simple à
+la plus puissante) :
+
+1. **`prefixe`** — le nom doit commencer par le préfixe donné. Le cas le plus fréquent
+   et le plus lisible :
+
+   ```json
+   { "controles": { "G404": { "cible": { "type": "prefixe", "valeur": "TT-" } } } }
+   ```
+
+2. **`segments`** — le nom doit être découpé par le séparateur en un nombre de morceaux
+   attendu, aucun morceau vide (`A--B` ou `-A-B` sont non conformes). `nbMax` est
+   optionnel (absent = pas de plafond) :
+
+   ```json
+   { "controles": { "G203": { "cible": { "type": "segments", "separateur": "-", "nbMin": 3, "nbMax": 5 } } } }
+   ```
+
+3. **`regex`** — motif d'expression régulière (sémantique **RegExp JavaScript**, le
+   scoring est backend). Réservé aux cas tordus, écrit par un développeur :
+
+   ```json
+   { "controles": { "G205": { "cible": { "type": "regex", "motif": "^AX-[0-9]{2}$" } } } }
+   ```
+
+Options communes aux trois sous-formes :
+
+- `ignoreCasse` (défaut `false`) : comparaison insensible à la casse si `true` — par
+  défaut les conventions de nommage sont sensibles à la casse.
+- `exceptions` : liste de noms exacts exemptés de la validation. Exemple typique,
+  exempter le sous-projet créé automatiquement par Revit :
+
+  ```json
+  { "controles": { "G404": { "cible": {
+      "type": "prefixe", "valeur": "TT-",
+      "exceptions": ["Niveaux et quadrillages partagés"]
+  } } } }
+  ```
 
 ## Intégrité des données (ISO 19650)
 

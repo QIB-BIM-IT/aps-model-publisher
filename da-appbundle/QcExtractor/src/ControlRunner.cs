@@ -26,6 +26,10 @@ namespace QcExtractor
                 new Extractors.G406PhaseNamesExtractor(),
                 new Extractors.G407PhaseOrderExtractor(),
                 new Extractors.G507SharedParametersExtractor(),
+                // Lot NOMMAGE — listes de noms validées par le scoreur backend 'nommage'
+                new Extractors.G404WorksetNamesExtractor(),
+                new Extractors.G203LevelNamesExtractor(),
+                new Extractors.G205GridNamesExtractor(),
             };
         }
 
