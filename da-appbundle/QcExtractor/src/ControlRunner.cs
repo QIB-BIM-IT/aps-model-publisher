@@ -10,7 +10,7 @@ namespace QcExtractor
     /// </summary>
     public static class ControlRunner
     {
-        private static IControlExtractor[] Registry()
+        private static IControlExtractor[] Registry(InputParams input)
         {
             return new IControlExtractor[]
             {
@@ -37,6 +37,9 @@ namespace QcExtractor
                 new Extractors.G200BasePointOriginExtractor(),
                 new Extractors.G201SurveyPointExtractor(),
                 new Extractors.G202TrueNorthAngleExtractor(),
+                // Lot G504 — couverture UNIFORMAT : reçoit sa config (paramètre + liste
+                // blanche) résolue par le backend via params.json (norme maison + projet).
+                new Extractors.G504UniformatCoverageExtractor(input != null ? input.Uniformat : null),
             };
         }
 
@@ -44,7 +47,7 @@ namespace QcExtractor
         {
             var payload = new ResultPayload();
 
-            foreach (IControlExtractor extractor in Registry())
+            foreach (IControlExtractor extractor in Registry(input))
             {
                 try
                 {

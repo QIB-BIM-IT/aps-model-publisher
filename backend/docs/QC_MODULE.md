@@ -274,6 +274,90 @@ La distance angulaire gère le **wrap-around** : `359°` et `1°` sont distants 
 - `angle` : l'angle attendu du PEB entre nord projet et nord vrai, **en degrés**.
 - `tolerance` : écart angulaire maximal toléré, **en degrés** (ex. `0.5`).
 
+## Forme de scoreur « couverture » (lot G504 — codification UNIFORMAT)
+
+G504 mesure la **couverture de codification UNIFORMAT** : parmi les éléments des
+catégories de design (liste blanche), quelle proportion porte une valeur non vide dans
+le paramètre configuré. C'est le contrôle le plus riche : paramètre configurable, liste
+blanche de catégories, **comptage adaptatif type/instance**, liste détaillée plafonnée
+pour Power BI.
+
+### Paramètre configurable + liste blanche (norme maison versionnée)
+
+La norme vit dans `backend/config/qc-uniformat-norm.json` (fichier versionné, comme
+`qc-criticality-grid.json`), surchargeable par `qc.project_config.config.controles.G504` :
+
+```json
+{ "controles": { "G504": {
+    "cible": 100,
+    "parametre": { "kind": "builtin", "valeur": "UNIFORMAT_CODE" },
+    "categories": ["OST_MechanicalEquipment", "OST_DuctCurves"],
+    "categoriesDesactivees": ["OST_GenericModel"],
+    "inclureOptionnelles": true
+} } }
+```
+
+- **`parametre`** : soit `{ "kind": "builtin", "valeur": "<BuiltInParameter>" }` (paramètre
+  natif, ex. `UNIFORMAT_CODE` = « Code d'assemblage »), soit `{ "kind": "partage",
+  "valeur": "<nom>" }` (paramètre partagé/projet lu par NOM, ex. `Tt_TXT_Code_Uniformat`).
+  Une simple chaîne est acceptée comme raccourci pour un paramètre partagé. Défaut : la
+  `parametreDefaut` de la norme.
+- **Liste blanche** : `categories` (liste de `BuiltInCategory`) **remplace** la norme ; sinon
+  la norme s'applique, moins `categoriesDesactivees`, et `inclureOptionnelles: false` retire
+  les catégories marquées optionnelles (`OST_GenericModel`, `OST_SpecialityEquipment` —
+  ambiguïté design, chevauchement avec G308). Clés en `BuiltInCategory` (stables, non
+  traduites). **Correction** : l'amorce mentionnait `OST_StructuralConnections`, inexistant ;
+  la catégorie réelle est `OST_StructConnections`.
+
+### Comptage adaptatif TYPE vs INSTANCE (détecté à l'exécution)
+
+L'addin **détecte la nature réelle** du paramètre — jamais présumée :
+- **partagé/projet** : lue dans `doc.ParameterBindings` (`TypeBinding` vs `InstanceBinding`) ;
+- **natif** : sondage sur les éléments (priorité au type).
+
+Puis il adapte le comptage :
+- **paramètre au TYPE** (cas natif actuel « Code d'assemblage ») : `valeur_num` = types de
+  design avec code / total types de design. Un type sans code = **1 fautif** (1 action) ;
+  la liste des `typesFautifs` donne `{famille, nomType, categorie, nbInstances, idsEchantillon}`
+  avec le **nombre total d'instances concernées** en contexte d'ampleur.
+- **paramètre à l'INSTANCE** (cible future `Tt_TXT_Code_Uniformat`) : `valeur_num` =
+  instances avec code / total instances. Chaque instance sans code = 1 fautif ;
+  `instancesFautives` donne `{famille, nomType, categorie, id}` par entrée.
+
+La nature détectée est rapportée dans `valeur_json.natureParametre` et
+`valeur_json.couverture.nature`.
+
+### Chemin de transition (bascule par config seule, sans recodage)
+
+- **Aujourd'hui** : `{ "kind": "builtin", "valeur": "UNIFORMAT_CODE" }` — natif, **au type**.
+- **Bientôt** (Tetra Tech) : `{ "kind": "partage", "valeur": "Tt_TXT_Code_Uniformat" }` —
+  partagé, **à l'instance**, pour plus de précision.
+
+Grâce à la détection de nature, la transition est un **simple changement de la config
+projet** : aucun recodage ni redéploiement du bundle.
+
+### Trois cas distingués
+
+- **(a) ABSENT** : le paramètre n'est intégré nulle part (cause amont) — drapeau
+  `valeur_json.parametreAbsent = true`, `natureParametre = "absent"`, couverture 0 %.
+- **(b) VIDE** : présent mais sans valeur — le défaut visé (`raison: "vide"` par fautif).
+- **(c) REMPLI** : conforme.
+
+### Plafonnement & IDs
+
+La liste des fautifs est **plafonnée à 100 IDs par groupe** (comme G410), avec le compte
+total exact à côté (`nbInstances` / `nbEntitesFautives`) et un drapeau `listeTronquee`.
+Les IDs sont des `ElementId.Value` (Int64, cohérents 2024/2025) pour repérer dans Revit.
+
+### Scoring : porte de livraison à 100 %
+
+- `conforme` **seulement si** `valeur_num == 100` (couverture complète). `non_conforme`
+  dès qu'une entité manque — **aucune tolérance**. Paramètre absent ⇒ 0 % ⇒ `non_conforme`.
+- La `cible` en config **active la porte** (présence ⇒ verdict) ; le seuil reste 100 %
+  quelle que soit sa valeur. **Sans cible ni config** : extraction réussie, `statut` NULL.
+- Le `statut` est la **porte de livraison** ; `valeur_num` (pourcentage) est la **tendance**
+  pour Power BI.
+
 ## Intégrité des données (ISO 19650)
 
 - Jamais de `ON DELETE CASCADE` de `qc` vers `public` : `qc.jobs.userId` et `qc.runs.userId`
@@ -363,6 +447,39 @@ POST /api/qc/runs { "...": "...", "simulerEchec": "G201" }
 **7. Additivité.** Vérifier que le diff est confiné au module QC + addin, que le schéma
 `public` est inchangé (snapshot — valide seulement si `DB_SYNC_ALTER=false`), qu'aucune
 migration n'a été ajoutée et que `backend/src/config/database.js` est intact.
+
+## Lot G504 — à exécuter par l'utilisateur EN LOCAL (procédure)
+
+Mêmes garde-fous que ci-dessus (base **locale** uniquement, rebuild bundle +
+re-provisioning `setup-da.js` 2024/2025 car G504 est un contrôle MODÈLE). Total attendu :
+**22 lignes** par run (21 + G504).
+
+**Non-régression (priorité).** Les 21 contrôles existants doivent rester identiques aux
+références. G504 s'ajoute sans les toucher.
+
+**G504 sur les 2 pilotes (paramètre natif « Code d'assemblage », cas TYPE).** Le défaut de
+la norme est `{ "kind": "builtin", "valeur": "UNIFORMAT_CODE" }`. Relever :
+`valeur_num` (couverture %), `valeur_json.natureParametre` (**doit être `type`**),
+`couverture {numerateur, denominateur, pourcentage}`, `nbEntitesFautives` (types),
+`nbInstancesConcernees`, et `typesFautifs[]` (échantillon d'IDs plafonné à 100). Le Code
+d'assemblage étant natif, il existe partout : on attend un **vrai %**, pas un cas absent.
+
+**Preuve du scoring (porte 100 %) — insérer puis retirer une cible.**
+
+```json
+{ "controles": { "G504": { "cible": 100 } } }
+```
+
+- couverture < 100 % ⇒ `statut = non_conforme` avec la liste des fautifs ;
+- couverture == 100 % ⇒ `statut = conforme` ;
+- sans `cible` ⇒ `statut` NULL (extraction conservée).
+
+**Preuve de la bascule TYPE/INSTANCE.** Pointer un paramètre d'INSTANCE existant via
+`{ "controles": { "G504": { "parametre": { "kind": "partage", "valeur": "<param instance>" } } } }`
+et vérifier que `valeur_json.natureParametre` passe à `instance` et que le comptage
+bascule (dénominateur = instances, `instancesFautives[]` par entrée).
+
+**Isolation.** `simulerEchec: "G504"` ⇒ sa ligne `etat_extraction='echec'`, les 21 autres intactes.
 
 ## Limites assumées de la tranche
 
