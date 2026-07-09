@@ -27,6 +27,7 @@ const logger = require('../config/logger');
 
 const GRID_PATH = path.join(__dirname, '..', '..', 'config', 'qc-criticality-grid.json');
 const CATALOG_PATH = path.join(__dirname, '..', '..', 'config', 'qc-controls-catalog.json');
+const UNIFORMAT_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-uniformat-norm.json');
 const LEVELS = ['critique', 'faible'];
 const DEFAULT_LEVEL = 'faible';
 
@@ -34,6 +35,7 @@ class QcScoringService {
   constructor() {
     this._grid = null; // cache process (fichier versionné, invariant au runtime)
     this._catalog = null;
+    this._uniformatNorm = null;
   }
 
   // ======== Catalogue des contrôles (chantier 3) ========
@@ -50,6 +52,67 @@ class QcScoringService {
 
   catalogEntry(controlCode) {
     return this.loadCatalog().controles?.[controlCode] || null;
+  }
+
+  // ======== Norme UNIFORMAT (G504) — fichier versionné + surcharge projet ========
+
+  /** Charge la norme UNIFORMAT (cache process). Lance si illisible. */
+  loadUniformatNorm() {
+    if (this._uniformatNorm) return this._uniformatNorm;
+    const raw = JSON.parse(fs.readFileSync(UNIFORMAT_NORM_PATH, 'utf8'));
+    if (!raw || typeof raw.parametreDefaut !== 'object' || !Array.isArray(raw.categories)) {
+      throw new Error(`Norme UNIFORMAT invalide: ${UNIFORMAT_NORM_PATH}`);
+    }
+    this._uniformatNorm = raw;
+    return raw;
+  }
+
+  /**
+   * Normalise une désignation de paramètre G504 en { kind, valeur } :
+   *  - chaîne  => paramètre partagé maison lu par NOM ({ kind: 'partage' })
+   *  - objet   => { kind: 'builtin'|'partage', valeur } explicite
+   * Toute forme invalide => null (l'appelant retombe sur le défaut de la norme).
+   */
+  _normalizeUniformatParam(p) {
+    if (typeof p === 'string' && p.trim()) return { kind: 'partage', valeur: p.trim() };
+    if (p && typeof p === 'object' && !Array.isArray(p)) {
+      const kind = p.kind === 'builtin' ? 'builtin' : p.kind === 'partage' ? 'partage' : null;
+      const valeur = typeof p.valeur === 'string' ? p.valeur.trim() : '';
+      if (kind && valeur) return { kind, valeur };
+    }
+    return null;
+  }
+
+  /**
+   * Construit la config EFFECTIVE de G504 (norme maison versionnée + surcharge projet),
+   * telle qu'envoyée à l'addin via params.json. AUCUN accès base ici — `controles` est
+   * déjà la section qc.project_config.config.controles (ou null).
+   *
+   * @param {object|null} controles - qc.project_config.config.controles
+   * @returns {{ parametre: {kind:string, valeur:string}, categories: string[] }}
+   */
+  resolveUniformatConfig(controles) {
+    const norm = this.loadUniformatNorm();
+    const cfg = controles?.G504 || {};
+
+    const parametre =
+      this._normalizeUniformatParam(cfg.parametre) ||
+      this._normalizeUniformatParam(norm.parametreDefaut) || { kind: 'builtin', valeur: 'UNIFORMAT_CODE' };
+
+    let categories;
+    if (Array.isArray(cfg.categories)) {
+      // Remplacement explicite par le projet (liste de BuiltInCategory)
+      categories = cfg.categories.map(String);
+    } else {
+      const inclureOptionnelles = cfg.inclureOptionnelles !== false; // défaut: inclure
+      const desactivees = new Set((Array.isArray(cfg.categoriesDesactivees) ? cfg.categoriesDesactivees : []).map(String));
+      categories = norm.categories
+        .filter((c) => (inclureOptionnelles ? true : !c.optionnelle))
+        .map((c) => String(c.bic))
+        .filter((bic) => !desactivees.has(bic));
+    }
+
+    return { parametre, categories };
   }
 
   // ======== Grille maison ========
@@ -231,6 +294,18 @@ class QcScoringService {
         const releve = outcome.valeurJson?.[champ];
         const { statut } = this.evaluerCoordonnees(releve, cible, controlCode);
         return statut;
+      }
+      case 'couverture': {
+        // Lot G504 (couverture UNIFORMAT) : PORTE DE LIVRAISON à 100 %, AUCUNE tolérance.
+        // valeur_num = pourcentage de couverture relevé (types OU instances, selon la
+        // nature détectée par l'extracteur). conforme SEULEMENT si couverture == 100 %
+        // (aucune entité de design sans code) ; non_conforme dès qu'il en manque une —
+        // paramètre absent inclus (l'extracteur rapporte alors 0 %, drapeau parametreAbsent).
+        // La cible en config ne fait qu'ACTIVER la porte (présence => verdict) ; le seuil
+        // reste 100 % quelle que soit sa valeur (pas de desserrage possible). Sans cible :
+        // le garde en tête de méthode a déjà renvoyé null (extraction conservée, pas de verdict).
+        if (!Number.isFinite(num)) return null;
+        return num >= 100 ? 'conforme' : 'non_conforme';
       }
       default:
         return null;
