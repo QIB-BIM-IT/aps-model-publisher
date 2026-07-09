@@ -205,6 +205,33 @@ class QcScoringService {
         const { statut } = this.evaluerNommage(noms, cible, controlCode);
         return statut;
       }
+      case 'angle': {
+        // Lot COORDONNÉES (G202) : conforme si l'angle relevé (valeur_num, en degrés) est à
+        // moins d'une tolérance ANGULAIRE de l'angle attendu, wrap-around géré (359° et 1°
+        // sont distants de 2°). Cible OBJET { angle, tolerance } en degrés. Cible malformée
+        // => statut NULL (jamais de faux verdict), aligné sur 'pattern'/'nommage'.
+        if (!cible || typeof cible !== 'object' || Array.isArray(cible)) {
+          logger.warn(`[QC][Scoring] Cible angle malformée pour ${controlCode} (objet {angle,tolerance} attendu) — statut NULL`);
+          return null;
+        }
+        const attendu = Number(cible.angle);
+        const tol = Number(cible.tolerance);
+        if (!Number.isFinite(attendu) || !Number.isFinite(tol) || !Number.isFinite(num)) {
+          logger.warn(`[QC][Scoring] Cible angle incomplète pour ${controlCode} (angle/tolerance numériques attendus) — statut NULL`);
+          return null;
+        }
+        return this.angularDistanceDeg(num, attendu) <= tol ? 'conforme' : 'non_conforme';
+      }
+      case 'coordonnees': {
+        // Lot COORDONNÉES (G201) : conforme si CHAQUE composante (ns, eo, elev) du point relevé
+        // est à moins d'une tolérance en distance de la valeur attendue. Le détail (axe fautif)
+        // est réinjecté dans valeur_json par la finalisation via evaluerCoordonnees (option A,
+        // comme 'nommage') — ici on ne renvoie que le statut.
+        const champ = entry.champObjet || 'coordonnees';
+        const releve = outcome.valeurJson?.[champ];
+        const { statut } = this.evaluerCoordonnees(releve, cible, controlCode);
+        return statut;
+      }
       default:
         return null;
     }
@@ -294,6 +321,69 @@ class QcScoringService {
     }
     // Liste vide (aucun nom, ou tous exemptés) => conforme par vacuité (décision validée)
     return { statut: nomsNonConformes.length ? 'non_conforme' : 'conforme', nomsNonConformes };
+  }
+
+  /**
+   * Distance ANGULAIRE minimale entre deux angles en degrés, wrap-around géré :
+   * angularDistanceDeg(359, 1) === 2 (et non 358). Résultat dans [0, 180].
+   */
+  angularDistanceDeg(a, b) {
+    let d = Math.abs(Number(a) - Number(b)) % 360;
+    if (d > 180) d = 360 - d;
+    return d;
+  }
+
+  /**
+   * Forme 'coordonnees' — méthode PURE (aucune écriture, aucun effet de bord), réutilisable.
+   * Compare les 3 composantes d'un point relevé { ns, eo, elev } (mètres) à une cible avec
+   * tolérance en distance, et IDENTIFIE l'axe fautif. Cible (OBJET), éditable par un
+   * non-développeur :
+   *   { ns: <attendu>, eo: <attendu>, elev: <attendu>, tolerance: <mètres> }
+   * Tolérance par axe optionnelle (surcharge la globale) : toleranceNs / toleranceEo /
+   * toleranceElev. Conforme si CHAQUE axe est à |relevé - attendu| ≤ tolérance de l'axe.
+   * Relevé manquant, cible malformée ou incomplète (une composante ou tolérance non
+   * numérique) => statut NULL + warn (jamais de faux verdict), aligné sur 'nommage'.
+   *
+   * @param {object} releve - { ns, eo, elev } en mètres (valeur_json[champObjet] de l'extracteur)
+   * @param {object} cible  - config.controles[code].cible
+   * @param {string} [controlCode] - pour les logs uniquement
+   * @returns {{statut: string|null, axes: object[], axesHorsTolerance: string[]}}
+   */
+  evaluerCoordonnees(releve, cible, controlCode = '?') {
+    const aucun = { statut: null, axes: [], axesHorsTolerance: [] };
+    if (!releve || typeof releve !== 'object' || Array.isArray(releve)) {
+      logger.warn(`[QC][Scoring] Relevé coordonnees absent/malformé pour ${controlCode} — statut NULL`);
+      return aucun;
+    }
+    if (!cible || typeof cible !== 'object' || Array.isArray(cible)) {
+      logger.warn(`[QC][Scoring] Cible coordonnees malformée pour ${controlCode} (objet {ns,eo,elev,tolerance} attendu) — statut NULL`);
+      return aucun;
+    }
+
+    const tolGlobale = Number(cible.tolerance);
+    const definitions = [
+      { axe: 'ns', tolKey: 'toleranceNs' },
+      { axe: 'eo', tolKey: 'toleranceEo' },
+      { axe: 'elev', tolKey: 'toleranceElev' },
+    ];
+
+    const axes = [];
+    const axesHorsTolerance = [];
+    for (const { axe, tolKey } of definitions) {
+      const attendu = Number(cible[axe]);
+      const val = Number(releve[axe]);
+      const tol = Number.isFinite(Number(cible[tolKey])) ? Number(cible[tolKey]) : tolGlobale;
+      if (!Number.isFinite(attendu) || !Number.isFinite(val) || !Number.isFinite(tol)) {
+        logger.warn(`[QC][Scoring] Cible/relevé coordonnees incomplet pour ${controlCode} (axe ${axe}) — statut NULL`);
+        return aucun;
+      }
+      const ecart = Math.abs(val - attendu);
+      const ok = ecart <= tol;
+      axes.push({ axe, attendu, releve: val, ecart, tolerance: tol, ok });
+      if (!ok) axesHorsTolerance.push(axe);
+    }
+
+    return { statut: axesHorsTolerance.length ? 'non_conforme' : 'conforme', axes, axesHorsTolerance };
   }
 
   // ======== Résolution du niveau d'un avertissement ========

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Catalogue des contrôles QC : code → source d'extraction (meta = backend depuis la métadonnée Data Management, sans workitem ; modele = addin DA4R via l'API Revit) et forme du scoreur. Les cibles viennent EXCLUSIVEMENT de qc.project_config.config.controles[code].cible — aucun seuil maison codé en dur pour les contrôles non-G408 ; sans cible : extraction réussie, statut NULL. Formes disponibles : guid (cas particulier G408, grille de criticité), seuil, comptage, presence, pourcentage, liste (les deux dernières déclarées pour les lots futurs), pattern (regex brute sur valeur_text — RÉSERVÉ à G103, piste d'unification future vers nommage), nommage (lot NOMMAGE : valide une LISTE de noms contre une convention en config, cible OBJET {type: prefixe|segments|regex, ...} + options ignoreCasse/exceptions, sous-forme regex en sémantique RegExp JavaScript — voir QC_MODULE.md).",
+  "description": "Catalogue des contrôles QC : code → source d'extraction (meta = backend depuis la métadonnée Data Management, sans workitem ; modele = addin DA4R via l'API Revit) et forme du scoreur. Les cibles viennent EXCLUSIVEMENT de qc.project_config.config.controles[code].cible — aucun seuil maison codé en dur pour les contrôles non-G408 ; sans cible : extraction réussie, statut NULL. Formes disponibles : guid (cas particulier G408, grille de criticité), seuil, comptage, presence, pourcentage, liste (les deux dernières déclarées pour les lots futurs), pattern (regex brute sur valeur_text — RÉSERVÉ à G103, piste d'unification future vers nommage), nommage (lot NOMMAGE : valide une LISTE de noms contre une convention en config, cible OBJET {type: prefixe|segments|regex, ...} + options ignoreCasse/exceptions, sous-forme regex en sémantique RegExp JavaScript — voir QC_MODULE.md), coordonnees (lot COORDONNÉES : compare les 3 composantes d'un point relevé — localisé par champObjet — à une cible {ns, eo, elev} avec tolérance en distance globale et/ou par axe, en identifiant l'axe fautif), angle (lot COORDONNÉES : compare valeur_num à une cible {angle, tolerance} en degrés, avec gestion du wrap-around — 359° et 1° sont distants de 2°).",
   "controles": {
     "G408": { "source": "modele", "forme": "guid", "libelle": "Avertissements du modèle" },
     "G101": { "source": "meta", "forme": "egalite", "unite": "version", "libelle": "Version du logiciel (écart PEB vs réel)" },
@@ -17,6 +17,11 @@
     "G507": { "source": "modele", "forme": "presence", "champListe": "parametresPartages", "libelle": "Paramètres partagés intégrés (SharedParameterElement)" },
     "G404": { "source": "modele", "forme": "nommage", "champListe": "sousProjets", "libelle": "Sous-projets utilisateur (convention de nommage)" },
     "G203": { "source": "modele", "forme": "nommage", "champListe": "niveaux", "libelle": "Niveaux (convention de nommage)" },
-    "G205": { "source": "modele", "forme": "nommage", "champListe": "axes", "libelle": "Axes / quadrillages (convention de nommage)" }
+    "G205": { "source": "modele", "forme": "nommage", "champListe": "axes", "libelle": "Axes / quadrillages (convention de nommage)" },
+    "G104": { "source": "modele", "forme": "egalite", "unite": "systeme-unites", "libelle": "Système d'unités (longueur/aire/volume)" },
+    "G105": { "source": "modele", "forme": "presence", "champListe": "champsRenseignes", "libelle": "Informations projet (champs ProjectInfo renseignés)" },
+    "G200": { "source": "modele", "forme": "seuil", "sens": "max", "unite": "metres", "libelle": "Écart point de base projet / origine interne" },
+    "G201": { "source": "modele", "forme": "coordonnees", "champObjet": "surveyPoint", "unite": "metres", "libelle": "Géoréférencement (survey point vs PEB)" },
+    "G202": { "source": "modele", "forme": "angle", "unite": "degres", "libelle": "Angle au nord vrai (vs PEB)" }
   }
 }

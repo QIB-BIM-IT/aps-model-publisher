@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- SPIKE (branche spike/qc-coordination-review, NON destinée au merge).
+       Outil de diagnostic : décode les signatures exactes de méthodes Revit API
+       par lecture PURE des métadonnées (System.Reflection.Metadata), sans charger
+       aucun assembly Autodesk. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>SigDump</AssemblyName>
+  </PropertyGroup>
+</Project>
