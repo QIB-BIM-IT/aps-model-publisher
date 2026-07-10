@@ -414,6 +414,61 @@ Le rapport reste **par paramètre** : un gestionnaire 7D veut savoir QUEL param�
   indique `aucunParametre`, `statut` NULL. **C'est le comportement par défaut attendu** tant
   qu'un projet n'a pas défini ses exigences.
 
+## Forme de scoreur « copieControle » (lot G210 — axes et niveaux)
+
+G210 mesure la **présence** de la relation de copie-contrôle (Copy/Monitor) sur les
+**axes** (`Grid`) et **niveaux** (`Level`) de l'hôte. Il **ne** mesure **pas** la
+fraîcheur ni l'état « revue de coordination en attente » (non lisible via l'API
+publique — voir `spike/SPIKE_COORDINATION_REVIEW.md` et
+`spike/copy-monitor/API_VERIFIED.md`).
+
+### Règle métier (norme maison, 100 %)
+
+TOUS les axes et TOUS les niveaux **soumis à audit** DOIVENT être en copie-contrôle
+depuis un lien maître. **Pas de cible requise** en config projet : la porte est
+toujours active (norme maison).
+
+### Exceptions de niveaux (config, jamais codées en dur dans l'extracteur)
+
+```json
+{ "controles": { "G210": { "niveauxExclus": ["PLAN DE LIAISON"] } } }
+```
+
+- Défaut maison versionné : `config/qc-copy-monitor-norm.json` → `["PLAN DE LIAISON"]`.
+- Surcharge projet : `qc.project_config.config.controles.G210.niveauxExclus` (même une
+  liste vide remplace le défaut).
+- **Comparaison robuste** : `Trim` + insensible à la casse (`OrdinalIgnoreCase`) —
+  choix documenté (les noms techniques varient souvent en casse / espaces bord),
+  aligné sur le patron d'exceptions de G404 (`ignoreCasse` / `exceptions`).
+
+Un niveau exclu **n'entre pas** dans la conformité (ni fautif ni requis), mais
+**apparaît** dans le rapport avec l'état « exclu » (transparence).
+
+### Trois états d'un niveau
+
+| État | Sens |
+|------|------|
+| monitoré | `IsMonitoringLinkElement() == true` |
+| non monitoré fautif | soumis à audit et non monitoré |
+| exclu | nom dans `niveauxExclus` (jamais compté fautif) |
+
+### Sortie
+
+- `valeur_num` = % monitoré parmi les éléments **soumis à audit**
+  `(axes monitorés + niveaux monitorés non exclus) / (total axes + total niveaux non exclus)`.
+- `valeur_json` : par catégorie `{total, exclus (niveaux), soumisAudit, monitores,
+  nonMonitoresFautifs {total, noms plafonnés à 100, listeTronquee}, repartitionParLien}` ;
+  `repartitionParLien` = nom de l'instance de lien (lisible sur l'hôte sans
+  `GetLinkDocument()`), sinon `id:<ElementId.Value>`.
+- Vacuité (aucun axe ni niveau soumis à audit) : `vacuite=true`, `valeur_num` NULL,
+  `statut` NULL — **pas** `non_conforme`.
+
+### Scoring
+
+- `conforme` seulement si **0 fautif** parmi les soumis à audit (`valeur_num == 100`).
+- `non_conforme` dès qu'un élément soumis à audit n'est pas monitoré.
+- Un niveau exclu non monitoré **ne** rend **pas** non conforme.
+
 ## Intégrité des données (ISO 19650)
 
 - Jamais de `ON DELETE CASCADE` de `qc` vers `public` : `qc.jobs.userId` et `qc.runs.userId`
@@ -562,6 +617,21 @@ catégories différents**, la **nature détectée** (instance vs type), le cas *
 (`non_conforme` dès qu'un paramètre est sous son seuil ou absent). Retirer la config ensuite.
 
 **Isolation.** `simulerEchec: "G508"` ⇒ sa ligne `etat_extraction='echec'`, les 22 autres intactes.
+
+## Lot G210 — à exécuter par l'utilisateur EN LOCAL (procédure)
+
+Mêmes garde-fous (base **locale**, rebuild bundle + re-provisioning `setup-da.js` 2024/2025 —
+G210 est un contrôle MODÈLE). Total attendu : **24 lignes** par run (23 + G210).
+
+**Sur les 2 pilotes.** Rapporter par catégorie : total / exclus / soumisAudit / monitorés /
+non monitorés fautifs, listes, répartition par lien. M_PR a 0 axe → vérifier le cas
+« aucun axe ». Vérifier si « PLAN DE LIAISON » (ou variante) existe et est classé « exclu ».
+
+**Preuves de scoring (déterministes).** Cas 100 % soumis-audit monitorés → conforme ;
+cas avec un fautif → non_conforme + liste ; cas où seul un niveau exclu n'est pas
+monitoré → **conforme** ; vacuité → statut NULL.
+
+**Isolation.** `simulerEchec: "G210"` ⇒ sa ligne `etat_extraction='echec'`, les 23 autres intactes.
 
 ## Limites assumées de la tranche
 

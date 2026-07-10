@@ -73,6 +73,16 @@ namespace QcExtractor
     }
 
     /// <summary>
+    /// Config EFFECTIVE de G210 (copie-contrôle axes/niveaux) : norme maison versionnée
+    /// + surcharge projet (niveauxExclus). Comparaison des noms : trim + OrdinalIgnoreCase.
+    /// </summary>
+    public class G210Config
+    {
+        [JsonProperty("niveauxExclus")]
+        public List<string> NiveauxExclus { get; set; } = new List<string>();
+    }
+
+    /// <summary>
     /// Paramètres du workitem (params.json), fournis par le backend :
     /// identifiants ACC du modèle cloud à contrôler.
     /// </summary>
@@ -111,6 +121,13 @@ namespace QcExtractor
         /// </summary>
         [JsonProperty("g508")]
         public G508Config G508 { get; set; }
+
+        /// <summary>
+        /// Config G210 (copie-contrôle axes/niveaux), résolue par le backend (norme maison
+        /// + surcharge projet). Null si absente (l'extracteur applique alors aucune exclusion).
+        /// </summary>
+        [JsonProperty("g210")]
+        public G210Config G210 { get; set; }
 
         public static InputParams Load(string path)
         {

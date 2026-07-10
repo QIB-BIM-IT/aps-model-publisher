@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "Norme maison G210 — copie-contrôle des axes et niveaux. Défaut des niveaux techniques exclus de l'audit (usage interne : géoréférencement, liaison de maquettes de légende, jamais monitorés). Surchargeable par qc.project_config.config.controles.G210.niveauxExclus. Comparaison des noms : trim + insensible à la casse.",
+  "niveauxExclus": ["PLAN DE LIAISON"]
+}

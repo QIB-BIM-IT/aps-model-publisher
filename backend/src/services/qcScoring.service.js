@@ -28,6 +28,7 @@ const logger = require('../config/logger');
 const GRID_PATH = path.join(__dirname, '..', '..', 'config', 'qc-criticality-grid.json');
 const CATALOG_PATH = path.join(__dirname, '..', '..', 'config', 'qc-controls-catalog.json');
 const UNIFORMAT_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-uniformat-norm.json');
+const COPY_MONITOR_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-copy-monitor-norm.json');
 const LEVELS = ['critique', 'faible'];
 const DEFAULT_LEVEL = 'faible';
 
@@ -36,6 +37,7 @@ class QcScoringService {
     this._grid = null; // cache process (fichier versionné, invariant au runtime)
     this._catalog = null;
     this._uniformatNorm = null;
+    this._copyMonitorNorm = null;
   }
 
   // ======== Catalogue des contrôles (chantier 3) ========
@@ -154,6 +156,44 @@ class QcScoringService {
     return { parametres, categoriesDesignDefaut };
   }
 
+  // ======== Config G210 (copie-contrôle) — norme maison + surcharge projet ========
+
+  /**
+   * Charge la norme maison G210 (niveaux techniques exclus par défaut).
+   * @returns {{ niveauxExclus: string[] }}
+   */
+  loadCopyMonitorNorm() {
+    if (this._copyMonitorNorm) return this._copyMonitorNorm;
+    const raw = JSON.parse(fs.readFileSync(COPY_MONITOR_NORM_PATH, 'utf8'));
+    if (!raw || !Array.isArray(raw.niveauxExclus)) {
+      throw new Error(`Norme copie-contrôle invalide: ${COPY_MONITOR_NORM_PATH}`);
+    }
+    this._copyMonitorNorm = raw;
+    return raw;
+  }
+
+  /**
+   * Config EFFECTIVE G210 envoyée à l'addin : défaut maison + surcharge projet
+   * (qc.project_config.config.controles.G210.niveauxExclus). Si le projet fournit
+   * une liste (même vide), elle remplace le défaut ; sinon le défaut maison s'applique.
+   *
+   * @param {object|null} controles
+   * @returns {{ niveauxExclus: string[] }}
+   */
+  resolveG210Config(controles) {
+    let niveauxExclus;
+    try {
+      niveauxExclus = this.loadCopyMonitorNorm().niveauxExclus.map(String);
+    } catch (_) {
+      niveauxExclus = ['PLAN DE LIAISON'];
+    }
+    const g = controles?.G210;
+    if (g && Array.isArray(g.niveauxExclus)) {
+      niveauxExclus = g.niveauxExclus.map(String);
+    }
+    return { niveauxExclus };
+  }
+
   // ======== Grille maison ========
 
   /** Charge la grille maison (cache). Lance si illisible — l'appelant décide du repli. */
@@ -236,6 +276,21 @@ class QcScoringService {
       const j = outcome.valeurJson;
       if (!j || j.aucunParametre || !Array.isArray(j.parametres) || j.parametres.length === 0) return null;
       return j.parametres.every((p) => p && p.conforme === true) ? 'conforme' : 'non_conforme';
+    }
+
+    // Lot G210 (copieControle) : norme maison STRICTE 100 % — pas de cible requise.
+    // conforme SEULEMENT si TOUS les axes et TOUS les niveaux SOUMIS À AUDIT sont
+    // monitorés (0 fautif). Les niveaux exclus n'entrent pas dans le calcul.
+    // Vacuité (aucun élément soumis à audit) => statut NULL (drapeau vacuite).
+    if (entry.forme === 'copieControle') {
+      const j = outcome.valeurJson;
+      if (!j || j.vacuite === true) return null;
+      const soumis = j.global?.soumisAudit;
+      if (!Number.isFinite(soumis) || soumis <= 0) return null;
+      const fautifs = j.global?.nonMonitoresFautifs;
+      if (Number.isFinite(fautifs)) return fautifs === 0 ? 'conforme' : 'non_conforme';
+      if (!Number.isFinite(num)) return null;
+      return num >= 100 ? 'conforme' : 'non_conforme';
     }
 
     const cible = controles?.[controlCode]?.cible;
