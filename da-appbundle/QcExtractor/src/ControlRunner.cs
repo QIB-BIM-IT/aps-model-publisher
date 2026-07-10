@@ -46,6 +46,9 @@ namespace QcExtractor
                 // Lot G210 — copie-contrôle axes/niveaux : présence de monitoring (PAS
                 // fraîcheur), exclusions de niveaux techniques via config (norme + projet).
                 new Extractors.G210CopyMonitorExtractor(input != null ? input.G210 : null),
+                // Lot G314 — rattachement au niveau (déclaré vs physique), catégories
+                // MEP+structure et tolérance via config (norme maison + projet).
+                new Extractors.G314LevelAttachmentExtractor(input != null ? input.G314 : null),
             };
         }
 

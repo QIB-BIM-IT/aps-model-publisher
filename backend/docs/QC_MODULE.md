@@ -469,6 +469,36 @@ Un niveau exclu **n'entre pas** dans la conformité (ni fautif ni requis), mais
 - `non_conforme` dès qu'un élément soumis à audit n'est pas monitoré.
 - Un niveau exclu non monitoré **ne** rend **pas** non conforme.
 
+## Forme « pourcentage » appliquée à G314 (rattachement au niveau)
+
+G314 compare le **niveau déclaré** d'un élément (paramètres de niveau Revit, puis
+`Element.LevelId`) à son **niveau physique** (niveau Building Story le plus élevé
+sous le point de référence Z — PAS le plus proche). Portage headless du script
+pyRevit maison. Voir `spike/level-attachment/API_VERIFIED.md`.
+
+### Quatre états
+
+| État | Sens | Entre dans le verdict ? |
+|------|------|-------------------------|
+| conforme | déclaré ≈ physique (tolérance) | oui |
+| fautif | déclaré ≠ physique | oui |
+| multiNiveaux | linéaire traversant plusieurs niveaux | non (écarté) |
+| nonEvaluable | pas de niveau déclaré / pas de Z | non (écarté) |
+
+`valeur_num` = `conformes / (conformes + fautifs)`. **Contrôle intrinsèquement bruyant**
+(faux positifs possibles sur poutres à décalage volontaire, etc.).
+
+### Config
+
+- Défauts maison : `config/qc-level-attachment-norm.json` — `toleranceMm: 50`, catégories
+  MEP + STRUCTURE (`OST_StructConnections`, pas `OST_StructuralConnections`).
+- Surcharge : `controles.G314.{toleranceMm, categories}`.
+- Scoring : forme `pourcentage` / sens `min`. Cible via `cible` **ou** alias `seuil`
+  (ex. `{ "G314": { "seuil": 95 } }`). **Sans cible : statut NULL** — ne pas mettre 100 %
+  par défaut ; le seuil doit être un choix conscient.
+- Liste des fautifs plafonnée à 100 : `{id, categorie, famille, type, niveauDeclare,
+  niveauPhysique, decalagePhysiqueMm, ecartEntreNiveauxMm}` ; comptes ventilés MEP/structure.
+
 ## Intégrité des données (ISO 19650)
 
 - Jamais de `ON DELETE CASCADE` de `qc` vers `public` : `qc.jobs.userId` et `qc.runs.userId`
@@ -632,6 +662,20 @@ cas avec un fautif → non_conforme + liste ; cas où seul un niveau exclu n'est
 monitoré → **conforme** ; vacuité → statut NULL.
 
 **Isolation.** `simulerEchec: "G210"` ⇒ sa ligne `etat_extraction='echec'`, les 23 autres intactes.
+
+## Lot G314 — à exécuter par l'utilisateur EN LOCAL (procédure)
+
+Mêmes garde-fous (base **locale**, rebuild + re-provisioning 2024/2025). Total attendu :
+**25 lignes** par run (24 + G314).
+
+**Sur les 2 pilotes.** Rapporter les 4 états (ventilés MEP/structure), % conformité,
+liste fautifs plafonnée. Du bruit est **attendu**. G102 MÉTA peut dériver si le fichier
+ACC a changé — ce n'est pas une régression MODÈLE.
+
+**Scoring.** Sans cible → statut NULL. Avec `seuil`/`cible` de test (ex. 95) →
+conforme/non_conforme selon le %.
+
+**Isolation.** `simulerEchec: "G314"` ⇒ sa ligne `echec`, les 24 autres intactes.
 
 ## Limites assumées de la tranche
 

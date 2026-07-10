@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "description": "Norme maison G314 — rattachement au niveau (déclaré vs physique). Tolérance par défaut 50 mm (limite de niveau ET équivalence d'élévation). Catégories MEP + STRUCTURE en BuiltInCategory. Surcharge projet : qc.project_config.config.controles.G314.{categories, toleranceMm}. Scoring via cible/seuil (forme pourcentage, sens min) — SANS cible : statut NULL (contrôle indicatif/bruyant).",
+  "toleranceMm": 50,
+  "categories": {
+    "mep": [
+      "OST_MechanicalEquipment",
+      "OST_DuctCurves",
+      "OST_DuctFitting",
+      "OST_DuctAccessory",
+      "OST_DuctTerminal",
+      "OST_FlexDuctCurves",
+      "OST_PipeCurves",
+      "OST_PipeFitting",
+      "OST_PipeAccessory",
+      "OST_FlexPipeCurves",
+      "OST_Sprinklers",
+      "OST_PlumbingFixtures",
+      "OST_ElectricalEquipment",
+      "OST_ElectricalFixtures",
+      "OST_LightingFixtures",
+      "OST_LightingDevices",
+      "OST_CommunicationDevices",
+      "OST_DataDevices",
+      "OST_FireAlarmDevices",
+      "OST_SecurityDevices",
+      "OST_NurseCallDevices",
+      "OST_TelephoneDevices",
+      "OST_AudioVisualDevices",
+      "OST_Conduit",
+      "OST_ConduitFitting",
+      "OST_CableTray",
+      "OST_CableTrayFitting"
+    ],
+    "structure": [
+      "OST_StructuralColumns",
+      "OST_StructuralFraming",
+      "OST_StructuralFoundation",
+      "OST_StructConnections",
+      "OST_StructuralStiffener",
+      "OST_StructuralTruss"
+    ]
+  }
+}

@@ -83,6 +83,22 @@ namespace QcExtractor
     }
 
     /// <summary>
+    /// Config EFFECTIVE de G314 (rattachement au niveau) : tolérance mm + catégories
+    /// MEP/structure (norme maison + surcharge projet).
+    /// </summary>
+    public class G314Config
+    {
+        [JsonProperty("toleranceMm")]
+        public double ToleranceMm { get; set; } = 50;
+
+        [JsonProperty("categoriesMep")]
+        public List<string> CategoriesMep { get; set; } = new List<string>();
+
+        [JsonProperty("categoriesStructure")]
+        public List<string> CategoriesStructure { get; set; } = new List<string>();
+    }
+
+    /// <summary>
     /// Paramètres du workitem (params.json), fournis par le backend :
     /// identifiants ACC du modèle cloud à contrôler.
     /// </summary>
@@ -128,6 +144,13 @@ namespace QcExtractor
         /// </summary>
         [JsonProperty("g210")]
         public G210Config G210 { get; set; }
+
+        /// <summary>
+        /// Config G314 (rattachement au niveau), résolue par le backend (norme maison +
+        /// surcharge projet : catégories MEP/structure + tolérance mm).
+        /// </summary>
+        [JsonProperty("g314")]
+        public G314Config G314 { get; set; }
 
         public static InputParams Load(string path)
         {
