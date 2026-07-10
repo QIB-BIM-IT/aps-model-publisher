@@ -227,19 +227,19 @@ class QcRunService {
 
       const onCompleteUrl = this._buildCallbackUrl(run.id);
 
-      // G504/G508 : configs EFFECTIVES résolues ICI et passées à l'addin via params.json.
-      // Lecture seule, best-effort — un échec de résolution n'empêche pas le run (les
-      // extracteurs concernés se marqueront en échec isolé). G504 = norme maison + projet ;
-      // G508 = qc.project_config uniquement (liste variable par projet).
+      // G504/G508/G210 : configs EFFECTIVES résolues ICI et passées à l'addin via params.json.
+      // Lecture seule, best-effort — un échec de résolution n'empêche pas le run.
       let uniformat = null;
       let g508 = null;
+      let g210 = null;
       try {
         const qcScoring = require('./qcScoring.service');
         const projectConfig = await qcScoring.loadProjectConfig(resolved.projectGuid);
         uniformat = qcScoring.resolveUniformatConfig(projectConfig.controles);
         g508 = qcScoring.resolveG508Config(projectConfig.controles);
+        g210 = qcScoring.resolveG210Config(projectConfig.controles);
       } catch (e) {
-        logger.warn(`[QC] Résolution config UNIFORMAT/G508 échouée (non bloquant): ${e.message}`);
+        logger.warn(`[QC] Résolution config UNIFORMAT/G508/G210 échouée (non bloquant): ${e.message}`);
       }
 
       const workitemId = await qcDa.submitWorkitem({
@@ -252,6 +252,7 @@ class QcRunService {
           ...(simulerEchec ? { simulerEchec } : {}),
           ...(uniformat ? { uniformat } : {}),
           ...(g508 ? { g508 } : {}),
+          ...(g210 ? { g210 } : {}),
         },
         resultUrl,
         threeLeggedToken: accessToken,

@@ -43,6 +43,9 @@ namespace QcExtractor
                 // Lot G508 — taux de remplissage des paramètres d'exploitation : liste de
                 // paramètres VARIABLE PAR PROJET (qc.project_config), granulaire par catégories.
                 new Extractors.G508OperationalParamsFillRateExtractor(input != null ? input.G508 : null),
+                // Lot G210 — copie-contrôle axes/niveaux : présence de monitoring (PAS
+                // fraîcheur), exclusions de niveaux techniques via config (norme + projet).
+                new Extractors.G210CopyMonitorExtractor(input != null ? input.G210 : null),
             };
         }
 
