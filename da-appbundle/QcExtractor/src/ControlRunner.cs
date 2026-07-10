@@ -40,6 +40,9 @@ namespace QcExtractor
                 // Lot G504 — couverture UNIFORMAT : reçoit sa config (paramètre + liste
                 // blanche) résolue par le backend via params.json (norme maison + projet).
                 new Extractors.G504UniformatCoverageExtractor(input != null ? input.Uniformat : null),
+                // Lot G508 — taux de remplissage des paramètres d'exploitation : liste de
+                // paramètres VARIABLE PAR PROJET (qc.project_config), granulaire par catégories.
+                new Extractors.G508OperationalParamsFillRateExtractor(input != null ? input.G508 : null),
             };
         }
 

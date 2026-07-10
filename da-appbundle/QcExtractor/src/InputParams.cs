@@ -34,6 +34,45 @@ namespace QcExtractor
     }
 
     /// <summary>
+    /// G508 — une entrée de paramètre d'exploitation à vérifier (structure RÉGULIÈRE
+    /// pensée pour un futur formulaire web : champs nets, pas de structure libre).
+    /// </summary>
+    public class G508ParamEntry
+    {
+        /// <summary>Nom du paramètre. Résolu comme G504 : si le nom correspond à un
+        /// BuiltInParameter (ALL_CAPS) il est lu par enum, sinon en paramètre partagé
+        /// par NOM (LookupParameter). La nature type/instance est détectée à l'exécution.</summary>
+        [JsonProperty("nom")]
+        public string Nom { get; set; }
+
+        /// <summary>BuiltInCategory du périmètre de CE paramètre (granulaire).
+        /// Vide/absent = toutes les catégories de design (CategoriesDesignDefaut).</summary>
+        [JsonProperty("categories")]
+        public List<string> Categories { get; set; } = new List<string>();
+
+        /// <summary>% de remplissage requis pour ce paramètre (défaut 100).</summary>
+        [JsonProperty("seuil")]
+        public double Seuil { get; set; } = 100;
+    }
+
+    /// <summary>
+    /// Config PROJET de G508 (taux de remplissage des paramètres d'exploitation), résolue
+    /// par le backend depuis qc.project_config UNIQUEMENT (liste variable par projet, PAS
+    /// de norme maison). Optionnelle : sans elle, l'extracteur G508 rapporte « aucun
+    /// paramètre configuré » (statut NULL).
+    /// </summary>
+    public class G508Config
+    {
+        [JsonProperty("parametres")]
+        public List<G508ParamEntry> Parametres { get; set; } = new List<G508ParamEntry>();
+
+        /// <summary>Catégories de design par défaut (norme maison G504) appliquées à un
+        /// paramètre dont la liste de catégories est vide (« toutes catégories de design »).</summary>
+        [JsonProperty("categoriesDesignDefaut")]
+        public List<string> CategoriesDesignDefaut { get; set; } = new List<string>();
+    }
+
+    /// <summary>
     /// Paramètres du workitem (params.json), fournis par le backend :
     /// identifiants ACC du modèle cloud à contrôler.
     /// </summary>
@@ -65,6 +104,13 @@ namespace QcExtractor
         /// </summary>
         [JsonProperty("uniformat")]
         public UniformatConfig Uniformat { get; set; }
+
+        /// <summary>
+        /// Config G508 (taux de remplissage des paramètres d'exploitation), résolue par le
+        /// backend depuis qc.project_config. Null si absente (l'extracteur G508 le gère).
+        /// </summary>
+        [JsonProperty("g508")]
+        public G508Config G508 { get; set; }
 
         public static InputParams Load(string path)
         {

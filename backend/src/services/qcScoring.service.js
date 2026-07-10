@@ -115,6 +115,45 @@ class QcScoringService {
     return { parametre, categories };
   }
 
+  // ======== Config G508 (taux de remplissage) — PROJET uniquement ========
+
+  /**
+   * Construit la config EFFECTIVE de G508 telle qu'envoyée à l'addin via params.json.
+   * La liste des paramètres vit EXCLUSIVEMENT dans qc.project_config (variable par projet,
+   * PAS de norme maison). Structure régulière (nom / categories / seuil) pensée pour un
+   * futur formulaire web. Retourne null si aucun paramètre n'est configuré (comportement
+   * par défaut : rien à mesurer, statut NULL).
+   *
+   * `categoriesDesignDefaut` (les catégories de design de la norme G504) est joint pour
+   * qu'un paramètre au périmètre vide signifie « toutes les catégories de design ».
+   *
+   * @param {object|null} controles - qc.project_config.config.controles
+   * @returns {{ parametres: Array<{nom:string, categories:string[], seuil:number}>, categoriesDesignDefaut: string[] } | null}
+   */
+  resolveG508Config(controles) {
+    const g = controles?.G508;
+    if (!g || !Array.isArray(g.parametres) || g.parametres.length === 0) return null;
+
+    const parametres = g.parametres
+      .filter((p) => p && typeof p.nom === 'string' && p.nom.trim())
+      .map((p) => ({
+        nom: p.nom.trim(),
+        categories: Array.isArray(p.categories) ? p.categories.map(String) : [],
+        seuil: Number.isFinite(p.seuil) ? Number(p.seuil) : 100,
+      }));
+
+    if (parametres.length === 0) return null;
+
+    let categoriesDesignDefaut = [];
+    try {
+      categoriesDesignDefaut = this.loadUniformatNorm().categories.map((c) => String(c.bic));
+    } catch (_) {
+      categoriesDesignDefaut = [];
+    }
+
+    return { parametres, categoriesDesignDefaut };
+  }
+
   // ======== Grille maison ========
 
   /** Charge la grille maison (cache). Lance si illisible — l'appelant décide du repli. */
@@ -187,6 +226,18 @@ class QcScoringService {
   scoreByForme(controlCode, outcome, controles) {
     const entry = this.catalogEntry(controlCode);
     if (!entry) return null;
+
+    // Lot G508 (remplissage) : la porte n'est PAS une 'cible' mais la présence d'une
+    // liste de paramètres (par projet). Le verdict est PAR PARAMÈTRE : conforme SEULEMENT
+    // si CHAQUE paramètre atteint son seuil (calculé dans l'addin, champ conforme).
+    // non_conforme si au moins un paramètre est sous son seuil ou absent. Aucune liste
+    // de paramètres (aucunParametre) => statut NULL (rien à mesurer).
+    if (entry.forme === 'remplissage') {
+      const j = outcome.valeurJson;
+      if (!j || j.aucunParametre || !Array.isArray(j.parametres) || j.parametres.length === 0) return null;
+      return j.parametres.every((p) => p && p.conforme === true) ? 'conforme' : 'non_conforme';
+    }
+
     const cible = controles?.[controlCode]?.cible;
     if (cible === undefined || cible === null) return null;
 

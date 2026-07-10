@@ -358,6 +358,62 @@ Les IDs sont des `ElementId.Value` (Int64, cohérents 2024/2025) pour repérer d
 - Le `statut` est la **porte de livraison** ; `valeur_num` (pourcentage) est la **tendance**
   pour Power BI.
 
+## Forme de scoreur « remplissage » (lot G508 — paramètres d'exploitation 7D)
+
+G508 mesure le **taux de remplissage des paramètres d'exploitation** (usage 7D). Il réutilise
+fortement les patterns de G504 (lecture par nom, détection type/instance, plafonnement de
+liste), avec **deux différences clés** :
+
+1. La liste des paramètres à vérifier est **VARIABLE PAR PROJET** (exigences client / EIR) :
+   elle vit dans `qc.project_config` — **pas** de norme maison versionnée.
+2. Elle est **granulaire** : chaque paramètre a **son propre périmètre de catégories**.
+
+### Config PROJET (structure régulière, destinée à un futur formulaire web)
+
+```json
+{ "controles": { "G508": {
+    "parametres": [
+      { "nom": "Tt_Numero_Serie", "categories": ["OST_MechanicalEquipment", "OST_ElectricalEquipment"], "seuil": 100 },
+      { "nom": "Tt_Garantie",     "categories": ["OST_MechanicalEquipment"], "seuil": 100 }
+    ]
+} } }
+```
+
+- **`nom`** : nom du paramètre. Résolu comme G504 — si le nom correspond à un
+  `BuiltInParameter` (ALL_CAPS) il est lu par enum, sinon comme **paramètre partagé par NOM**
+  (`LookupParameter`). La **nature type/instance est détectée à l'exécution**.
+- **`categories`** : `BuiltInCategory` du périmètre de CE paramètre (granulaire).
+  **Vide/absent = toutes les catégories de design** (les catégories de la norme G504).
+- **`seuil`** : % de remplissage requis pour ce paramètre (**défaut 100**).
+- Le **nombre de paramètres est variable** (un projet en a 7, un autre 5 ou 12) : le contrôle
+  itère sur la liste quelle qu'en soit la longueur.
+
+> La structure est **régulière** (champs nets `nom` / `categories` / `seuil`, pas de structure
+> libre) précisément pour être **remplie plus tard par un formulaire web**. À préserver.
+
+### Mesure et sortie (rapport PAR PARAMÈTRE)
+
+Pour chaque paramètre : taux = entités avec valeur non vide / total entités du périmètre,
+en **unités selon la nature détectée** (types au TYPE, instances à l'INSTANCE). Les **3 cas**
+sont distingués par paramètre : **absent** (`parametreAbsent=true`), **vide** (compté fautif),
+**rempli**.
+
+`valeur_json` :
+- `parametres[]` : `{nom, categories, natureDetectee, rempli, total, pourcentage, seuil, conforme, parametreAbsent, nbFautifs, idsEchantillon, listeTronquee}` ;
+- `idsEchantillon` = IDs d'instances fautives (`ElementId.Value`, cohérent 2024/2025) **plafonnés à 100 par paramètre**, `nbFautifs` conservant le total réel ;
+- `global` : `{rempli, total, pourcentage}` agrégé.
+
+`valeur_num` = taux **global agrégé** (Σ rempli / Σ total), pour la tendance Power BI d'ensemble.
+Le rapport reste **par paramètre** : un gestionnaire 7D veut savoir QUEL paramètre traîne.
+
+### Scoring : porte par paramètre
+
+- `conforme` **seulement si CHAQUE** paramètre atteint son seuil. `non_conforme` si au moins
+  un paramètre est sous son seuil **ou absent**.
+- **Sans liste de paramètres** (aucune config G508) : extraction réussie, `valeur_json`
+  indique `aucunParametre`, `statut` NULL. **C'est le comportement par défaut attendu** tant
+  qu'un projet n'a pas défini ses exigences.
+
 ## Intégrité des données (ISO 19650)
 
 - Jamais de `ON DELETE CASCADE` de `qc` vers `public` : `qc.jobs.userId` et `qc.runs.userId`
@@ -480,6 +536,32 @@ et vérifier que `valeur_json.natureParametre` passe à `instance` et que le com
 bascule (dénominateur = instances, `instancesFautives[]` par entrée).
 
 **Isolation.** `simulerEchec: "G504"` ⇒ sa ligne `etat_extraction='echec'`, les 21 autres intactes.
+
+## Lot G508 — à exécuter par l'utilisateur EN LOCAL (procédure)
+
+Mêmes garde-fous (base **locale**, rebuild bundle + re-provisioning `setup-da.js` 2024/2025 —
+G508 est un contrôle MODÈLE). Total attendu : **23 lignes** par run (22 + G508).
+
+**Comportement par défaut (sans config).** Sur les 2 pilotes, G508 doit rapporter
+`etat_extraction='extrait'`, `valeur_json.aucunParametre = true`, `statut` NULL — c'est le
+comportement attendu tant qu'aucune exigence n'est définie.
+
+**Preuve du granulaire (insérer puis retirer une config).**
+
+```json
+{ "controles": { "G508": { "parametres": [
+  { "nom": "ALL_MODEL_INSTANCE_COMMENTS", "categories": ["OST_MechanicalEquipment"], "seuil": 100 },
+  { "nom": "UNIFORMAT_CODE", "categories": ["OST_ElectricalEquipment"], "seuil": 100 },
+  { "nom": "Tt_Parametre_Inexistant", "categories": [], "seuil": 100 }
+] } } }
+```
+
+Vérifier `valeur_json.parametres[]` : un **taux par paramètre** distinct, des **périmètres de
+catégories différents**, la **nature détectée** (instance vs type), le cas **absent**
+(`parametreAbsent=true`) pour le paramètre inventé, et le **verdict d'ensemble**
+(`non_conforme` dès qu'un paramètre est sous son seuil ou absent). Retirer la config ensuite.
+
+**Isolation.** `simulerEchec: "G508"` ⇒ sa ligne `etat_extraction='echec'`, les 22 autres intactes.
 
 ## Limites assumées de la tranche
 
