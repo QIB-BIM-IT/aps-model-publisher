@@ -94,10 +94,10 @@ namespace QcExtractor
         /// <summary>
         /// Hauteur minimale (mm) entre deux niveaux retenus dans la table de plages.
         /// Les Building Story plus proches que ce seuil du précédent retenu sont ignorés
-        /// comme bornes (niveaux techniques serrés). Défaut 2000. 0 = aucun filtre.
+        /// comme bornes (niveaux techniques serrés). Défaut 2500. 0 = aucun filtre.
         /// </summary>
         [JsonProperty("hauteurMinEtageMm")]
-        public double HauteurMinEtageMm { get; set; } = 2000;
+        public double HauteurMinEtageMm { get; set; } = 2500;
 
         [JsonProperty("categoriesMep")]
         public List<string> CategoriesMep { get; set; } = new List<string>();

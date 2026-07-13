@@ -1,8 +1,8 @@
 {
-  "version": 3,
-  "description": "Norme maison G314 RÉVISÉE — rattachement au niveau par PARAMÈTRES NATIFS + table de plages Building Story (pas de calcul géométrique de niveau physique). Tolérance défaut 0 mm. hauteurMinEtageMm défaut 2000 (filtre les Building Story techniques trop serrés). Catégories MEP + STRUCTURE (sans axes). Surcharge : qc.project_config.config.controles.G314.{categories, toleranceMm, hauteurMinEtageMm}. Scoring via cible/seuil (pourcentage, sens min) — SANS cible : statut NULL (indicatif).",
+  "version": 4,
+  "description": "Norme maison G314 RÉVISÉE — paramètres NATIFS + plages Building Story. Famille B : élévations relatives natives (Middle/Start-End/arases), jamais le Z LocationCurve. Tolérance défaut 0 mm. hauteurMinEtageMm défaut 2500. Catégories MEP + STRUCTURE (sans axes). Surcharge : qc.project_config.config.controles.G314.{categories, toleranceMm, hauteurMinEtageMm}. Scoring cible/seuil — SANS cible : statut NULL.",
   "toleranceMm": 0,
-  "hauteurMinEtageMm": 2000,
+  "hauteurMinEtageMm": 2500,
   "categories": {
     "mep": [
       "OST_MechanicalEquipment",

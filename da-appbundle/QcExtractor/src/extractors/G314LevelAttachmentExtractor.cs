@@ -14,7 +14,8 @@ namespace QcExtractor.Extractors
     /// NOUVELLE MÉTHODE : paramètres NATIFS + table de plages d'étages (Building Story),
     /// trois familles détectées par élément :
     ///   C — Base Level + Top Level (colonnes) : cohérence Top &gt; Base (multi-étages OK) ;
-    ///   B — LocationCurve (filaires) : plages des extrémités ; multi-niveaux écarté ;
+    ///   B — LocationCurve (filaires) : niveau de référence + élévations relatives NATIVES
+    ///       (Middle / Start-End Middle / arases) — JAMAIS le Z géométrique de la courbe ;
     ///   A — Level + Offset (ponctuels) : élévation effective dans la plage du niveau déclaré.
     ///
     /// Plages semi-ouvertes [E_i, E_{i+1}) ; dernier niveau = borne basse seule.
@@ -55,6 +56,15 @@ namespace QcExtractor.Extractors
             BuiltInParameter.INSTANCE_ELEVATION_PARAM,
         };
 
+        // Famille B — arases relatives (top/bottom) par famille de catégorie MEP.
+        // Présents 2024/2025 : PIPE / DUCT / CTC (cable tray + conduit).
+        private static readonly BuiltInParameter[][] FilaireTopBottomPairs =
+        {
+            new[] { BuiltInParameter.RBS_PIPE_BOTTOM_ELEVATION, BuiltInParameter.RBS_PIPE_TOP_ELEVATION },
+            new[] { BuiltInParameter.RBS_DUCT_BOTTOM_ELEVATION, BuiltInParameter.RBS_DUCT_TOP_ELEVATION },
+            new[] { BuiltInParameter.RBS_CTC_BOTTOM_ELEVATION, BuiltInParameter.RBS_CTC_TOP_ELEVATION },
+        };
+
         // Bruit arithmétique min (tolérance config 0) — ~0.01 mm en unités internes.
         private const double FloorEpsMm = 0.01;
 
@@ -80,7 +90,7 @@ namespace QcExtractor.Extractors
                 toleranceMm = _cfg.ToleranceMm;
             double tol = UnitUtils.ConvertToInternalUnits(toleranceMm, UnitTypeId.Millimeters);
 
-            double hauteurMinMm = 2000;
+            double hauteurMinMm = 2500;
             if (_cfg != null && _cfg.HauteurMinEtageMm >= 0)
                 hauteurMinMm = _cfg.HauteurMinEtageMm;
 
@@ -139,7 +149,7 @@ namespace QcExtractor.Extractors
                         liste = fautifs,
                         listeTronquee = tronque,
                     },
-                    note = "Méthode par paramètres natifs + plages Building Story (borne semi-ouverte, hauteurMinEtageMm filtre les niveaux techniques serrés). Indicatif : sans cible/seuil => statut NULL. Ancienne méthode géométrique retirée.",
+                    note = "Méthode par paramètres natifs + plages Building Story (borne semi-ouverte, hauteurMinEtageMm filtre les niveaux techniques serrés). Famille B : élévations relatives natives (pas le Z LocationCurve). Indicatif : sans cible/seuil => statut NULL.",
                 },
             };
         }
@@ -345,56 +355,47 @@ namespace QcExtractor.Extractors
             return Outcome.Fail('A', declared, offset, effective, range, raison: raison);
         }
 
-        // ---- Famille B : LocationCurve ----
+        // ---- Famille B : filaires (params natifs, PAS le Z LocationCurve) ----
 
         private static Outcome EvaluateFamilyB(Document doc, Element el, List<StoryRange> ranges, double tol)
         {
-            LocationCurve lc = el.Location as LocationCurve;
-            if (lc == null || lc.Curve == null)
-                return Outcome.NonEval("LocationCurve illisible");
+            // LocationCurve sert UNIQUEMENT à la détection de famille (DetectFamily).
+            // Le verdict utilise uniquement niveau de référence + élévations relatives natives.
 
-            XYZ a, b;
-            try
-            {
-                a = lc.Curve.GetEndPoint(0);
-                b = lc.Curve.GetEndPoint(1);
-            }
-            catch
-            {
-                return Outcome.NonEval("extrémités de courbe illisibles");
-            }
+            Level declared = GetFilaireReferenceLevel(doc, el);
+            if (declared == null)
+                return Outcome.NonEval("pas de paramètre de niveau de référence");
 
-            int i0 = FindRangeIndex(ranges, a.Z, tol);
-            int i1 = FindRangeIndex(ranges, b.Z, tol);
+            int idxDeclared = IndexOfLevel(ranges, declared);
+            if (idxDeclared < 0)
+                return Outcome.NonEval("niveau déclaré hors table de plages");
+
+            if (!TryGetFilaireRelativeEnds(el, out double rel0, out double rel1, out double relMid))
+                return Outcome.NonEval("pas de paramètre d'élévation relative");
+
+            double z0 = declared.Elevation + rel0;
+            double z1 = declared.Elevation + rel1;
+            int i0 = FindRangeIndex(ranges, z0, tol);
+            int i1 = FindRangeIndex(ranges, z1, tol);
             if (i0 < 0 || i1 < 0)
                 return Outcome.NonEval("extrémité hors plages d'étages");
 
             if (i0 != i1)
                 return Outcome.Multi('B');
 
-            Level declared = GetDeclaredLevel(doc, el);
-            if (declared == null)
-                return Outcome.NonEval("pas de paramètre de niveau déclaré");
-
-            int idxDeclared = IndexOfLevel(ranges, declared);
-            if (idxDeclared < 0)
-                return Outcome.NonEval("niveau déclaré hors table de plages");
-
-            // Même plage physique pour les deux extrémités : conforme ssi cette plage
-            // est celle du niveau déclaré (équivalent Famille A sans dépendre d'un offset
-            // filaire parfois absent — la plage des extrémités EST la mesure).
-            double midZ = (a.Z + b.Z) / 2.0;
+            // Même plage aux deux extrémités → même règle que Famille A
+            // (élévation effective = niveau déclaré + élévation relative).
+            double effective = declared.Elevation + relMid;
             StoryRange range = ranges[idxDeclared];
-            bool ok = idxDeclared == i0 && ElevationInStoryRange(range, midZ, tol);
+            double floorTol = Math.Max(tol, UnitUtils.ConvertToInternalUnits(FloorEpsMm, UnitTypeId.Millimeters));
+            bool onDeclaredPlane = SameLevelId(range.Level, declared) && Math.Abs(relMid) <= floorTol;
+            bool ok = onDeclaredPlane || ElevationInStoryRange(range, effective, tol);
 
-            double offset = midZ - declared.Elevation;
             if (ok)
-                return Outcome.Ok('B', declared, offset, midZ, range);
+                return Outcome.Ok('B', declared, relMid, effective, range);
 
-            string raison = idxDeclared != i0
-                ? "plage_extremites_differente_du_niveau_declare"
-                : (midZ < range.Low ? "sous_niveau" : "depassement_haut");
-            return Outcome.Fail('B', declared, offset, midZ, range, raison: raison);
+            string raison = effective < range.Low - floorTol ? "sous_niveau" : "depassement_haut";
+            return Outcome.Fail('B', declared, relMid, effective, range, raison: raison);
         }
 
         // ---- Famille C : Base + Top ----
@@ -457,6 +458,83 @@ namespace QcExtractor.Extractors
                 return p.AsDouble(); // unités internes
             }
             return 0;
+        }
+
+        /// <summary>
+        /// Niveau de référence filaire : RBS_START_LEVEL_PARAM (« Reference Level ») d'abord.
+        /// </summary>
+        private static Level GetFilaireReferenceLevel(Document doc, Element el)
+        {
+            ElementId id = ReadLevelParam(el, BuiltInParameter.RBS_START_LEVEL_PARAM);
+            if (id != null)
+            {
+                Level lvl = doc.GetElement(id) as Level;
+                if (lvl != null) return lvl;
+            }
+            return GetDeclaredLevel(doc, el);
+        }
+
+        private static double? ReadDoubleParam(Element el, BuiltInParameter bip)
+        {
+            Parameter p = el.get_Parameter(bip);
+            if (p == null || p.StorageType != StorageType.Double) return null;
+            if (!p.HasValue) return null;
+            return p.AsDouble();
+        }
+
+        /// <summary>
+        /// Élévations relatives natives des extrémités + milieu (unités internes).
+        /// Ordre : Start/End Middle Elevation → Middle Elevation → arases TOP/BOTTOM catégorie.
+        /// Aucun repli géométrique. Retourne false si aucun paramètre relatif exploitable.
+        /// </summary>
+        private static bool TryGetFilaireRelativeEnds(
+            Element el, out double rel0, out double rel1, out double relMid)
+        {
+            rel0 = rel1 = relMid = 0;
+
+            double? start = ReadDoubleParam(el, BuiltInParameter.RBS_START_OFFSET_PARAM);
+            double? end = ReadDoubleParam(el, BuiltInParameter.RBS_END_OFFSET_PARAM);
+            if (start.HasValue && end.HasValue)
+            {
+                rel0 = start.Value;
+                rel1 = end.Value;
+                double? mid = ReadDoubleParam(el, BuiltInParameter.RBS_OFFSET_PARAM);
+                relMid = mid.HasValue ? mid.Value : (rel0 + rel1) / 2.0;
+                return true;
+            }
+
+            double? middle = ReadDoubleParam(el, BuiltInParameter.RBS_OFFSET_PARAM);
+            if (middle.HasValue)
+            {
+                rel0 = rel1 = relMid = middle.Value;
+                return true;
+            }
+
+            // Une seule extrémité middle connue
+            if (start.HasValue)
+            {
+                rel0 = rel1 = relMid = start.Value;
+                return true;
+            }
+            if (end.HasValue)
+            {
+                rel0 = rel1 = relMid = end.Value;
+                return true;
+            }
+
+            // Arases sup/inf (relatives au niveau de référence, UI FR).
+            foreach (BuiltInParameter[] pair in FilaireTopBottomPairs)
+            {
+                double? lo = ReadDoubleParam(el, pair[0]);
+                double? hi = ReadDoubleParam(el, pair[1]);
+                if (!lo.HasValue || !hi.HasValue) continue;
+                rel0 = lo.Value;
+                rel1 = hi.Value;
+                relMid = (rel0 + rel1) / 2.0;
+                return true;
+            }
+
+            return false;
         }
 
         // ======== JSON fautif / compteurs ========

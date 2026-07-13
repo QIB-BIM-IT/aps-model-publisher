@@ -215,13 +215,13 @@ class QcScoringService {
    */
   resolveG314Config(controles) {
     let toleranceMm = 0;
-    let hauteurMinEtageMm = 2000;
+    let hauteurMinEtageMm = 2500;
     let categoriesMep = [];
     let categoriesStructure = [];
     try {
       const norm = this.loadLevelAttachmentNorm();
       toleranceMm = Number.isFinite(norm.toleranceMm) ? Number(norm.toleranceMm) : 0;
-      hauteurMinEtageMm = Number.isFinite(norm.hauteurMinEtageMm) ? Number(norm.hauteurMinEtageMm) : 2000;
+      hauteurMinEtageMm = Number.isFinite(norm.hauteurMinEtageMm) ? Number(norm.hauteurMinEtageMm) : 2500;
       categoriesMep = norm.categories.mep.map(String);
       categoriesStructure = norm.categories.structure.map(String);
     } catch (_) { /* défauts ci-dessus */ }

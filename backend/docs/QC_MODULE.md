@@ -484,7 +484,7 @@ positifs sur les pilotes (ELEC 6,89 %, M_PR 11,53 %). **Méthode géométrique r
 ### Table de plages (une fois par modèle)
 
 1. Niveaux Building Story (`LEVEL_IS_BUILDING_STORY`) ; repli = tous les niveaux.
-2. Filtre `hauteurMinEtageMm` (défaut **2000**) : un Building Story n'est retenu comme
+2. Filtre `hauteurMinEtageMm` (défaut **2500**) : un Building Story n'est retenu comme
    borne d'étage que s'il est à ≥ ce seuil au-dessus du précédent retenu. Sans ce filtre,
    les niveaux techniques serrés (souvent &lt; 1 m) produisent des plages irréalistes et
    des faux positifs massifs sur les pilotes industriels (offsets MEP normaux).
@@ -497,7 +497,7 @@ positifs sur les pilotes (ELEC 6,89 %, M_PR 11,53 %). **Méthode géométrique r
 | Famille | Détection | Règle |
 |---------|-----------|--------|
 | **C** | Base Level + Top Level présents | Cohérence : niveaux réels et Top > Base. Multi-étages **OK**. |
-| **B** | `LocationCurve` | Extrémmités dans la même plage → contrôle vs niveau déclaré ; plages différentes → **MULTI-NIVEAUX** (écarté). |
+| **B** | `LocationCurve` (détection seule) | Niveau de référence + élévations **relatives natives** (`RBS_OFFSET_PARAM` / Start-End Middle / arases PIPE·DUCT·CTC). Même formule que A. Extrémmités en plages différentes → **MULTI-NIVEAUX**. **Jamais** le Z `LocationCurve`. Paramètres absents → **NON ÉVALUABLE**. |
 | **A** | sinon (Level + Offset) | `élévation effective = niveau déclaré + offset` ; conforme si dans la plage du niveau déclaré. Pas de repli `Element.LevelId`. |
 
 ### Quatre états
@@ -514,7 +514,7 @@ pratiques Revit) : le contrôleur BIM juge.
 
 ### Config
 
-- Défauts : `qc-level-attachment-norm.json` — `toleranceMm: 0`, `hauteurMinEtageMm: 2000`,
+- Défauts : `qc-level-attachment-norm.json` — `toleranceMm: 0`, `hauteurMinEtageMm: 2500`,
   MEP + STRUCTURE (**sans axes** ; `OST_StructConnections`).
 - Scoring : `pourcentage` / sens `min` via `cible` ou alias `seuil`. **Sans cible :
   statut NULL.**
