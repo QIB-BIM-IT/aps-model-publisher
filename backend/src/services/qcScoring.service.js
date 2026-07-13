@@ -29,6 +29,7 @@ const GRID_PATH = path.join(__dirname, '..', '..', 'config', 'qc-criticality-gri
 const CATALOG_PATH = path.join(__dirname, '..', '..', 'config', 'qc-controls-catalog.json');
 const UNIFORMAT_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-uniformat-norm.json');
 const COPY_MONITOR_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-copy-monitor-norm.json');
+const LEVEL_ATTACHMENT_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-level-attachment-norm.json');
 const LEVELS = ['critique', 'faible'];
 const DEFAULT_LEVEL = 'faible';
 
@@ -38,6 +39,7 @@ class QcScoringService {
     this._catalog = null;
     this._uniformatNorm = null;
     this._copyMonitorNorm = null;
+    this._levelAttachmentNorm = null;
   }
 
   // ======== Catalogue des contrôles (chantier 3) ========
@@ -194,6 +196,52 @@ class QcScoringService {
     return { niveauxExclus };
   }
 
+  // ======== Config G314 (rattachement au niveau) — norme + surcharge projet ========
+
+  loadLevelAttachmentNorm() {
+    if (this._levelAttachmentNorm) return this._levelAttachmentNorm;
+    const raw = JSON.parse(fs.readFileSync(LEVEL_ATTACHMENT_NORM_PATH, 'utf8'));
+    if (!raw || !raw.categories || !Array.isArray(raw.categories.mep) || !Array.isArray(raw.categories.structure)) {
+      throw new Error(`Norme rattachement niveau invalide: ${LEVEL_ATTACHMENT_NORM_PATH}`);
+    }
+    this._levelAttachmentNorm = raw;
+    return raw;
+  }
+
+  /**
+   * Config EFFECTIVE G314 : tolérance + hauteur min d'étage + catégories MEP/structure.
+   * Surcharge projet : controles.G314.{toleranceMm, hauteurMinEtageMm, categories}
+   * (categories = liste plate qui remplace mep+structure, ou {mep, structure}).
+   */
+  resolveG314Config(controles) {
+    let toleranceMm = 0;
+    let hauteurMinEtageMm = 2500;
+    let categoriesMep = [];
+    let categoriesStructure = [];
+    try {
+      const norm = this.loadLevelAttachmentNorm();
+      toleranceMm = Number.isFinite(norm.toleranceMm) ? Number(norm.toleranceMm) : 0;
+      hauteurMinEtageMm = Number.isFinite(norm.hauteurMinEtageMm) ? Number(norm.hauteurMinEtageMm) : 2500;
+      categoriesMep = norm.categories.mep.map(String);
+      categoriesStructure = norm.categories.structure.map(String);
+    } catch (_) { /* défauts ci-dessus */ }
+
+    const g = controles?.G314;
+    if (g) {
+      if (Number.isFinite(g.toleranceMm)) toleranceMm = Number(g.toleranceMm);
+      if (Number.isFinite(g.hauteurMinEtageMm)) hauteurMinEtageMm = Number(g.hauteurMinEtageMm);
+      if (Array.isArray(g.categories)) {
+        // Liste plate : tout en MEP pour l'audit (ventilation structure vide)
+        categoriesMep = g.categories.map(String);
+        categoriesStructure = [];
+      } else if (g.categories && typeof g.categories === 'object') {
+        if (Array.isArray(g.categories.mep)) categoriesMep = g.categories.mep.map(String);
+        if (Array.isArray(g.categories.structure)) categoriesStructure = g.categories.structure.map(String);
+      }
+    }
+    return { toleranceMm, hauteurMinEtageMm, categoriesMep, categoriesStructure };
+  }
+
   // ======== Grille maison ========
 
   /** Charge la grille maison (cache). Lance si illisible — l'appelant décide du repli. */
@@ -293,7 +341,7 @@ class QcScoringService {
       return num >= 100 ? 'conforme' : 'non_conforme';
     }
 
-    const cible = controles?.[controlCode]?.cible;
+    const cible = controles?.[controlCode]?.cible ?? controles?.[controlCode]?.seuil;
     if (cible === undefined || cible === null) return null;
 
     const sens = entry.sens || 'max';

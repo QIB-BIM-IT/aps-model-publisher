@@ -1,0 +1,45 @@
+{
+  "version": 4,
+  "description": "Norme maison G314 RÉVISÉE — paramètres NATIFS + plages Building Story. Famille B : élévations relatives natives (Middle/Start-End/arases), jamais le Z LocationCurve. Tolérance défaut 0 mm. hauteurMinEtageMm défaut 2500. Catégories MEP + STRUCTURE (sans axes). Surcharge : qc.project_config.config.controles.G314.{categories, toleranceMm, hauteurMinEtageMm}. Scoring cible/seuil — SANS cible : statut NULL.",
+  "toleranceMm": 0,
+  "hauteurMinEtageMm": 2500,
+  "categories": {
+    "mep": [
+      "OST_MechanicalEquipment",
+      "OST_DuctCurves",
+      "OST_DuctFitting",
+      "OST_DuctAccessory",
+      "OST_DuctTerminal",
+      "OST_FlexDuctCurves",
+      "OST_PipeCurves",
+      "OST_PipeFitting",
+      "OST_PipeAccessory",
+      "OST_FlexPipeCurves",
+      "OST_Sprinklers",
+      "OST_PlumbingFixtures",
+      "OST_ElectricalEquipment",
+      "OST_ElectricalFixtures",
+      "OST_LightingFixtures",
+      "OST_LightingDevices",
+      "OST_CommunicationDevices",
+      "OST_DataDevices",
+      "OST_FireAlarmDevices",
+      "OST_SecurityDevices",
+      "OST_NurseCallDevices",
+      "OST_TelephoneDevices",
+      "OST_AudioVisualDevices",
+      "OST_Conduit",
+      "OST_ConduitFitting",
+      "OST_CableTray",
+      "OST_CableTrayFitting"
+    ],
+    "structure": [
+      "OST_StructuralColumns",
+      "OST_StructuralFraming",
+      "OST_StructuralFoundation",
+      "OST_StructConnections",
+      "OST_StructuralStiffener",
+      "OST_StructuralTruss"
+    ]
+  }
+}
