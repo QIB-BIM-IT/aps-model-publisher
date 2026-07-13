@@ -89,7 +89,15 @@ namespace QcExtractor
     public class G314Config
     {
         [JsonProperty("toleranceMm")]
-        public double ToleranceMm { get; set; } = 50;
+        public double ToleranceMm { get; set; } = 0;
+
+        /// <summary>
+        /// Hauteur minimale (mm) entre deux niveaux retenus dans la table de plages.
+        /// Les Building Story plus proches que ce seuil du précédent retenu sont ignorés
+        /// comme bornes (niveaux techniques serrés). Défaut 2000. 0 = aucun filtre.
+        /// </summary>
+        [JsonProperty("hauteurMinEtageMm")]
+        public double HauteurMinEtageMm { get; set; } = 2000;
 
         [JsonProperty("categoriesMep")]
         public List<string> CategoriesMep { get; set; } = new List<string>();

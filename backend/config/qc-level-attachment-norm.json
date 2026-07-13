@@ -1,7 +1,8 @@
 {
-  "version": 1,
-  "description": "Norme maison G314 — rattachement au niveau (déclaré vs physique). Tolérance par défaut 50 mm (limite de niveau ET équivalence d'élévation). Catégories MEP + STRUCTURE en BuiltInCategory. Surcharge projet : qc.project_config.config.controles.G314.{categories, toleranceMm}. Scoring via cible/seuil (forme pourcentage, sens min) — SANS cible : statut NULL (contrôle indicatif/bruyant).",
-  "toleranceMm": 50,
+  "version": 3,
+  "description": "Norme maison G314 RÉVISÉE — rattachement au niveau par PARAMÈTRES NATIFS + table de plages Building Story (pas de calcul géométrique de niveau physique). Tolérance défaut 0 mm. hauteurMinEtageMm défaut 2000 (filtre les Building Story techniques trop serrés). Catégories MEP + STRUCTURE (sans axes). Surcharge : qc.project_config.config.controles.G314.{categories, toleranceMm, hauteurMinEtageMm}. Scoring via cible/seuil (pourcentage, sens min) — SANS cible : statut NULL (indicatif).",
+  "toleranceMm": 0,
+  "hauteurMinEtageMm": 2000,
   "categories": {
     "mep": [
       "OST_MechanicalEquipment",

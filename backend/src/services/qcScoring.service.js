@@ -209,17 +209,19 @@ class QcScoringService {
   }
 
   /**
-   * Config EFFECTIVE G314 : tolérance + catégories MEP/structure.
-   * Surcharge projet : controles.G314.{toleranceMm, categories} (categories = liste plate
-   * qui remplace mep+structure, ou {mep, structure}).
+   * Config EFFECTIVE G314 : tolérance + hauteur min d'étage + catégories MEP/structure.
+   * Surcharge projet : controles.G314.{toleranceMm, hauteurMinEtageMm, categories}
+   * (categories = liste plate qui remplace mep+structure, ou {mep, structure}).
    */
   resolveG314Config(controles) {
-    let toleranceMm = 50;
+    let toleranceMm = 0;
+    let hauteurMinEtageMm = 2000;
     let categoriesMep = [];
     let categoriesStructure = [];
     try {
       const norm = this.loadLevelAttachmentNorm();
-      toleranceMm = Number.isFinite(norm.toleranceMm) ? Number(norm.toleranceMm) : 50;
+      toleranceMm = Number.isFinite(norm.toleranceMm) ? Number(norm.toleranceMm) : 0;
+      hauteurMinEtageMm = Number.isFinite(norm.hauteurMinEtageMm) ? Number(norm.hauteurMinEtageMm) : 2000;
       categoriesMep = norm.categories.mep.map(String);
       categoriesStructure = norm.categories.structure.map(String);
     } catch (_) { /* défauts ci-dessus */ }
@@ -227,6 +229,7 @@ class QcScoringService {
     const g = controles?.G314;
     if (g) {
       if (Number.isFinite(g.toleranceMm)) toleranceMm = Number(g.toleranceMm);
+      if (Number.isFinite(g.hauteurMinEtageMm)) hauteurMinEtageMm = Number(g.hauteurMinEtageMm);
       if (Array.isArray(g.categories)) {
         // Liste plate : tout en MEP pour l'audit (ventilation structure vide)
         categoriesMep = g.categories.map(String);
@@ -236,7 +239,7 @@ class QcScoringService {
         if (Array.isArray(g.categories.structure)) categoriesStructure = g.categories.structure.map(String);
       }
     }
-    return { toleranceMm, categoriesMep, categoriesStructure };
+    return { toleranceMm, hauteurMinEtageMm, categoriesMep, categoriesStructure };
   }
 
   // ======== Grille maison ========

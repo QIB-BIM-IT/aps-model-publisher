@@ -1,40 +1,44 @@
-# API vérifiée — G314 (rattachement au niveau)
+# API vérifiée — G314 RÉVISÉ (plages d'étages + paramètres natifs)
 
-Vérification par lecture PURE des métadonnées contre `RevitAPI.dll` 2024 et 2025.
-
-## Signatures utilisées (identiques 2024 / 2025)
-
-- `Element.LevelId`, `Element.Location`, `Element.get_BoundingBox(View)`
-- `LocationPoint.Point`, `LocationCurve.Curve` (+ `Curve.GetEndPoint`)
-- `Level.Elevation`, `Level.ProjectElevation`
-- `UnitUtils.ConvertFromInternalUnits(Double, ForgeTypeId)` / `UnitTypeId.Millimeters`
-- `Element.get_Parameter(BuiltInParameter)`, `Parameter.AsElementId()`, `StorageType.ElementId`
+Vérification métadonnées `RevitAPI.dll` 2024 et 2025.
 
 ## Building Story
 
-La propriété `Level.IsBuildingStory` **n'apparaît pas** dans les métadonnées publiques
-des propriétés de `Level` (seuls `Elevation` / `ProjectElevation` listés). En revanche
-`BuiltInParameter.LEVEL_IS_BUILDING_STORY` existe en 2024 **et** 2025.
+`BuiltInParameter.LEVEL_IS_BUILDING_STORY` présent 2024/2025.
+Propriété `Level.IsBuildingStory` absente des métadonnées → lecture via le paramètre.
 
-**Choix G314** : lire Building Story via `level.get_Parameter(LEVEL_IS_BUILDING_STORY)`
-(`AsInteger() == 1`), avec repli sur tous les niveaux si aucun Building Story — comme le
-script pyRevit (qui utilisait `level.IsBuildingStory` en interactif).
+Filtre additif `hauteurMinEtageMm` (défaut 2000, config) : un Building Story n'est
+retenu comme borne d'étage que s'il est à ≥ ce seuil au-dessus du précédent retenu.
+Sans filtre, les niveaux techniques serrés (usines) créent des plages &lt; 1 m irréalistes.
 
-## BuiltInParameter de niveau (liste du script)
+## Niveau déclaré (Familles A/B)
 
-Présents 2024/2025 :
-`INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM`, `SCHEDULE_LEVEL_PARAM`, `FAMILY_LEVEL_PARAM`,
-`INSTANCE_REFERENCE_LEVEL_PARAM`, `RBS_START_LEVEL_PARAM`, `WALL_BASE_CONSTRAINT`,
-`STAIRS_BASE_LEVEL_PARAM`, `ROOF_CONSTRAINT_LEVEL_PARAM`.
+Présents : `INSTANCE_REFERENCE_LEVEL_PARAM`, `FAMILY_LEVEL_PARAM`,
+`RBS_START_LEVEL_PARAM`, `SCHEDULE_LEVEL_PARAM`, `WALL_BASE_CONSTRAINT`,
+`STAIRS_BASE_LEVEL_PARAM`, `ROOF_CONSTRAINT_LEVEL_PARAM`,
+`INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM` (dernier : peut différer de la contrainte).
 
-**Absent des deux DLLs** : `RBS_REFERENCE_LEVEL_PARAM` (le script pyRevit le tolérait via
-`getattr` → `None`). Non utilisé par G314.
+**Absent** : `RBS_REFERENCE_LEVEL_PARAM` — omis.
+**Pas de repli** `Element.LevelId` (révision).
 
-## BuiltInCategory
+## Offset (Famille A)
 
-Liste MEP + STRUCTURE du prompt : toutes présentes. `OST_StructConnections` (pas
-`OST_StructuralConnections`).
+Présents 2024/2025 : `INSTANCE_FREE_HOST_OFFSET_PARAM`,
+`FAMILY_BASE_LEVEL_OFFSET_PARAM`, `RBS_OFFSET_PARAM`, `RBS_START_OFFSET_PARAM`,
+`SCHEDULE_BASE_LEVEL_OFFSET_PARAM`, `ASSOCIATED_LEVEL_OFFSET`,
+`INSTANCE_OFFSET_POS_PARAM`, `INSTANCE_ELEVATION_PARAM` (dernier : parfois absolu).
+
+## Base / Top (Famille C)
+
+Présents : `FAMILY_BASE_LEVEL_PARAM` / `FAMILY_TOP_LEVEL_PARAM`,
+`SCHEDULE_BASE_LEVEL_PARAM` / `SCHEDULE_TOP_LEVEL_PARAM`.
+
+## LocationCurve / unités
+
+`LocationCurve.Curve`, `Curve.GetEndPoint`, `Level.Elevation`,
+`UnitUtils.ConvertFromInternalUnits` / `ConvertToInternalUnits` + `UnitTypeId.Millimeters`.
+Comparaison d'`ElementId` via `.Value` (cohérent net48 / net8.0-windows).
 
 ## Deltas 2024 / 2025
 
-Aucun sur le périmètre G314 (hors ajouts UnitTypeId hors sujet en 2025).
+Aucun sur le périmètre G314 (hors ajouts UnitTypeId / Rebar hors sujet).

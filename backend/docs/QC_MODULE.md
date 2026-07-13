@@ -469,35 +469,56 @@ Un niveau exclu **n'entre pas** dans la conformité (ni fautif ni requis), mais
 - `non_conforme` dès qu'un élément soumis à audit n'est pas monitoré.
 - Un niveau exclu non monitoré **ne** rend **pas** non conforme.
 
-## Forme « pourcentage » appliquée à G314 (rattachement au niveau)
+## Forme « pourcentage » appliquée à G314 (rattachement au niveau) — RÉVISION
 
-G314 compare le **niveau déclaré** d'un élément (paramètres de niveau Revit, puis
-`Element.LevelId`) à son **niveau physique** (niveau Building Story le plus élevé
-sous le point de référence Z — PAS le plus proche). Portage headless du script
-pyRevit maison. Voir `spike/level-attachment/API_VERIFIED.md`.
+G314 vérifie le **rattachement au niveau** via les **paramètres natifs** et une
+**table de plages d'étages** (Building Story). Voir `spike/level-attachment/API_VERIFIED.md`.
+
+### Pourquoi l'ancienne méthode a été retirée
+
+L'ancienne approche calculait un « niveau physique » depuis la géométrie Z (balayage
+des niveaux). En MEP, les décalages verticaux sont **normaux** (diffuseur au plafond
+rattaché au plancher) et les niveaux techniques faussaient le calcul → ~90 % de faux
+positifs sur les pilotes (ELEC 6,89 %, M_PR 11,53 %). **Méthode géométrique retirée.**
+
+### Table de plages (une fois par modèle)
+
+1. Niveaux Building Story (`LEVEL_IS_BUILDING_STORY`) ; repli = tous les niveaux.
+2. Filtre `hauteurMinEtageMm` (défaut **2000**) : un Building Story n'est retenu comme
+   borne d'étage que s'il est à ≥ ce seuil au-dessus du précédent retenu. Sans ce filtre,
+   les niveaux techniques serrés (souvent &lt; 1 m) produisent des plages irréalistes et
+   des faux positifs massifs sur les pilotes industriels (offsets MEP normaux).
+3. Tri par élévation. Plage du niveau i = `[E_i, E_{i+1})` (**semi-ouverte** : pile à
+   `E_{i+1}` → niveau suivant).
+4. Dernier niveau : **borne basse seule** (pas de borne haute inventée).
+
+### Trois familles (détection automatique)
+
+| Famille | Détection | Règle |
+|---------|-----------|--------|
+| **C** | Base Level + Top Level présents | Cohérence : niveaux réels et Top > Base. Multi-étages **OK**. |
+| **B** | `LocationCurve` | Extrémmités dans la même plage → contrôle vs niveau déclaré ; plages différentes → **MULTI-NIVEAUX** (écarté). |
+| **A** | sinon (Level + Offset) | `élévation effective = niveau déclaré + offset` ; conforme si dans la plage du niveau déclaré. Pas de repli `Element.LevelId`. |
 
 ### Quatre états
 
-| État | Sens | Entre dans le verdict ? |
-|------|------|-------------------------|
-| conforme | déclaré ≈ physique (tolérance) | oui |
-| fautif | déclaré ≠ physique | oui |
-| multiNiveaux | linéaire traversant plusieurs niveaux | non (écarté) |
-| nonEvaluable | pas de niveau déclaré / pas de Z | non (écarté) |
+| État | Sens | Verdict ? |
+|------|------|-----------|
+| conforme | règle de famille respectée | oui |
+| fautif | règle violée | oui |
+| multiNiveaux | filaire traversant plusieurs plages | non |
+| nonEvaluable | pas de niveau déclaré exploitable | non |
 
-`valeur_num` = `conformes / (conformes + fautifs)`. **Contrôle intrinsèquement bruyant**
-(faux positifs possibles sur poutres à décalage volontaire, etc.).
+`valeur_num` = `conformes / (conformes + fautifs)`. Contrôle **indicatif** (bonnes
+pratiques Revit) : le contrôleur BIM juge.
 
 ### Config
 
-- Défauts maison : `config/qc-level-attachment-norm.json` — `toleranceMm: 50`, catégories
-  MEP + STRUCTURE (`OST_StructConnections`, pas `OST_StructuralConnections`).
-- Surcharge : `controles.G314.{toleranceMm, categories}`.
-- Scoring : forme `pourcentage` / sens `min`. Cible via `cible` **ou** alias `seuil`
-  (ex. `{ "G314": { "seuil": 95 } }`). **Sans cible : statut NULL** — ne pas mettre 100 %
-  par défaut ; le seuil doit être un choix conscient.
-- Liste des fautifs plafonnée à 100 : `{id, categorie, famille, type, niveauDeclare,
-  niveauPhysique, decalagePhysiqueMm, ecartEntreNiveauxMm}` ; comptes ventilés MEP/structure.
+- Défauts : `qc-level-attachment-norm.json` — `toleranceMm: 0`, `hauteurMinEtageMm: 2000`,
+  MEP + STRUCTURE (**sans axes** ; `OST_StructConnections`).
+- Scoring : `pourcentage` / sens `min` via `cible` ou alias `seuil`. **Sans cible :
+  statut NULL.**
+- Fautifs plafonnés à 100 ; ventilation par famille A/B/C et MEP/structure.
 
 ## Intégrité des données (ISO 19650)
 
@@ -663,19 +684,16 @@ monitoré → **conforme** ; vacuité → statut NULL.
 
 **Isolation.** `simulerEchec: "G210"` ⇒ sa ligne `etat_extraction='echec'`, les 23 autres intactes.
 
-## Lot G314 — à exécuter par l'utilisateur EN LOCAL (procédure)
+## Lot G314 — à exécuter par l'utilisateur EN LOCAL (procédure) — RÉVISION
 
-Mêmes garde-fous (base **locale**, rebuild + re-provisioning 2024/2025). Total attendu :
-**25 lignes** par run (24 + G314).
+Mêmes garde-fous (base **locale**, rebuild + re-provisioning). **25 lignes**/run.
 
-**Sur les 2 pilotes.** Rapporter les 4 états (ventilés MEP/structure), % conformité,
-liste fautifs plafonnée. Du bruit est **attendu**. G102 MÉTA peut dériver si le fichier
-ACC a changé — ce n'est pas une régression MODÈLE.
+**Attendu vs ancienne méthode.** Le % de conformité doit être **nettement plus élevé**
+que 6,89 % / 11,53 % (faux positifs géométriques). Ventiler les 4 états par famille A/B/C.
 
-**Scoring.** Sans cible → statut NULL. Avec `seuil`/`cible` de test (ex. 95) →
-conforme/non_conforme selon le %.
+**Scoring.** Sans cible → NULL. Avec `seuil`/`cible` de test → conforme/non_conforme.
 
-**Isolation.** `simulerEchec: "G314"` ⇒ sa ligne `echec`, les 24 autres intactes.
+**Isolation.** `simulerEchec: "G314"` ⇒ G314 `echec`, 24 autres intactes.
 
 ## Limites assumées de la tranche
 
