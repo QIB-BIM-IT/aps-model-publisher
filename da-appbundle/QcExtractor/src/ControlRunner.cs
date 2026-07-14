@@ -49,6 +49,9 @@ namespace QcExtractor
                 // Lot G314 — rattachement au niveau (déclaré vs physique), catégories
                 // MEP+structure et tolérance via config (norme maison + projet).
                 new Extractors.G314LevelAttachmentExtractor(input != null ? input.G314 : null),
+                // Lot G412 — hygiène du modèle : familles in place + groupes miroir
+                // (Organisation Revit ; ne remplace pas la purge manuelle / G106 doc).
+                new Extractors.G412ModelHygieneExtractor(),
             };
         }
 

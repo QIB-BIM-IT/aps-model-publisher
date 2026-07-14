@@ -520,6 +520,35 @@ pratiques Revit) : le contrôleur BIM juge.
   statut NULL.**
 - Fautifs plafonnés à 100 ; ventilation par famille A/B/C et MEP/structure.
 
+## Forme « hygieneModele » — G412 (hygiène du modèle)
+
+G412 combine **deux indicateurs** dans une seule ligne `control_results`. Voir
+`spike/model-hygiene/API_VERIFIED.md`.
+
+| Indicateur | Mesure | Rôle statut |
+|------------|--------|-------------|
+| Groupes miroir | `valeur_num` = nb | **Tolérance zéro** (défaut) → `conforme` si 0, `non_conforme` si ≥ 1 |
+| Familles in place | `valeur_json.famillesInPlace` | Hygiène complémentaire ; verdict seulement si `seuilFamillesInPlace` en config |
+
+### Choix de code : G412 (pas G106)
+
+G106 reste réservé à la notion documentaire « Fichier purgé » (**Manuel**, hors outil —
+le comptage de purgeables via API n'est pas fiable). G412 = section Organisation Revit
+(à côté de G411 groupes inutilisés).
+
+### Groupes miroir — limite API
+
+`Group` / `GroupType` **n'exposent pas** `Mirrored` (2024/2025). Méthode retenue :
+consensus `FamilyInstance.Mirrored` sur les membres FI. Groupes sans FI =
+indéterminés (listés, non fautifs). Pas de transaction / PlaceGroup en DA.
+
+### Config
+
+- Défaut strict miroir : seuil 0 (aucune cible projet requise).
+- Surcharge : `controles.G412.seuilGroupesMiroir` (ou `seuil` / `cible`).
+- Optionnel : `controles.G412.seuilFamillesInPlace` (ex. 0 = zéro famille in place).
+- Listes plafonnées à 100.
+
 ## Intégrité des données (ISO 19650)
 
 - Jamais de `ON DELETE CASCADE` de `qc` vers `public` : `qc.jobs.userId` et `qc.runs.userId`

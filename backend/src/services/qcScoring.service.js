@@ -341,6 +341,30 @@ class QcScoringService {
       return num >= 100 ? 'conforme' : 'non_conforme';
     }
 
+    // Lot G412 (hygieneModele) : statut piloté par les GROUPES MIROIR (tolérance zéro
+    // par défaut). valeur_num = nbGroupesMiroir. Familles in place = hygiène complémentaire :
+    // n'affectent le statut que si seuilFamillesInPlace est configuré.
+    if (entry.forme === 'hygieneModele') {
+      const cfg = controles?.[controlCode] || {};
+      const seuilMiroir = Number.isFinite(cfg.seuilGroupesMiroir)
+        ? Number(cfg.seuilGroupesMiroir)
+        : Number.isFinite(cfg.seuil)
+          ? Number(cfg.seuil)
+          : Number.isFinite(cfg.cible)
+            ? Number(cfg.cible)
+            : 0;
+      const num = outcome.valeurNum;
+      if (!Number.isFinite(num)) return null;
+      if (num > seuilMiroir) return 'non_conforme';
+      if (Number.isFinite(cfg.seuilFamillesInPlace)) {
+        const nbFam = outcome.valeurJson?.famillesInPlace?.nbFamillesInPlace;
+        if (Number.isFinite(nbFam) && nbFam > Number(cfg.seuilFamillesInPlace)) {
+          return 'non_conforme';
+        }
+      }
+      return 'conforme';
+    }
+
     const cible = controles?.[controlCode]?.cible ?? controles?.[controlCode]?.seuil;
     if (cible === undefined || cible === null) return null;
 
