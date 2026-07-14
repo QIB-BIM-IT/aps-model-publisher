@@ -341,6 +341,37 @@ class QcScoringService {
       return num >= 100 ? 'conforme' : 'non_conforme';
     }
 
+    // Lot G412 (hygieneModele) : statut piloté par les GROUPES À INSTANCE UNIQUE
+    // (tolérance zéro par défaut). valeur_num = nbGroupesInstanceUnique (GroupType.Groups.Size==1).
+    // Familles in place / total de types = indicateurs complémentaires (seuils optionnels).
+    // Indicateur groupes miroir RETIRÉ (pas d'API Group.Mirrored fiable).
+    if (entry.forme === 'hygieneModele') {
+      const cfg = controles?.[controlCode] || {};
+      const seuilUnique = Number.isFinite(cfg.seuilGroupesInstanceUnique)
+        ? Number(cfg.seuilGroupesInstanceUnique)
+        : Number.isFinite(cfg.seuil)
+          ? Number(cfg.seuil)
+          : Number.isFinite(cfg.cible)
+            ? Number(cfg.cible)
+            : 0;
+      const num = outcome.valeurNum;
+      if (!Number.isFinite(num)) return null;
+      if (num > seuilUnique) return 'non_conforme';
+      if (Number.isFinite(cfg.seuilFamillesInPlace)) {
+        const nbFam = outcome.valeurJson?.famillesInPlace?.nbFamillesInPlace;
+        if (Number.isFinite(nbFam) && nbFam > Number(cfg.seuilFamillesInPlace)) {
+          return 'non_conforme';
+        }
+      }
+      if (Number.isFinite(cfg.seuilTypesGroupes)) {
+        const nbTypes = outcome.valeurJson?.groupes?.nbTypesGroupes;
+        if (Number.isFinite(nbTypes) && nbTypes > Number(cfg.seuilTypesGroupes)) {
+          return 'non_conforme';
+        }
+      }
+      return 'conforme';
+    }
+
     const cible = controles?.[controlCode]?.cible ?? controles?.[controlCode]?.seuil;
     if (cible === undefined || cible === null) return null;
 

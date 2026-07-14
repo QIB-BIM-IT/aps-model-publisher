@@ -520,6 +520,40 @@ pratiques Revit) : le contrôleur BIM juge.
   statut NULL.**
 - Fautifs plafonnés à 100 ; ventilation par famille A/B/C et MEP/structure.
 
+## Forme « hygieneModele » — G412 (hygiène du modèle)
+
+G412 combine **trois indicateurs** dans une seule ligne `control_results`. Voir
+`spike/model-hygiene/API_VERIFIED.md`.
+
+| Indicateur | Mesure | Rôle statut |
+|------------|--------|-------------|
+| Groupes à instance unique | `valeur_num` = nb types avec `Groups.Size == 1` | **Tolérance zéro** (mesure exacte) → `conforme` si 0, `non_conforme` si ≥ 1 |
+| Familles in place | `valeur_json.famillesInPlace` | INDICATIF ; verdict seulement si `seuilFamillesInPlace` |
+| Total de types de groupes | `valeur_json.groupes.nbTypesGroupes` (+ instances) | INDICATIF (tendance jalon) ; verdict seulement si `seuilTypesGroupes` |
+
+### Choix de code : G412 (pas G106)
+
+G106 reste réservé à la notion documentaire « Fichier purgé » (**Manuel**, hors outil).
+G412 = section Organisation Revit (à côté de G411 groupes inutilisés).
+
+### Retrait de l'indicateur « groupes miroir »
+
+`Group` / `GroupType` **n'exposent pas** `Mirrored` (2024/2025). L'heuristique
+`FamilyInstance.Mirrored` (PR #179 initiale) produisait massivement des indéterminés
+et n'était pas fiable → **retirée**. Remplacée par les comptes exacts ci-dessus.
+
+### Groupes à instance unique (logique pyRevit)
+
+Pour chaque `GroupType`, si `gt.Groups.Size == 1` → type placé une seule fois (devrait
+être explosé). Liste : nom, catégorie, nb membres (`GetMemberIds`), pinned, viewSpecific.
+
+### Config
+
+- Défaut strict instance unique : seuil 0 (aucune cible projet requise).
+- Surcharge : `controles.G412.seuilGroupesInstanceUnique` (ou `seuil` / `cible`).
+- Optionnel : `seuilFamillesInPlace`, `seuilTypesGroupes`.
+- Listes plafonnées à 100.
+
 ## Intégrité des données (ISO 19650)
 
 - Jamais de `ON DELETE CASCADE` de `qc` vers `public` : `qc.jobs.userId` et `qc.runs.userId`

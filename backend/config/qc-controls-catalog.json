@@ -26,6 +26,7 @@
     "G504": { "source": "modele", "forme": "couverture", "unite": "pourcentage", "libelle": "Couverture de codification UNIFORMAT (types/instances de design avec code)" },
     "G508": { "source": "modele", "forme": "remplissage", "unite": "pourcentage", "libelle": "Taux de remplissage des paramètres d'exploitation (7D, liste par projet)" },
     "G210": { "source": "modele", "forme": "copieControle", "unite": "pourcentage", "libelle": "Copie-contrôle des axes et niveaux (présence de monitoring)" },
-    "G314": { "source": "modele", "forme": "pourcentage", "sens": "min", "unite": "pourcentage", "libelle": "Rattachement au niveau (plages d'étages + paramètres natifs, MEP+structure)" }
+    "G314": { "source": "modele", "forme": "pourcentage", "sens": "min", "unite": "pourcentage", "libelle": "Rattachement au niveau (plages d'étages + paramètres natifs, MEP+structure)" },
+    "G412": { "source": "modele", "forme": "hygieneModele", "unite": "groupes-instance-unique", "libelle": "Hygiène du modèle (familles in place + groupes à instance unique)" }
   }
 }
