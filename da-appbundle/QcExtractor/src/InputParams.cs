@@ -83,6 +83,26 @@ namespace QcExtractor
     }
 
     /// <summary>
+    /// Config EFFECTIVE G205 : nom de la design option PRINCIPALE attendue pour les axes.
+    /// Défaut extracteur = "Quadrillages" si null/vide.
+    /// </summary>
+    public class G205Config
+    {
+        [JsonProperty("designOptionNom")]
+        public string DesignOptionNom { get; set; }
+    }
+
+    /// <summary>
+    /// Config EFFECTIVE G111 : nom de la design option PRINCIPALE attendue pour les liens.
+    /// Défaut extracteur = "Liens" si null/vide.
+    /// </summary>
+    public class G111Config
+    {
+        [JsonProperty("designOptionNom")]
+        public string DesignOptionNom { get; set; }
+    }
+
+    /// <summary>
     /// Config EFFECTIVE de G314 (rattachement au niveau) : tolérance mm + catégories
     /// MEP/structure (norme maison + surcharge projet).
     /// </summary>
@@ -159,6 +179,20 @@ namespace QcExtractor
         /// </summary>
         [JsonProperty("g314")]
         public G314Config G314 { get; set; }
+
+        /// <summary>
+        /// Config G205 (axes pinnés + design option principale), résolue par le backend.
+        /// Null => défaut extracteur "Quadrillages".
+        /// </summary>
+        [JsonProperty("g205")]
+        public G205Config G205 { get; set; }
+
+        /// <summary>
+        /// Config G111 (liens dans design option principale), résolue par le backend.
+        /// Null => défaut extracteur "Liens".
+        /// </summary>
+        [JsonProperty("g111")]
+        public G111Config G111 { get; set; }
 
         public static InputParams Load(string path)
         {

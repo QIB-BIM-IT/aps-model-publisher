@@ -146,15 +146,13 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   `SharedParameterElement`+`GuidValue` ; distinction documentée : G502 = liaisons de
   paramètres de PROJET via ParameterBindings, G507 = définitions de paramètres PARTAGÉS
   identifiées par leur Guid de fichier partagé). API vérifiée identique 2024/2025.
-- **Lot NOMMAGE** : G404 (modèle/nommage — sous-projets UTILISATEUR via
+- **Lot NOMMAGE** : G404 uniquement (modèle/nommage — sous-projets UTILISATEUR via
   `FilteredWorksetCollector.OfKind(WorksetKind.UserWorkset)` → `Workset.Name` ; les
   sous-projets système vues/familles/normes sont exclus par `OfKind` ; « Niveaux et
   quadrillages partagés » est classé `UserWorkset` par l'API sans drapeau d'exclusion
   fiable — il reste dans la liste relevée et s'exempte via `exceptions` en config,
-  jamais par un filtre de nom codé en dur), G203 (modèle/nommage — niveaux via
-  `OfClass(Level)` → `Element.Name`), G205 (modèle/nommage — axes/quadrillages via
-  `OfClass(Grid)` → `Element.Name`, dédoublonné : les segments d'un quadrillage
-  multi-segments portent le même nom). API vérifiée identique 2024/2025.
+  jamais par un filtre de nom codé en dur). **G203/G205** ont été **refondus** en
+  contrôles d'état (`etatReference`) — voir section dédiée. API vérifiée 2024/2025.
   La forme `pattern` reste RÉSERVÉE à G103 (cible chaîne regex sur UNE valeur) ;
   piste d'unification future vers `nommage`, aucune action maintenant.
 - **Lot COORDONNÉES** (tous MODÈLE, hôte seul, sans lien ; API vérifiée identique
@@ -194,14 +192,14 @@ la plus puissante) :
    optionnel (absent = pas de plafond) :
 
    ```json
-   { "controles": { "G203": { "cible": { "type": "segments", "separateur": "-", "nbMin": 3, "nbMax": 5 } } } }
+   { "controles": { "G404": { "cible": { "type": "segments", "separateur": "-", "nbMin": 3, "nbMax": 5 } } } }
    ```
 
 3. **`regex`** — motif d'expression régulière (sémantique **RegExp JavaScript**, le
    scoring est backend). Réservé aux cas tordus, écrit par un développeur :
 
    ```json
-   { "controles": { "G205": { "cible": { "type": "regex", "motif": "^AX-[0-9]{2}$" } } } }
+   { "controles": { "G404": { "cible": { "type": "regex", "motif": "^TT-[A-Z0-9-]+$" } } } }
    ```
 
 Options communes aux trois sous-formes :
@@ -553,6 +551,56 @@ Pour chaque `GroupType`, si `gt.Groups.Size == 1` → type placé une seule fois
 - Surcharge : `controles.G412.seuilGroupesInstanceUnique` (ou `seuil` / `cible`).
 - Optionnel : `seuilFamillesInPlace`, `seuilTypesGroupes`.
 - Listes plafonnées à 100.
+
+## Forme « etatReference » — G203 / G205 / G111 (pinné + design option)
+
+Refonte des contrôles d'éléments de référence. Voir
+`da-appbundle/QcExtractor/spike/reference-state/API_VERIFIED.md`.
+
+### Changement de nature G203 / G205
+
+| Code | Ancien | Nouveau |
+|------|--------|---------|
+| G203 | Nommage des niveaux | **État** : tous les niveaux pinnés |
+| G205 | Nommage des axes | **État** : axes pinnés **et** dans l'option principale nommée |
+
+Les niveaux/axes viennent du copie-contrôle : leurs noms sont hérités du maître, la
+convention de nommage **ne s'applique pas**. On **relève toujours** la liste complète
+avec les **noms** dans `valeur_json` (Power BI + identification des fautifs), mais le
+**verdict** porte uniquement sur l'état.
+
+### G203 — Niveaux pinnés
+
+- Collecte : `OfClass(Level)`.
+- Règle : `Element.Pinned == true`. Pas de vérif design option (impossible en Revit).
+- `valeur_num` = nb fautifs (non pinnés). Tolérance zéro.
+- Vacuité (0 niveau) : `vacuite=true`, statut NULL.
+
+### G205 — Axes pinnés + design option principale
+
+- Collecte : `OfClass(Grid)` (chaque instance, pas de Distinct).
+- Règle : pinné **ET** `DesignOption != null`, `IsPrimary == true`, nom == attendu.
+- Défaut nom d'option : `"Quadrillages"` ; config :
+  `controles.G205.designOptionNom`.
+- **Normalisation** : `DesignOption.Name` peut contenir le suffixe ` <primary>` —
+  retiré avant comparaison (voir API_VERIFIED).
+- Raisons fautives : `non pinne` / `dans main model` / `option secondaire` /
+  `mauvaise option`.
+- Vacuité (0 axe, ex. M_PR) : statut NULL.
+
+### G111 — Liens dans la design option principale (nouveau)
+
+Code **G111** (section 1 Fichier / références externes). Collecte
+`RevitLinkInstance` ; nom via `Element.Name` **sans** charger le lien.
+Règle : option primaire nommée uniquement (**pas** d'exigence pinné).
+Défaut `"Liens"` ; config `controles.G111.designOptionNom`. Vacuité → NULL.
+
+### Scoring commun `etatReference`
+
+- `conforme` si `valeur_num == 0` (aucun fautif).
+- `non_conforme` si ≥ 1 fautif.
+- `vacuite` → statut NULL.
+- Fautifs plafonnés à 100 ; liste complète des éléments (avec noms) toujours présente.
 
 ## Intégrité des données (ISO 19650)
 

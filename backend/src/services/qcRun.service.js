@@ -232,6 +232,8 @@ class QcRunService {
       let g508 = null;
       let g210 = null;
       let g314 = null;
+      let g205 = null;
+      let g111 = null;
       try {
         const qcScoring = require('./qcScoring.service');
         const projectConfig = await qcScoring.loadProjectConfig(resolved.projectGuid);
@@ -239,8 +241,10 @@ class QcRunService {
         g508 = qcScoring.resolveG508Config(projectConfig.controles);
         g210 = qcScoring.resolveG210Config(projectConfig.controles);
         g314 = qcScoring.resolveG314Config(projectConfig.controles);
+        g205 = qcScoring.resolveG205Config(projectConfig.controles);
+        g111 = qcScoring.resolveG111Config(projectConfig.controles);
       } catch (e) {
-        logger.warn(`[QC] Résolution config UNIFORMAT/G508/G210/G314 échouée (non bloquant): ${e.message}`);
+        logger.warn(`[QC] Résolution config UNIFORMAT/G508/G210/G314/G205/G111 échouée (non bloquant): ${e.message}`);
       }
 
       const workitemId = await qcDa.submitWorkitem({
@@ -255,6 +259,8 @@ class QcRunService {
           ...(g508 ? { g508 } : {}),
           ...(g210 ? { g210 } : {}),
           ...(g314 ? { g314 } : {}),
+          ...(g205 ? { g205 } : {}),
+          ...(g111 ? { g111 } : {}),
         },
         resultUrl,
         threeLeggedToken: accessToken,

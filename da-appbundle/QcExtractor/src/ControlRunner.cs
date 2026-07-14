@@ -26,10 +26,13 @@ namespace QcExtractor
                 new Extractors.G406PhaseNamesExtractor(),
                 new Extractors.G407PhaseOrderExtractor(),
                 new Extractors.G507SharedParametersExtractor(),
-                // Lot NOMMAGE — listes de noms validées par le scoreur backend 'nommage'
+                // Lot NOMMAGE — sous-projets uniquement (G203/G205 refondus en état)
                 new Extractors.G404WorksetNamesExtractor(),
-                new Extractors.G203LevelNamesExtractor(),
-                new Extractors.G205GridNamesExtractor(),
+                // Lot ÉTAT RÉFÉRENCE — G203 niveaux pinnés ; G205 axes pinnés + DO principale ;
+                // G111 liens dans DO principale (noms relevés pour Power BI, verdict = état).
+                new Extractors.G203PinnedLevelsExtractor(),
+                new Extractors.G205PinnedGridsExtractor(input != null ? input.G205 : null),
+                new Extractors.G111LinksDesignOptionExtractor(input != null ? input.G111 : null),
                 // Lot COORDONNÉES — hôte seul, sans lien (API vérifiée 2024/2025) :
                 // unités, infos projet, base/origine, survey point, angle au nord vrai.
                 new Extractors.G104UnitSystemExtractor(),
