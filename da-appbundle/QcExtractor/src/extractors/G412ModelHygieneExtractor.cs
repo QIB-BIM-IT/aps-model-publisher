@@ -8,15 +8,15 @@ namespace QcExtractor.Extractors
     /// <summary>
     /// G412 — hygiène du modèle (Organisation Revit). Contrôle MODÈLE, hôte seul.
     ///
-    /// Deux indicateurs dans UNE ligne :
-    ///   1) Familles in place — Family.IsInPlace (API vérifiée 2024/2025) + instances.
-    ///      Indicateur d'hygiène ; n'affecte le statut que si seuilFamillesInPlace en config.
-    ///   2) Groupes miroir — PAS de Group.Mirrored dans l'API. Méthode retenue : consensus
-    ///      FamilyInstance.Mirrored sur les membres FamilyInstance du groupe (voir
-    ///      spike/model-hygiene/API_VERIFIED.md). Groupes sans FI = indéterminés (non fautifs).
+    /// Trois indicateurs (mesures exactes, aucune heuristique) :
+    ///   1) Familles in place — Family.IsInPlace + instances (INDICATIF).
+    ///   2) Total de types de groupes (+ instances) — INDICATIF (tendance jalon).
+    ///   3) Groupes à instance unique — GroupType.Groups.Size == 1 (TOLÉRANCE ZÉRO,
+    ///      pilote le statut). Un type placé une seule fois devrait être explosé.
     ///
-    /// valeur_num = nbGroupesMiroir (indicateur à verdict strict, tolérance zéro).
-    /// Ce contrôle ne mesure PAS la purge (Manuel) — G106 « Fichier purgé » reste hors outil.
+    /// RETRAIT : groupes miroir (pas de Group.Mirrored en API ; heuristique FI retirée).
+    /// valeur_num = nbGroupesInstanceUnique. Voir spike/model-hygiene/API_VERIFIED.md.
+    /// Purge = Manuel hors outil (pas G106).
     /// </summary>
     public class G412ModelHygieneExtractor : IControlExtractor
     {
@@ -26,12 +26,12 @@ namespace QcExtractor.Extractors
         public ControlOutcome Extract(Document doc)
         {
             var inPlace = CollectInPlaceFamilies(doc);
-            var mirror = CollectMirroredGroups(doc);
+            var groupes = CollectGroupStats(doc);
 
             return new ControlOutcome
             {
                 ControlCode = ControlCode,
-                ValeurNum = mirror.NbMiroir,
+                ValeurNum = groupes.NbInstanceUnique,
                 ValeurJson = new
                 {
                     famillesInPlace = new
@@ -41,19 +41,17 @@ namespace QcExtractor.Extractors
                         liste = inPlace.Liste.Take(MaxListe).ToList(),
                         listeTronquee = inPlace.Liste.Count > MaxListe,
                     },
-                    groupesMiroir = new
+                    groupes = new
                     {
-                        nbGroupesMiroir = mirror.NbMiroir,
-                        liste = mirror.ListeMiroir.Take(MaxListe).ToList(),
-                        listeTronquee = mirror.ListeMiroir.Count > MaxListe,
-                        nbIndetermines = mirror.NbIndetermines,
-                        indetermines = mirror.ListeIndetermines.Take(MaxListe).ToList(),
-                        methode = "FamilyInstance.Mirrored consensus sur membres FI",
-                        noteApi = "Group/GroupType n'exposent pas de propriété Mirrored (2024/2025). "
-                            + "Détection via consensus FamilyInstance.Mirrored des membres. "
-                            + "Groupes sans FamilyInstance = indéterminés (non comptés comme miroir).",
+                        nbTypesGroupes = groupes.NbTypes,
+                        nbInstancesGroupesTotal = groupes.NbInstancesTotal,
+                        nbGroupesInstanceUnique = groupes.NbInstanceUnique,
+                        listeInstanceUnique = groupes.ListeUnique.Take(MaxListe).ToList(),
+                        listeTronquee = groupes.ListeUnique.Count > MaxListe,
                     },
-                    note = "Statut piloté par groupes miroir (tolérance 0). Familles in place = hygiène complémentaire.",
+                    note = "Statut piloté par groupes à instance unique (tolérance 0, mesure exacte GroupType.Groups.Size==1). "
+                        + "Familles in place et total de groupes = indicateurs complémentaires. "
+                        + "Indicateur groupes miroir RETIRÉ (pas d'API Group.Mirrored fiable).",
                 },
             };
         }
@@ -71,7 +69,6 @@ namespace QcExtractor.Extractors
         {
             var result = new InPlaceResult();
 
-            // Agrégation par Family.Id via les instances (IsInPlace sur Family).
             var groups = new FilteredElementCollector(doc)
                 .OfClass(typeof(FamilyInstance))
                 .Cast<FamilyInstance>()
@@ -90,7 +87,6 @@ namespace QcExtractor.Extractors
                 .GroupBy(fi => fi.Symbol.Family.Id.Value)
                 .ToList();
 
-            // Aussi les familles in place sans instance (rares mais possibles)
             var seen = new HashSet<long>(groups.Select(g => g.Key));
             foreach (Family fam in new FilteredElementCollector(doc).OfClass(typeof(Family)).Cast<Family>())
             {
@@ -119,104 +115,85 @@ namespace QcExtractor.Extractors
             return result;
         }
 
-        // -------- Groupes miroir --------
+        // -------- Groupes (types / instances / instance unique) --------
 
-        private sealed class MirrorResult
+        private sealed class GroupStats
         {
-            public int NbMiroir;
-            public int NbIndetermines;
-            public List<object> ListeMiroir = new List<object>();
-            public List<object> ListeIndetermines = new List<object>();
+            public int NbTypes;
+            public int NbInstancesTotal;
+            public int NbInstanceUnique;
+            public List<object> ListeUnique = new List<object>();
         }
 
-        private static MirrorResult CollectMirroredGroups(Document doc)
+        /// <summary>
+        /// Parcourt les GroupType (comme G411 / script pyRevit) :
+        /// - Size == 0 : type inutilisé (compté dans nbTypes, pas dans instance unique)
+        /// - Size == 1 : groupe à instance unique (défaut franc)
+        /// - Size &gt; 1 : type réutilisé (OK pour le verdict strict)
+        /// </summary>
+        private static GroupStats CollectGroupStats(Document doc)
         {
-            var result = new MirrorResult();
+            var result = new GroupStats();
 
-            foreach (Group group in new FilteredElementCollector(doc)
-                .OfClass(typeof(Group))
-                .Cast<Group>())
+            foreach (GroupType gt in new FilteredElementCollector(doc)
+                .OfClass(typeof(GroupType))
+                .Cast<GroupType>()
+                .OrderBy(t => t.Name))
             {
-                // Groupes attachés (detail attachés à un modèle) : inclus s'ils sont placés.
-                MirrorVerdict v = ClassifyGroupMirror(doc, group);
-                string nom = ResolveGroupName(group);
-                long id = group.Id.Value;
+                result.NbTypes++;
+                GroupSet set = gt.Groups;
+                int nInst = set != null ? set.Size : 0;
+                result.NbInstancesTotal += nInst;
 
-                if (v == MirrorVerdict.Miroir)
+                if (nInst != 1) continue;
+
+                Group instance = FirstGroup(set);
+                int nbMembres = 0;
+                bool pinned = false;
+                bool viewSpecific = false;
+                long idInstance = 0;
+                if (instance != null)
                 {
-                    result.NbMiroir++;
-                    result.ListeMiroir.Add(new { nomGroupe = nom, id = id });
-                }
-                else if (v == MirrorVerdict.Indetermine)
-                {
-                    result.NbIndetermines++;
-                    result.ListeIndetermines.Add(new
+                    idInstance = instance.Id.Value;
+                    try
                     {
-                        nomGroupe = nom,
-                        id = id,
-                        raison = "aucun FamilyInstance membre (Mirror non lisible sans FI)",
-                    });
+                        IList<ElementId> members = instance.GetMemberIds();
+                        nbMembres = members != null ? members.Count : 0;
+                    }
+                    catch { /* ignore */ }
+                    try { pinned = instance.Pinned; } catch { /* ignore */ }
+                    try { viewSpecific = instance.ViewSpecific; } catch { /* ignore */ }
                 }
+
+                string categorie = null;
+                try
+                {
+                    if (gt.Category != null) categorie = gt.Category.Name;
+                }
+                catch { /* ignore */ }
+
+                result.NbInstanceUnique++;
+                result.ListeUnique.Add(new
+                {
+                    nomType = gt.Name,
+                    categorie = categorie,
+                    nbMembres = nbMembres,
+                    pinned = pinned,
+                    viewSpecific = viewSpecific,
+                    idType = gt.Id.Value,
+                    idInstance = idInstance,
+                });
             }
 
             return result;
         }
 
-        private enum MirrorVerdict { NonMiroir, Miroir, Indetermine }
-
-        /// <summary>
-        /// Consensus FamilyInstance.Mirrored sur les membres FI du groupe.
-        /// - 0 FI → Indetermine (pas de Group.Mirrored API)
-        /// - tous les FI Mirrored → Miroir
-        /// - aucun FI Mirrored → NonMiroir
-        /// - mixte → NonMiroir (évite faux positifs d'une FI miroir isolée dans un groupe normal)
-        /// </summary>
-        private static MirrorVerdict ClassifyGroupMirror(Document doc, Group group)
+        private static Group FirstGroup(GroupSet set)
         {
-            IList<ElementId> memberIds;
-            try { memberIds = group.GetMemberIds(); }
-            catch { return MirrorVerdict.Indetermine; }
-            if (memberIds == null || memberIds.Count == 0)
-                return MirrorVerdict.Indetermine;
-
-            int fiCount = 0;
-            int mirroredCount = 0;
-            foreach (ElementId mid in memberIds)
-            {
-                Element el = doc.GetElement(mid);
-                FamilyInstance fi = el as FamilyInstance;
-                if (fi == null) continue;
-                fiCount++;
-                try
-                {
-                    if (fi.Mirrored) mirroredCount++;
-                }
-                catch
-                {
-                    // Certaines FI peuvent ne pas exposer Mirrored de façon fiable
-                }
-            }
-
-            if (fiCount == 0) return MirrorVerdict.Indetermine;
-            if (mirroredCount == fiCount) return MirrorVerdict.Miroir;
-            return MirrorVerdict.NonMiroir;
-        }
-
-        private static string ResolveGroupName(Group group)
-        {
-            try
-            {
-                if (group.GroupType != null && !string.IsNullOrWhiteSpace(group.GroupType.Name))
-                    return group.GroupType.Name;
-            }
-            catch { /* ignore */ }
-            try
-            {
-                if (!string.IsNullOrWhiteSpace(group.Name))
-                    return group.Name;
-            }
-            catch { /* ignore */ }
-            return "id:" + group.Id.Value;
+            if (set == null) return null;
+            foreach (Group g in set)
+                return g;
+            return null;
         }
     }
 }

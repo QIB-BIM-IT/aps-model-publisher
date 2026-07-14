@@ -341,13 +341,14 @@ class QcScoringService {
       return num >= 100 ? 'conforme' : 'non_conforme';
     }
 
-    // Lot G412 (hygieneModele) : statut piloté par les GROUPES MIROIR (tolérance zéro
-    // par défaut). valeur_num = nbGroupesMiroir. Familles in place = hygiène complémentaire :
-    // n'affectent le statut que si seuilFamillesInPlace est configuré.
+    // Lot G412 (hygieneModele) : statut piloté par les GROUPES À INSTANCE UNIQUE
+    // (tolérance zéro par défaut). valeur_num = nbGroupesInstanceUnique (GroupType.Groups.Size==1).
+    // Familles in place / total de types = indicateurs complémentaires (seuils optionnels).
+    // Indicateur groupes miroir RETIRÉ (pas d'API Group.Mirrored fiable).
     if (entry.forme === 'hygieneModele') {
       const cfg = controles?.[controlCode] || {};
-      const seuilMiroir = Number.isFinite(cfg.seuilGroupesMiroir)
-        ? Number(cfg.seuilGroupesMiroir)
+      const seuilUnique = Number.isFinite(cfg.seuilGroupesInstanceUnique)
+        ? Number(cfg.seuilGroupesInstanceUnique)
         : Number.isFinite(cfg.seuil)
           ? Number(cfg.seuil)
           : Number.isFinite(cfg.cible)
@@ -355,10 +356,16 @@ class QcScoringService {
             : 0;
       const num = outcome.valeurNum;
       if (!Number.isFinite(num)) return null;
-      if (num > seuilMiroir) return 'non_conforme';
+      if (num > seuilUnique) return 'non_conforme';
       if (Number.isFinite(cfg.seuilFamillesInPlace)) {
         const nbFam = outcome.valeurJson?.famillesInPlace?.nbFamillesInPlace;
         if (Number.isFinite(nbFam) && nbFam > Number(cfg.seuilFamillesInPlace)) {
+          return 'non_conforme';
+        }
+      }
+      if (Number.isFinite(cfg.seuilTypesGroupes)) {
+        const nbTypes = outcome.valeurJson?.groupes?.nbTypesGroupes;
+        if (Number.isFinite(nbTypes) && nbTypes > Number(cfg.seuilTypesGroupes)) {
           return 'non_conforme';
         }
       }

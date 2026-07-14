@@ -1,46 +1,36 @@
-# API vérifiée — G412 hygiène du modèle
+# API vérifiée — G412 hygiène du modèle (révision)
 
-Vérification métadonnées `RevitAPI.dll` 2024 et 2025 (spike ApiDump, lecture PURE).
+Vérification métadonnées `RevitAPI.dll` 2024 et 2025.
 
 ## Familles in place
 
 | Membre | 2024 | 2025 |
 |--------|------|------|
-| `Family.IsInPlace` (prop + `get_IsInPlace`) | présent | présent |
+| `Family.IsInPlace` | présent | présent |
 
-Comptage des instances : `FamilyInstance` dont `Symbol.Family.IsInPlace == true`,
-agrégé par `Family.Id.Value`. Familles in place sans instance aussi listées (0 instance).
+## Groupes — comptes exacts (pas de miroir)
 
-## Groupes miroir — AMBIGUÏTÉ API DOCUMENTÉE
+| Membre | 2024 | 2025 |
+|--------|------|------|
+| `GroupType.Groups` (prop) | présent | présent |
+| `GroupSet.Size` (via Groups) | utilisé comme G411 | idem |
+| `Group.GetMemberIds()` | présent | présent |
+| `Element.Pinned` | présent | présent |
+| `Element.ViewSpecific` | présent | présent |
+| `Element.Category` / `Name` | présent | présent |
 
-| Type | Propriété Mirrored / IsMirrored | 2024 | 2025 |
-|------|----------------------------------|------|------|
-| `Group` | **aucune** | — | — |
-| `GroupType` | **aucune** | — | — |
-| `FamilyInstance.Mirrored` | présent | oui | oui |
-| `Transform.HasReflection` | présent | oui | oui |
+**Critère « instance unique »** : `GroupType.Groups.Size == 1` (nombre d'INSTANCES du
+type), distinct du nombre de MEMBRES (`GetMemberIds`, info complémentaire).
 
-**Pas de propriété native « groupe miroir ».** La méthode fiable citée sur les forums
-Autodesk (placer une instance temporaire du `GroupType`, comparer les transforms des
-membres, `Transaction.RollBack`) n'est **pas** retenue ici : aucun extracteur du module
-n'ouvre de transaction ; risque headless DA (échec PlaceGroup, worksets, groupes attachés).
+## Groupes miroir — RETIRÉ
 
-### Méthode retenue (lecture seule)
-
-Consensus sur les membres `FamilyInstance` du groupe (`Group.GetMemberIds`) :
-
-- **0 FI** → indéterminé (rapporté à part, **non** compté comme miroir)
-- **tous** les FI ont `Mirrored == true` → groupe miroir
-- sinon → non miroir (un FI miroir isolé dans un groupe normal ne crée **pas** de faux positif)
-
-Limite : un groupe miroir composé uniquement de murs / courbes système (sans FI) reste
-indéterminé. Signalé dans `valeur_json.groupesMiroir.nbIndetermines`.
+`Group` / `GroupType` n'exposent **aucune** propriété Mirrored (2024=2025).
+L'heuristique `FamilyInstance.Mirrored` est retirée (indéterminés massifs, non fiable).
 
 ## Deltas 2024 / 2025
 
-Aucun sur le périmètre G412 (`IsInPlace`, `Mirrored`, absence de mirroir sur `Group`).
+Aucun sur le périmètre G412.
 
-## Code retenu : G412
+## Code : G412
 
-Pas G106 : le catalogue / doc existants associent G106 à « Fichier purgé » (Manuel).
-G412 = Organisation Revit (après G411 types de groupes inutilisés). La purge reste hors outil.
+Pas G106 (purge = Manuel). G412 = Organisation Revit.
