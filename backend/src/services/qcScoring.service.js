@@ -196,6 +196,32 @@ class QcScoringService {
     return { niveauxExclus };
   }
 
+  /**
+   * Config EFFECTIVE G205 : nom de l'option principale attendue pour les axes.
+   * Défaut maison "Quadrillages" ; surcharge projet controles.G205.designOptionNom.
+   */
+  resolveG205Config(controles) {
+    let designOptionNom = 'Quadrillages';
+    const g = controles?.G205;
+    if (g && typeof g.designOptionNom === 'string' && g.designOptionNom.trim()) {
+      designOptionNom = g.designOptionNom.trim();
+    }
+    return { designOptionNom };
+  }
+
+  /**
+   * Config EFFECTIVE G111 : nom de l'option principale attendue pour les liens.
+   * Défaut maison "Liens" ; surcharge projet controles.G111.designOptionNom.
+   */
+  resolveG111Config(controles) {
+    let designOptionNom = 'Liens';
+    const g = controles?.G111;
+    if (g && typeof g.designOptionNom === 'string' && g.designOptionNom.trim()) {
+      designOptionNom = g.designOptionNom.trim();
+    }
+    return { designOptionNom };
+  }
+
   // ======== Config G314 (rattachement au niveau) — norme + surcharge projet ========
 
   loadLevelAttachmentNorm() {
@@ -341,6 +367,16 @@ class QcScoringService {
       return num >= 100 ? 'conforme' : 'non_conforme';
     }
 
+    // Lot G203/G205/G111 (etatReference) : tolérance zéro sur nb fautifs (valeur_num).
+    // Vacuité (aucun élément) => statut NULL. Noms dans valeur_json = Power BI, pas le score.
+    if (entry.forme === 'etatReference') {
+      const j = outcome.valeurJson;
+      if (!j || j.vacuite === true) return null;
+      const num = outcome.valeurNum;
+      if (!Number.isFinite(num)) return null;
+      return num === 0 ? 'conforme' : 'non_conforme';
+    }
+
     // Lot G412 (hygieneModele) : statut piloté par les GROUPES À INSTANCE UNIQUE
     // (tolérance zéro par défaut). valeur_num = nbGroupesInstanceUnique (GroupType.Groups.Size==1).
     // Familles in place / total de types = indicateurs complémentaires (seuils optionnels).
@@ -444,10 +480,9 @@ class QcScoringService {
         }
       }
       case 'nommage': {
-        // Lot NOMMAGE (G404/G203/G205) : valide la LISTE de noms relevée contre la
-        // convention décrite en config (cible OBJET). Conforme si TOUS les noms
-        // passent. Le détail des fautifs (nomsNonConformes) est réinjecté dans
-        // valeur_json par la finalisation via evaluerNommage (option A validée).
+        // Lot NOMMAGE (G404 uniquement — G203/G205 refondus en etatReference) :
+        // valide la LISTE de noms relevée contre la convention en config (cible OBJET).
+        // Conforme si TOUS les noms passent. Détail fautifs réinjecté via evaluerNommage.
         const champ = entry.champListe || 'noms';
         const noms = Array.isArray(outcome.valeurJson?.[champ]) ? outcome.valeurJson[champ] : [];
         const { statut } = this.evaluerNommage(noms, cible, controlCode);
