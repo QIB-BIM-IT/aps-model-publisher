@@ -17,15 +17,15 @@ namespace QcExtractor
                 new Extractors.G408WarningsExtractor(),
                 new Extractors.G411UnusedGroupsExtractor(),
                 new Extractors.G502ProjectParametersExtractor(),
-                // Lot 1 (chantier 3)
-                new Extractors.G309UnassignedMepSystemsExtractor(),
-                new Extractors.G310OpenConnectorsExtractor(),
+                // Lot 1 — G309/G310 RETIRÉS du registre (jugement humain / bruit) :
+                // classes d'extracteurs supprimées ; données historiques qc conservées.
                 new Extractors.G402DesignOptionsExtractor(),
                 new Extractors.G410UnplacedViewsExtractor(),
                 // Lot 2 — G406/G407 partagent la lecture des phases via PhaseReader
                 new Extractors.G406PhaseNamesExtractor(),
                 new Extractors.G407PhaseOrderExtractor(),
-                new Extractors.G507SharedParametersExtractor(),
+                // G507 — présence de paramètres partagés (liste variable par projet, comme G508)
+                new Extractors.G507SharedParametersExtractor(input != null ? input.G507 : null),
                 // Lot NOMMAGE — sous-projets uniquement (G203/G205 refondus en état)
                 new Extractors.G404WorksetNamesExtractor(),
                 // Lot ÉTAT RÉFÉRENCE — G203 niveaux pinnés ; G205 axes pinnés + DO principale ;
