@@ -73,6 +73,26 @@ namespace QcExtractor
     }
 
     /// <summary>
+    /// G507 — une entrée de paramètre partagé attendu (présence). Structure régulière
+    /// alignée sur G508 (liste variable par projet) : champ principal = nom.
+    /// </summary>
+    public class G507ParamEntry
+    {
+        [JsonProperty("nom")]
+        public string Nom { get; set; }
+    }
+
+    /// <summary>
+    /// Config PROJET de G507 (paramètres partagés attendus), résolue par le backend
+    /// depuis qc.project_config UNIQUEMENT. Null/vide = inventaire seul, statut NULL.
+    /// </summary>
+    public class G507Config
+    {
+        [JsonProperty("parametres")]
+        public List<G507ParamEntry> Parametres { get; set; } = new List<G507ParamEntry>();
+    }
+
+    /// <summary>
     /// Config EFFECTIVE de G210 (copie-contrôle axes/niveaux) : norme maison versionnée
     /// + surcharge projet (niveauxExclus). Comparaison des noms : trim + OrdinalIgnoreCase.
     /// </summary>
@@ -165,6 +185,13 @@ namespace QcExtractor
         /// </summary>
         [JsonProperty("g508")]
         public G508Config G508 { get; set; }
+
+        /// <summary>
+        /// Config G507 (paramètres partagés attendus), résolue par le backend depuis
+        /// qc.project_config. Null si absente (inventaire seul, statut NULL).
+        /// </summary>
+        [JsonProperty("g507")]
+        public G507Config G507 { get; set; }
 
         /// <summary>
         /// Config G210 (copie-contrôle axes/niveaux), résolue par le backend (norme maison

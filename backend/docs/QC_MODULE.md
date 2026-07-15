@@ -128,24 +128,22 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   `presence` ; `pourcentage`/`liste` déclarés). Cibles EXCLUSIVEMENT depuis
   `qc.project_config.config.controles[code].cible` — sans cible : statut NULL. G408
   garde son scoring par Guid, inchangé.
-- Contrôles actuels : G408 (modèle/guid), G102 (méta/seuil, octets), G411 (modèle/comptage,
+- Contrôles actuels : G408 (modèle/guid), G102 (méta/seuil, **Mo** binaires), G411 (modèle/comptage,
   groupes inutilisés), G502 (modèle/presence, paramètres de projet — lecture des noms
   uniquement, `Definition.ParameterGroup` interdit car supprimé de l'API 2025).
 - **Lot 1** : G101 (méta/`egalite` — écart entre version PEB cible et `revitProjectVersion`
-  réelle), G103 (méta/`pattern` — nom de fichier vs regex de convention), G309
-  (modèle/comptage — Duct/Pipe/FlexDuct/FlexPipe avec `MEPSystem` null ; CableTray/Conduit
-  exclus, sans notion de système), G310 (modèle/comptage — `UnusedConnectors`, **compte brut
-  indicatif et bruyant**, aucun tri légitime/fautif dans cette tranche), G402
+  réelle), G103 (méta/`pattern` — nom de fichier vs regex de convention), G402
   (modèle/comptage — variantes présentes, jugement de superfluité humain), G410
   (modèle/comptage — vues `NotPlaced` hors gabarits, liste plafonnée à 200 noms).
+  **G309 / G310 RETIRÉS** du parc actif (voir section « Retraits »).
   API vérifiée identique 2024/2025 pour toutes ces lectures.
 - **Lot 2** : G406 (modèle/presence — noms de phases, liste ORDONNÉE via `Document.Phases`),
   G407 (modèle/**`sequence`** — même lecture que G406 partagée par `PhaseReader`, une seule
   traversée ; règle : la cible doit être une sous-séquence ordonnée de la liste réelle,
-  éléments intercalés tolérés, ordre relatif exigé), G507 (modèle/presence —
-  `SharedParameterElement`+`GuidValue` ; distinction documentée : G502 = liaisons de
-  paramètres de PROJET via ParameterBindings, G507 = définitions de paramètres PARTAGÉS
-  identifiées par leur Guid de fichier partagé). API vérifiée identique 2024/2025.
+  éléments intercalés tolérés, ordre relatif exigé), G507 (modèle/**`presenceProjet`** —
+  paramètres partagés attendus, **liste variable par projet** comme G508 ; inventaire
+  `SharedParameterElement`+`GuidValue` toujours relevé ; distinction G502 = ParameterBindings).
+  API vérifiée identique 2024/2025.
 - **Lot NOMMAGE** : G404 uniquement (modèle/nommage — sous-projets UTILISATEUR via
   `FilteredWorksetCollector.OfKind(WorksetKind.UserWorkset)` → `Workset.Name` ; les
   sous-projets système vues/familles/normes sont exclus par `OfKind` ; « Niveaux et
@@ -601,6 +599,38 @@ Défaut `"Liens"` ; config `controles.G111.designOptionNom`. Vacuité → NULL.
 - `non_conforme` si ≥ 1 fautif.
 - `vacuite` → statut NULL.
 - Fautifs plafonnés à 100 ; liste complète des éléments (avec noms) toujours présente.
+
+## G102 — taille fichier en Mo (méta)
+
+`valeur_num` = taille en **mégaoctets binaires** (`storageSize / 1 048 576`), arrondi
+à 2 décimales. `valeur_json` conserve `{ octets, mo, unite: "Mo", facteur: 1048576 }`.
+La **cible** `controles.G102.cible` (forme `seuil`, sens `max`) s'exprime désormais
+**en Mo** (ex. `150`), plus en octets. Aucune config locale existante ne dépendait
+de l'ancienne unité octets (vérifié sur `qc.project_config`).
+
+## G507 — présence de paramètres partagés (liste projet, comme G508)
+
+Structure alignée sur G508 :
+
+```json
+{ "controles": { "G507": { "parametres": [ { "nom": "Tt_TXT_Exemple" } ] } } }
+```
+
+- **Sans liste** : inventaire de tous les `SharedParameterElement` (`parametresPartages` /
+  `detail`), `aucunParametre=true`, **statut NULL**.
+- **Avec liste** : rapport `parametres[]` `{nom, present, guid}` ; conforme si tous
+  `present` ; `valeur_num` = nb absents. Forme scoreur `presenceProjet`.
+
+## Retraits G309 / G310 (parc actif)
+
+| Code | Raison du retrait |
+|------|-------------------|
+| G309 | Juger si le système assigné est le **bon** exige un jugement humain |
+| G310 | Compte brut de connecteurs ouverts trop bruyant, sans valeur de verdict |
+
+Retirés du **registre** `ControlRunner`, du **catalogue**, et de la doc active.
+Classes d'extracteurs **supprimées** du bundle (propre). **Aucune** migration, **aucune**
+suppression de lignes historiques `qc.control_results` (réversible côté données).
 
 ## Intégrité des données (ISO 19650)
 

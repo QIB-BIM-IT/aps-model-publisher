@@ -39,17 +39,19 @@ class QcMetaControlsService {
       logger.warn(`[QC][Meta] G101 en échec d'extraction: ${e.message}`);
     }
 
-    // G102 — taille du fichier (storageSize de la version DM)
+    // G102 — taille du fichier en MÉGAOCTETS binaires (1 Mo = 1 048 576 octets).
+    // Octets bruts conservés dans valeur_json pour audit ; valeur_num + cible = Mo.
     try {
       const octets = meta?.storageSize;
       if (!Number.isFinite(octets)) {
         throw new Error('storageSize absent de la métadonnée DM capturée au lancement du run');
       }
+      const mo = Math.round((octets / 1048576) * 100) / 100;
       outcomes.push({
         controlCode: 'G102',
         etatExtraction: 'extrait',
-        valeurNum: octets,
-        valeurJson: { octets, mo: Math.round((octets / 1048576) * 10) / 10 },
+        valeurNum: mo,
+        valeurJson: { octets, mo, unite: 'Mo', facteur: 1048576 },
       });
     } catch (e) {
       outcomes.push({ controlCode: 'G102', etatExtraction: 'echec', erreur: e.message });

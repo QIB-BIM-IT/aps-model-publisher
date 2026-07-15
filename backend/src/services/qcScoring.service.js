@@ -158,6 +158,21 @@ class QcScoringService {
     return { parametres, categoriesDesignDefaut };
   }
 
+  /**
+   * Config EFFECTIVE G507 (paramètres partagés attendus) — PROJET uniquement, comme G508.
+   * Structure : controles.G507.parametres = [{ nom }]. Retourne null si liste absente/vide
+   * (inventaire seul, statut NULL).
+   */
+  resolveG507Config(controles) {
+    const g = controles?.G507;
+    if (!g || !Array.isArray(g.parametres) || g.parametres.length === 0) return null;
+    const parametres = g.parametres
+      .filter((p) => p && typeof p.nom === 'string' && p.nom.trim())
+      .map((p) => ({ nom: p.nom.trim() }));
+    if (parametres.length === 0) return null;
+    return { parametres };
+  }
+
   // ======== Config G210 (copie-contrôle) — norme maison + surcharge projet ========
 
   /**
@@ -350,6 +365,14 @@ class QcScoringService {
       const j = outcome.valeurJson;
       if (!j || j.aucunParametre || !Array.isArray(j.parametres) || j.parametres.length === 0) return null;
       return j.parametres.every((p) => p && p.conforme === true) ? 'conforme' : 'non_conforme';
+    }
+
+    // Lot G507 (presenceProjet) : liste variable par projet (comme G508.parametres).
+    // conforme si CHAQUE attendu est present===true ; aucunParametre => statut NULL.
+    if (entry.forme === 'presenceProjet') {
+      const j = outcome.valeurJson;
+      if (!j || j.aucunParametre || !Array.isArray(j.parametres) || j.parametres.length === 0) return null;
+      return j.parametres.every((p) => p && p.present === true) ? 'conforme' : 'non_conforme';
     }
 
     // Lot G210 (copieControle) : norme maison STRICTE 100 % — pas de cible requise.

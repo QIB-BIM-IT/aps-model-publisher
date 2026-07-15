@@ -230,6 +230,7 @@ class QcRunService {
       // G504/G508/G210/G314 : configs EFFECTIVES résolues ICI et passées à l'addin.
       let uniformat = null;
       let g508 = null;
+      let g507 = null;
       let g210 = null;
       let g314 = null;
       let g205 = null;
@@ -239,12 +240,13 @@ class QcRunService {
         const projectConfig = await qcScoring.loadProjectConfig(resolved.projectGuid);
         uniformat = qcScoring.resolveUniformatConfig(projectConfig.controles);
         g508 = qcScoring.resolveG508Config(projectConfig.controles);
+        g507 = qcScoring.resolveG507Config(projectConfig.controles);
         g210 = qcScoring.resolveG210Config(projectConfig.controles);
         g314 = qcScoring.resolveG314Config(projectConfig.controles);
         g205 = qcScoring.resolveG205Config(projectConfig.controles);
         g111 = qcScoring.resolveG111Config(projectConfig.controles);
       } catch (e) {
-        logger.warn(`[QC] Résolution config UNIFORMAT/G508/G210/G314/G205/G111 échouée (non bloquant): ${e.message}`);
+        logger.warn(`[QC] Résolution config UNIFORMAT/G508/G507/G210/G314/G205/G111 échouée (non bloquant): ${e.message}`);
       }
 
       const workitemId = await qcDa.submitWorkitem({
@@ -257,6 +259,7 @@ class QcRunService {
           ...(simulerEchec ? { simulerEchec } : {}),
           ...(uniformat ? { uniformat } : {}),
           ...(g508 ? { g508 } : {}),
+          ...(g507 ? { g507 } : {}),
           ...(g210 ? { g210 } : {}),
           ...(g314 ? { g314 } : {}),
           ...(g205 ? { g205 } : {}),
