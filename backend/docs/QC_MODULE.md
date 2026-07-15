@@ -4,6 +4,16 @@ Module **strictement additif** : tout vit dans le schéma PostgreSQL `qc`, gér�
 migrations umzug réversibles (`qc.migrations`). Le schéma `public` reste géré par
 `sequelize.sync()` comme aujourd'hui et n'est jamais modifié.
 
+## Catalogue — bloc `descriptionCible` (préparation formulaire)
+
+Chaque entrée de `backend/config/qc-controls-catalog.json` porte un bloc additif
+**`descriptionCible`** (widget, libellés, aide, défauts, validation) destiné à un
+futur formulaire web adaptatif. Ce bloc **ne pilote pas** l'extraction ni le scoring ;
+seuls les champs historiques (`source`, `forme`, `champListe`, `libelle`, …) restent
+la source de vérité runtime. G103 est marqué `aTraiterSeparement: true` (widget
+nommage à concevoir séparément). Voir les champs `formatScoreur` / `ecartSignale`
+dans le catalogue pour le lien avec `qc.project_config`.
+
 ## Architecture
 
 ```

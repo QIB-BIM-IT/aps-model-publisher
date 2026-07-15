@@ -2,30 +2,662 @@
   "version": 1,
   "description": "Catalogue des contrôles QC : code → source d'extraction (meta = backend depuis la métadonnée Data Management, sans workitem ; modele = addin DA4R via l'API Revit) et forme du scoreur. Les cibles viennent EXCLUSIVEMENT de qc.project_config.config.controles[code].cible — aucun seuil maison codé en dur pour les contrôles non-G408 ; sans cible : extraction réussie, statut NULL. Formes disponibles : guid (cas particulier G408, grille de criticité), seuil, comptage, presence, pourcentage, liste (les deux dernières déclarées pour les lots futurs), pattern (regex brute sur valeur_text — RÉSERVÉ à G103, piste d'unification future vers nommage), nommage (lot NOMMAGE : valide une LISTE de noms contre une convention en config, cible OBJET {type: prefixe|segments|regex, ...} + options ignoreCasse/exceptions, sous-forme regex en sémantique RegExp JavaScript — voir QC_MODULE.md), coordonnees (lot COORDONNÉES : compare les 3 composantes d'un point relevé — localisé par champObjet — à une cible {ns, eo, elev} avec tolérance en distance globale et/ou par axe, en identifiant l'axe fautif), angle (lot COORDONNÉES : compare valeur_num à une cible {angle, tolerance} en degrés, avec gestion du wrap-around — 359° et 1° sont distants de 2°), couverture (lot G504 : porte de livraison à 100 % sans tolérance — conforme SEULEMENT si valeur_num == 100 (couverture de codification UNIFORMAT complète) ; la cible en config ne fait qu'activer la porte, le paramètre et la liste blanche de catégories viennent de la norme versionnée qc-uniformat-norm.json surchargeable par projet, et l'addin détecte la nature type/instance du paramètre — voir QC_MODULE.md), remplissage (lot G508 : taux de remplissage des paramètres d'exploitation 7D — la LISTE des paramètres à vérifier est VARIABLE PAR PROJET dans qc.project_config.config.controles.G508.parametres [{nom, categories, seuil}], granulaire par paramètre ; conforme SEULEMENT si CHAQUE paramètre atteint son seuil ; sans liste : statut NULL — voir QC_MODULE.md), copieControle (lot G210 : présence de copie-contrôle sur TOUS les axes et TOUS les niveaux soumis à audit — norme maison 100 %, pas de cible requise ; niveaux techniques exclus via qc-copy-monitor-norm.json surchargeable par projet ; mesure la PRÉSENCE de monitoring, PAS la fraîcheur — voir QC_MODULE.md). G314 (rattachement au niveau) réutilise la forme pourcentage (sens min) : conforme si % de conformité parmi les évaluables >= cible/seuil en config ; SANS cible : statut NULL (contrôle bruyant/indicatif) — voir QC_MODULE.md).",
   "controles": {
-    "G408": { "source": "modele", "forme": "guid", "libelle": "Avertissements du modèle" },
-    "G101": { "source": "meta", "forme": "egalite", "unite": "version", "libelle": "Version du logiciel (écart PEB vs réel)" },
-    "G102": { "source": "meta", "forme": "seuil", "sens": "max", "unite": "Mo", "libelle": "Taille du fichier en Mo (storageSize DM / 1048576)" },
-    "G103": { "source": "meta", "forme": "pattern", "libelle": "Nom du fichier (convention de nommage)" },
-    "G402": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "variantes", "libelle": "Variantes présentes (indicatif, jugement humain)" },
-    "G406": { "source": "modele", "forme": "presence", "champListe": "phases", "libelle": "Phases du document (noms, liste ordonnée)" },
-    "G407": { "source": "modele", "forme": "sequence", "champListe": "phases", "libelle": "Phases du document (ordre vs séquence de référence)" },
-    "G410": { "source": "modele", "forme": "comptage", "sens": "max", "unite": "vues", "libelle": "Vues non placées sur feuille" },
-    "G411": { "source": "modele", "forme": "comptage", "sens": "max", "libelle": "Types de groupes inutilisés" },
-    "G502": { "source": "modele", "forme": "presence", "champListe": "parametres", "libelle": "Paramètres de projet présents" },
-    "G507": { "source": "modele", "forme": "presenceProjet", "unite": "absents", "libelle": "Paramètres partagés attendus (liste variable par projet)" },
-    "G404": { "source": "modele", "forme": "nommage", "champListe": "sousProjets", "libelle": "Sous-projets utilisateur (préfixes autorisés, liste maison listePrefixes)" },
-    "G203": { "source": "modele", "forme": "etatReference", "unite": "fautifs", "libelle": "Niveaux pinnés (état, pas nommage)" },
-    "G205": { "source": "modele", "forme": "etatReference", "unite": "fautifs", "libelle": "Axes pinnés et dans la design option principale" },
-    "G111": { "source": "modele", "forme": "etatReference", "unite": "fautifs", "libelle": "Liens dans la design option principale" },
-    "G104": { "source": "modele", "forme": "egalite", "unite": "systeme-unites", "libelle": "Système d'unités (longueur/aire/volume)" },
-    "G105": { "source": "modele", "forme": "presence", "champListe": "champsRenseignes", "libelle": "Informations projet (champs ProjectInfo renseignés)" },
-    "G200": { "source": "modele", "forme": "seuil", "sens": "max", "unite": "metres", "libelle": "Écart point de base projet / origine interne" },
-    "G201": { "source": "modele", "forme": "coordonnees", "champObjet": "surveyPoint", "unite": "metres", "libelle": "Géoréférencement (survey point vs PEB)" },
-    "G202": { "source": "modele", "forme": "angle", "unite": "degres", "libelle": "Angle au nord vrai (vs PEB)" },
-    "G504": { "source": "modele", "forme": "couverture", "unite": "pourcentage", "libelle": "Couverture de codification UNIFORMAT (types/instances de design avec code)" },
-    "G508": { "source": "modele", "forme": "remplissage", "unite": "pourcentage", "libelle": "Taux de remplissage des paramètres d'exploitation (7D, liste par projet)" },
-    "G210": { "source": "modele", "forme": "copieControle", "unite": "pourcentage", "libelle": "Copie-contrôle des axes et niveaux (présence de monitoring)" },
-    "G314": { "source": "modele", "forme": "pourcentage", "sens": "min", "unite": "pourcentage", "libelle": "Rattachement au niveau (plages d'étages + paramètres natifs, MEP+structure)" },
-    "G412": { "source": "modele", "forme": "hygieneModele", "unite": "groupes-instance-unique", "libelle": "Hygiène du modèle (familles in place + groupes à instance unique)" }
+    "G408": {
+      "source": "modele",
+      "forme": "guid",
+      "libelle": "Avertissements du modèle",
+      "descriptionCible": {
+        "typeWidget": "regleMaisonLectureSeule",
+        "libelle": "Avertissements du modèle",
+        "aide": "Règle = grille de criticité maison (qc-criticality-grid.json). Une surcharge avancée de criticité/seuils est possible via qc.project_config.config.criticite.",
+        "regle": "grille de criticité maison ; surcharge criticite/seuils possible (avancé)",
+        "defaut": "",
+        "validation": [],
+        "cleConfig": "criticite (racine config projet, pas controles.G408)",
+        "formatScoreur": "scoreWarnings + grille ; override = config.criticite"
+      }
+    },
+    "G101": {
+      "source": "meta",
+      "forme": "egalite",
+      "unite": "version",
+      "libelle": "Version du logiciel (écart PEB vs réel)",
+      "descriptionCible": {
+        "typeWidget": "menu",
+        "libelle": "Version Revit attendue (PEB)",
+        "aide": "Choisir la version Revit prévue au PEB. La liste est extensible dans le catalogue (ex. ajouter 2028).",
+        "choix": [
+          "2023",
+          "2024",
+          "2025",
+          "2026",
+          "2027"
+        ],
+        "defaut": "",
+        "validation": [
+          "valeurDansListe"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "chaîne égale à controles.G101.cible (forme egalite)"
+      }
+    },
+    "G102": {
+      "source": "meta",
+      "forme": "seuil",
+      "sens": "max",
+      "unite": "Mo",
+      "libelle": "Taille du fichier en Mo (storageSize DM / 1048576)",
+      "descriptionCible": {
+        "typeWidget": "valeurNumerique",
+        "libelle": "Seuil de taille du fichier",
+        "aide": "Taille maximale acceptée du fichier (mégaoctets binaires, 1 Mo = 1 048 576 octets). Laisser vide pour relever sans verdict.",
+        "unite": "Mo",
+        "defaut": 400,
+        "validation": [
+          "nombrePositif"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "nombre — controles.G102.cible (forme seuil, sens max)"
+      }
+    },
+    "G103": {
+      "source": "meta",
+      "forme": "pattern",
+      "libelle": "Nom du fichier (convention de nommage)",
+      "descriptionCible": {
+        "aTraiterSeparement": true,
+        "note": "Widget nommage complexe (sous-formes prefixe / segments / regex sur valeur_text). Conception dédiée hors de ce lot."
+      }
+    },
+    "G402": {
+      "source": "modele",
+      "forme": "comptage",
+      "sens": "max",
+      "unite": "variantes",
+      "libelle": "Variantes présentes (indicatif, jugement humain)",
+      "descriptionCible": {
+        "typeWidget": "indicatif",
+        "libelle": "Variantes présentes",
+        "aide": "Contrôle indicatif : relève le nombre de variantes. Pas de configuration de cible ; le jugement de superfluité reste humain.",
+        "mention": "contrôle indicatif, pas de configuration",
+        "defaut": "",
+        "validation": [],
+        "cleConfig": null,
+        "formatScoreur": "forme comptage — sans cible en pratique (indicatif)"
+      }
+    },
+    "G406": {
+      "source": "modele",
+      "forme": "presence",
+      "champListe": "phases",
+      "libelle": "Phases du document (noms, liste ordonnée)",
+      "descriptionCible": {
+        "typeWidget": "liste",
+        "libelle": "Noms de phases attendus",
+        "aide": "Lister les noms de phases qui doivent être présents. Français et anglais sont acceptés (ex. Existant / Existing, Nouvelle construction / New Construction) — saisir les libellés tels qu’ils apparaissent dans le modèle.",
+        "element": "un nom de phase",
+        "defaut": [
+          "Existant",
+          "Nouvelle construction"
+        ],
+        "validation": [
+          "nonVide"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "tableau de chaînes — controles.G406.cible (forme presence, champListe phases) ; comparaison insensible à la casse"
+      }
+    },
+    "G407": {
+      "source": "modele",
+      "forme": "sequence",
+      "champListe": "phases",
+      "libelle": "Phases du document (ordre vs séquence de référence)",
+      "descriptionCible": {
+        "typeWidget": "listeOrdonnee",
+        "libelle": "Séquence de phases de référence",
+        "aide": "Ordre attendu des phases (glisser-déposer). La cible doit être une sous-séquence ordonnée de la liste réelle (éléments intercalés tolérés). Français et anglais acceptés selon les libellés du modèle.",
+        "element": "un nom de phase",
+        "defaut": [
+          "Existant",
+          "Nouvelle construction"
+        ],
+        "validation": [
+          "nonVide"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "tableau ordonné — controles.G407.cible (forme sequence)"
+      }
+    },
+    "G410": {
+      "source": "modele",
+      "forme": "comptage",
+      "sens": "max",
+      "unite": "vues",
+      "libelle": "Vues non placées sur feuille",
+      "descriptionCible": {
+        "typeWidget": "valeurNumerique",
+        "libelle": "Seuil de vues non placées",
+        "aide": "Nombre maximal de vues non placées sur feuille accepté. Laisser vide pour relever sans verdict.",
+        "unite": "vues",
+        "defaut": "",
+        "validation": [
+          "nombrePositif"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "nombre — controles.G410.cible (forme comptage, sens max)",
+        "ecartSignale": "Non assigné dans le cahier des widgets ; affecté à valeurNumerique car forme comptage/seuil max."
+      }
+    },
+    "G411": {
+      "source": "modele",
+      "forme": "comptage",
+      "sens": "max",
+      "libelle": "Types de groupes inutilisés",
+      "descriptionCible": {
+        "typeWidget": "valeurNumerique",
+        "libelle": "Seuil de types de groupes inutilisés",
+        "aide": "Nombre maximal de types de groupes inutilisés accepté. Laisser vide pour relever sans verdict.",
+        "unite": "types",
+        "defaut": "",
+        "validation": [
+          "nombrePositif"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "nombre — controles.G411.cible (forme comptage, sens max)",
+        "ecartSignale": "Non assigné dans le cahier des widgets ; affecté à valeurNumerique car forme comptage/seuil max."
+      }
+    },
+    "G502": {
+      "source": "modele",
+      "forme": "presence",
+      "champListe": "parametres",
+      "libelle": "Paramètres de projet présents",
+      "descriptionCible": {
+        "typeWidget": "liste",
+        "libelle": "Paramètres de projet attendus",
+        "aide": "Lister les noms de paramètres de projet (ParameterBindings) qui doivent être présents. Liste variable par projet ; laisser vide pour relever sans verdict.",
+        "element": "un paramètre",
+        "defaut": [],
+        "validation": [],
+        "cleConfig": "cible",
+        "formatScoreur": "tableau de noms — controles.G502.cible (forme presence, champListe parametres)"
+      }
+    },
+    "G507": {
+      "source": "modele",
+      "forme": "presenceProjet",
+      "unite": "absents",
+      "libelle": "Paramètres partagés attendus (liste variable par projet)",
+      "descriptionCible": {
+        "typeWidget": "liste",
+        "libelle": "Paramètres partagés attendus",
+        "aide": "Lister les noms de paramètres partagés qui doivent être intégrés au modèle. Liste variable par projet ; laisser vide pour inventaire sans verdict (statut NULL).",
+        "element": "un paramètre partagé",
+        "defaut": [],
+        "validation": [],
+        "cleConfig": "parametres",
+        "formatScoreur": "controles.G507.parametres = [{ nom }] (pas cible) — forme presenceProjet",
+        "mappingFormulaire": "chaque ligne texte → { \"nom\": \"<saisie>\" }"
+      }
+    },
+    "G404": {
+      "source": "modele",
+      "forme": "nommage",
+      "champListe": "sousProjets",
+      "libelle": "Sous-projets utilisateur (préfixes autorisés, liste maison listePrefixes)",
+      "descriptionCible": {
+        "typeWidget": "listePrefixes",
+        "libelle": "Préfixes de sous-projets autorisés",
+        "aide": "Deux listes éditables : (1) préfixes autorisés — un sous-projet est conforme s’il commence par au moins un préfixe ; (2) exceptions — noms exacts exemptés (sous-projets système Revit). Sans saisie projet, la norme maison s’applique.",
+        "prefixes": {
+          "libelle": "Préfixes autorisés",
+          "defaut": [
+            "ZG_",
+            "ZL_",
+            "S_",
+            "CR_",
+            "EL_",
+            "GM_",
+            "PI_",
+            "PL_",
+            "VE_",
+            "PR_",
+            "TP_"
+          ]
+        },
+        "exceptions": {
+          "libelle": "Exceptions (noms exacts)",
+          "defaut": [
+            "Sous-projet1",
+            "Sous-projet 1",
+            "Niveaux et quadrillages partagés",
+            "Vues, niveaux et grilles partagés"
+          ]
+        },
+        "defaut": {
+          "prefixes": [
+            "ZG_",
+            "ZL_",
+            "S_",
+            "CR_",
+            "EL_",
+            "GM_",
+            "PI_",
+            "PL_",
+            "VE_",
+            "PR_",
+            "TP_"
+          ],
+          "exceptions": [
+            "Sous-projet1",
+            "Sous-projet 1",
+            "Niveaux et quadrillages partagés",
+            "Vues, niveaux et grilles partagés"
+          ]
+        },
+        "validation": [
+          "nonVide"
+        ],
+        "cleConfig": "prefixes|exceptions|ignoreCasse",
+        "formatScoreur": "controles.G404.{prefixes,exceptions,ignoreCasse} ou cible complète — resolveG404Cible → listePrefixes"
+      }
+    },
+    "G203": {
+      "source": "modele",
+      "forme": "etatReference",
+      "unite": "fautifs",
+      "libelle": "Niveaux pinnés (état, pas nommage)",
+      "descriptionCible": {
+        "typeWidget": "regleMaisonLectureSeule",
+        "libelle": "Niveaux pinnés",
+        "aide": "Règle maison : tous les niveaux doivent être pinnés (tolérance zéro). Aucun champ de base à saisir ; le contrôle score dès l’extraction.",
+        "regle": "tous pinnés (tolérance zéro)",
+        "defaut": "",
+        "validation": [],
+        "cleConfig": null,
+        "formatScoreur": "forme etatReference — pas de cible ; valeur_num = nb fautifs"
+      }
+    },
+    "G205": {
+      "source": "modele",
+      "forme": "etatReference",
+      "unite": "fautifs",
+      "libelle": "Axes pinnés et dans la design option principale",
+      "descriptionCible": {
+        "typeWidget": "texte",
+        "libelle": "Nom de la variante des axes",
+        "aide": "Nom exact de la design option principale attendue pour les axes (quadrillages). La règle « pinné + dans l’option » est fixe à 100 % (tolérance zéro).",
+        "defaut": "Quadrillages",
+        "validation": [
+          "nonVide"
+        ],
+        "cleConfig": "designOptionNom",
+        "formatScoreur": "controles.G205.designOptionNom — resolveG205Config ; pinné = règle fixe etatReference"
+      }
+    },
+    "G111": {
+      "source": "modele",
+      "forme": "etatReference",
+      "unite": "fautifs",
+      "libelle": "Liens dans la design option principale",
+      "descriptionCible": {
+        "typeWidget": "texte",
+        "libelle": "Nom de la variante des liens",
+        "aide": "Nom exact de la design option principale attendue pour les liens Revit. La règle d’état (liens dans cette option) est fixe à tolérance zéro.",
+        "defaut": "Liens",
+        "validation": [
+          "nonVide"
+        ],
+        "cleConfig": "designOptionNom",
+        "formatScoreur": "controles.G111.designOptionNom (pas cible) — resolveG111Config"
+      }
+    },
+    "G104": {
+      "source": "modele",
+      "forme": "egalite",
+      "unite": "systeme-unites",
+      "libelle": "Système d'unités (longueur/aire/volume)",
+      "descriptionCible": {
+        "typeWidget": "menu",
+        "libelle": "Système d’unités",
+        "aide": "Choisir métrique ou impérial. Le formulaire traduit vers le jeton Revit attendu par le scoreur (métrique → millimeters|squareMeters|cubicMeters ; impérial → feet|squareFeet|cubicFeet). Laisser vide pour relever sans verdict.",
+        "choix": [
+          "metrique",
+          "imperial"
+        ],
+        "defaut": "metrique",
+        "validation": [
+          "valeurDansListe"
+        ],
+        "cleConfig": "cible",
+        "traductionFormulaire": {
+          "metrique": "millimeters|squareMeters|cubicMeters",
+          "imperial": "feet|squareFeet|cubicFeet"
+        },
+        "formatScoreur": "chaîne egalite sur valeur_text (jeton longueur|aire|volume), PAS metrique/imperial brut"
+      }
+    },
+    "G105": {
+      "source": "modele",
+      "forme": "presence",
+      "champListe": "champsRenseignes",
+      "libelle": "Informations projet (champs ProjectInfo renseignés)",
+      "descriptionCible": {
+        "typeWidget": "liste",
+        "libelle": "Champs projet requis",
+        "aide": "Lister les champs ProjectInfo qui doivent être renseignés. Le scoreur compare les clés API anglaises (clientName, address, number, name, …), pas les libellés français affichés.",
+        "element": "un champ",
+        "defaut": [
+          "clientName",
+          "address",
+          "number",
+          "name"
+        ],
+        "libellesAffichage": {
+          "clientName": "Nom du client",
+          "address": "Adresse du projet",
+          "number": "Numéro de projet",
+          "name": "Nom du projet"
+        },
+        "validation": [
+          "nonVide"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "tableau de clés API ProjectInfo — controles.G105.cible (forme presence, champListe champsRenseignes)",
+        "ecartSignale": "Cahier demandait des libellés FR en défaut ; le scoreur exige les clés API (clientName, …). Défauts = clés API ; libellesAffichage pour le formulaire."
+      }
+    },
+    "G200": {
+      "source": "modele",
+      "forme": "seuil",
+      "sens": "max",
+      "unite": "metres",
+      "libelle": "Écart point de base projet / origine interne",
+      "descriptionCible": {
+        "typeWidget": "valeurNumerique",
+        "libelle": "Tolérance d’écart point de base",
+        "aide": "Écart maximal accepté (en mètres) entre le point de base projet et l’origine interne. Laisser vide pour relever sans verdict.",
+        "unite": "m",
+        "defaut": "",
+        "validation": [
+          "nombrePositif"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "nombre — controles.G200.cible (forme seuil, sens max) ; valeur_num extracteur en mètres",
+        "ecartSignale": "Cahier proposait l’unité mm ; catalogue/extracteur/scoreur utilisent des mètres. Widget en m."
+      }
+    },
+    "G201": {
+      "source": "modele",
+      "forme": "coordonnees",
+      "champObjet": "surveyPoint",
+      "unite": "metres",
+      "libelle": "Géoréférencement (survey point vs PEB)",
+      "descriptionCible": {
+        "typeWidget": "coordonnees",
+        "libelle": "Coordonnées attendues du survey point",
+        "aide": "Renseigner les coordonnées attendues du point de topographie (N/S, E/O, élévation) et les tolérances en mètres SI le projet est géoréférencé. Sinon laisser vide (contrôle optionnel, statut NULL).",
+        "sousChamps": [
+          {
+            "nom": "ns",
+            "libelle": "Nord / Sud",
+            "unite": "m"
+          },
+          {
+            "nom": "eo",
+            "libelle": "Est / Ouest",
+            "unite": "m"
+          },
+          {
+            "nom": "elev",
+            "libelle": "Élévation",
+            "unite": "m"
+          }
+        ],
+        "toleranceGlobale": {
+          "nom": "tolerance",
+          "libelle": "Tolérance globale",
+          "unite": "m"
+        },
+        "tolerancesParAxe": [
+          "toleranceNs",
+          "toleranceEo",
+          "toleranceElev"
+        ],
+        "defaut": "",
+        "validation": [
+          "numerique"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "objet { ns, eo, elev, tolerance [, toleranceNs|Eo|Elev] } — controles.G201.cible"
+      }
+    },
+    "G202": {
+      "source": "modele",
+      "forme": "angle",
+      "unite": "degres",
+      "libelle": "Angle au nord vrai (vs PEB)",
+      "descriptionCible": {
+        "typeWidget": "angle",
+        "libelle": "Angle attendu du nord projet",
+        "aide": "Angle attendu (degrés) de l’orientation du nord projet par rapport au nord vrai, plus une tolérance angulaire (wrap-around géré, ex. 359° et 1° = 2°). Laisser vide si non spécifié au PEB.",
+        "unite": "degres",
+        "champs": [
+          {
+            "nom": "angle",
+            "libelle": "Angle attendu"
+          },
+          {
+            "nom": "tolerance",
+            "libelle": "Tolérance angulaire"
+          }
+        ],
+        "defaut": "",
+        "validation": [
+          "numerique"
+        ],
+        "cleConfig": "cible",
+        "formatScoreur": "objet { angle, tolerance } — controles.G202.cible (forme angle)",
+        "ecartSignale": "Extracteur = angle nord projet ↔ nord VRAI (GetProjectPosition.Angle). Cahier dit « nord projet » : la cible PEB est bien cet angle, pas un azimut géographique absolu."
+      }
+    },
+    "G504": {
+      "source": "modele",
+      "forme": "couverture",
+      "unite": "pourcentage",
+      "libelle": "Couverture de codification UNIFORMAT (types/instances de design avec code)",
+      "descriptionCible": {
+        "typeWidget": "parametreUniformat",
+        "libelle": "Codification UNIFORMAT",
+        "aide": "Choisir le paramètre source (natif Code d’assemblage ou Tt_TXT_Code_Uniformat) pour pivoter projet par projet pendant la transition, et ajuster la liste blanche de catégories. Une cible numérique (ex. 100) active la porte de livraison 100 %. // Amélioration future : pré-remplir les catégories détectées dans le modèle.",
+        "parametreSource": {
+          "typeWidget": "menu",
+          "libelle": "Paramètre source",
+          "choix": [
+            {
+              "libelle": "Code d'assemblage (natif)",
+              "valeur": {
+                "kind": "builtin",
+                "valeur": "UNIFORMAT_CODE"
+              }
+            },
+            {
+              "libelle": "Tt_TXT_Code_Uniformat",
+              "valeur": {
+                "kind": "partage",
+                "valeur": "Tt_TXT_Code_Uniformat"
+              }
+            }
+          ],
+          "defaut": {
+            "kind": "builtin",
+            "valeur": "UNIFORMAT_CODE"
+          },
+          "cleConfig": "parametre"
+        },
+        "categories": {
+          "typeWidget": "liste",
+          "libelle": "Liste blanche de catégories",
+          "element": "une BuiltInCategory",
+          "defaut": [
+            "OST_MechanicalEquipment",
+            "OST_DuctCurves",
+            "OST_DuctFitting",
+            "OST_DuctAccessory",
+            "OST_DuctTerminal",
+            "OST_FlexDuctCurves",
+            "OST_PlumbingFixtures",
+            "OST_PipeCurves",
+            "OST_PipeFitting",
+            "OST_PipeAccessory",
+            "OST_FlexPipeCurves",
+            "OST_Sprinklers",
+            "OST_ElectricalEquipment",
+            "OST_ElectricalFixtures",
+            "OST_LightingFixtures",
+            "OST_LightingDevices",
+            "OST_CommunicationDevices",
+            "OST_DataDevices",
+            "OST_FireAlarmDevices",
+            "OST_SecurityDevices",
+            "OST_NurseCallDevices",
+            "OST_TelephoneDevices",
+            "OST_AudioVisualDevices",
+            "OST_Conduit",
+            "OST_ConduitFitting",
+            "OST_CableTray",
+            "OST_CableTrayFitting",
+            "OST_StructuralColumns",
+            "OST_StructuralFraming",
+            "OST_StructuralFoundation",
+            "OST_StructConnections",
+            "OST_StructuralStiffener",
+            "OST_StructuralTruss",
+            "OST_GenericModel",
+            "OST_SpecialityEquipment"
+          ],
+          "cleConfig": "categories"
+        },
+        "activationPorte": {
+          "typeWidget": "valeurNumerique",
+          "libelle": "Activer le verdict (porte 100 %)",
+          "aide": "Présence d’une cible active le scoring ; le seuil reste 100 % quelle que soit la valeur.",
+          "defaut": 100,
+          "cleConfig": "cible"
+        },
+        "defaut": "",
+        "validation": [],
+        "formatScoreur": "resolveUniformatConfig(parametre, categories…) + controles.G504.cible pour activer la porte couverture"
+      }
+    },
+    "G508": {
+      "source": "modele",
+      "forme": "remplissage",
+      "unite": "pourcentage",
+      "libelle": "Taux de remplissage des paramètres d'exploitation (7D, liste par projet)",
+      "descriptionCible": {
+        "typeWidget": "table",
+        "libelle": "Paramètres d’exploitation à vérifier",
+        "aide": "Lister les paramètres exigés par le client (usage 7D), avec les catégories concernées et le taux de remplissage requis (défaut 100 %). Liste variable par projet ; laisser vide pour relever sans verdict.",
+        "colonnes": [
+          {
+            "nom": "nom",
+            "type": "texte",
+            "libelle": "Nom du paramètre"
+          },
+          {
+            "nom": "categories",
+            "type": "liste",
+            "libelle": "Catégories (BuiltInCategory)"
+          },
+          {
+            "nom": "seuil",
+            "type": "nombre",
+            "libelle": "Seuil %",
+            "defaut": 100
+          }
+        ],
+        "defaut": [],
+        "validation": [],
+        "cleConfig": "parametres",
+        "formatScoreur": "controles.G508.parametres = [{ nom, categories, seuil }] — forme remplissage"
+      }
+    },
+    "G210": {
+      "source": "modele",
+      "forme": "copieControle",
+      "unite": "pourcentage",
+      "libelle": "Copie-contrôle des axes et niveaux (présence de monitoring)",
+      "descriptionCible": {
+        "typeWidget": "regleMaisonLectureSeule",
+        "libelle": "Copie-contrôle axes et niveaux",
+        "aide": "Règle maison : 100 % des axes et niveaux soumis à audit doivent être monitorés. Seule saisie courante : la liste des niveaux techniques exclus de l’audit.",
+        "regle": "100 % monitoré (présence de monitoring, pas la fraîcheur)",
+        "champEditable": {
+          "nom": "niveauxExclus",
+          "typeWidget": "liste",
+          "libelle": "Niveaux exclus de l’audit",
+          "element": "un nom de niveau",
+          "defaut": [
+            "PLAN DE LIAISON"
+          ],
+          "validation": []
+        },
+        "defaut": "",
+        "validation": [],
+        "cleConfig": "niveauxExclus",
+        "formatScoreur": "controles.G210.niveauxExclus remplace la norme qc-copy-monitor-norm.json — resolveG210Config"
+      }
+    },
+    "G314": {
+      "source": "modele",
+      "forme": "pourcentage",
+      "sens": "min",
+      "unite": "pourcentage",
+      "libelle": "Rattachement au niveau (plages d'étages + paramètres natifs, MEP+structure)",
+      "descriptionCible": {
+        "typeWidget": "indicatif",
+        "libelle": "Rattachement au niveau",
+        "aide": "Contrôle indicatif par défaut (extraction sans verdict). Un seuil optionnel avancé (pourcentage min) peut activer le scoring.",
+        "mention": "contrôle indicatif par défaut; seuil optionnel avancé",
+        "defaut": "",
+        "validation": [],
+        "cleConfig": "cible",
+        "formatScoreur": "optionnel — controles.G314.cible|seuil (forme pourcentage, sens min) ; sans cible statut NULL"
+      }
+    },
+    "G412": {
+      "source": "modele",
+      "forme": "hygieneModele",
+      "unite": "groupes-instance-unique",
+      "libelle": "Hygiène du modèle (familles in place + groupes à instance unique)",
+      "descriptionCible": {
+        "typeWidget": "regleMaisonLectureSeule",
+        "libelle": "Hygiène du modèle",
+        "aide": "Règle maison : tolérance zéro sur les groupes à instance unique. Seuils optionnels avancés pour familles in place et nombre de types de groupes.",
+        "regle": "tolérance zéro groupes à instance unique",
+        "champsAvances": [
+          {
+            "nom": "seuilGroupesInstanceUnique",
+            "typeWidget": "valeurNumerique",
+            "defaut": 0
+          },
+          {
+            "nom": "seuilFamillesInPlace",
+            "typeWidget": "valeurNumerique",
+            "defaut": ""
+          },
+          {
+            "nom": "seuilTypesGroupes",
+            "typeWidget": "valeurNumerique",
+            "defaut": ""
+          }
+        ],
+        "defaut": "",
+        "validation": [],
+        "cleConfig": "seuilGroupesInstanceUnique|seuil|cible|seuilFamillesInPlace|seuilTypesGroupes",
+        "formatScoreur": "forme hygieneModele — défaut seuil instance unique 0 ; pas de cible requise"
+      }
+    }
   }
 }
