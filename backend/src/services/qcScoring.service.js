@@ -30,6 +30,7 @@ const CATALOG_PATH = path.join(__dirname, '..', '..', 'config', 'qc-controls-cat
 const UNIFORMAT_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-uniformat-norm.json');
 const COPY_MONITOR_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-copy-monitor-norm.json');
 const LEVEL_ATTACHMENT_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-level-attachment-norm.json');
+const WORKSET_PREFIXES_NORM_PATH = path.join(__dirname, '..', '..', 'config', 'qc-workset-prefixes-norm.json');
 const LEVELS = ['critique', 'faible'];
 const DEFAULT_LEVEL = 'faible';
 
@@ -38,6 +39,7 @@ class QcScoringService {
     this._grid = null; // cache process (fichier versionné, invariant au runtime)
     this._catalog = null;
     this._uniformatNorm = null;
+    this._worksetPrefixesNorm = null;
     this._copyMonitorNorm = null;
     this._levelAttachmentNorm = null;
   }
@@ -171,6 +173,60 @@ class QcScoringService {
       .map((p) => ({ nom: p.nom.trim() }));
     if (parametres.length === 0) return null;
     return { parametres };
+  }
+
+  // ======== Config G404 (sous-projets) — norme maison préfixes + surcharge projet ========
+
+  /**
+   * Charge la norme maison G404 (préfixes + exceptions par défaut).
+   * @returns {{ prefixes: string[], exceptions: string[], ignoreCasse?: boolean }}
+   */
+  loadWorksetPrefixesNorm() {
+    if (this._worksetPrefixesNorm) return this._worksetPrefixesNorm;
+    const raw = JSON.parse(fs.readFileSync(WORKSET_PREFIXES_NORM_PATH, 'utf8'));
+    if (!raw || !Array.isArray(raw.prefixes) || raw.prefixes.length === 0) {
+      throw new Error(`Norme préfixes sous-projets invalide: ${WORKSET_PREFIXES_NORM_PATH}`);
+    }
+    this._worksetPrefixesNorm = raw;
+    return raw;
+  }
+
+  /**
+   * Cible EFFECTIVE G404 pour la forme nommage/listePrefixes.
+   * Défaut maison (qc-workset-prefixes-norm.json) ; surcharge projet :
+   *   controles.G404.prefixes | exceptions | ignoreCasse  (remplacent champ par champ)
+   *   controles.G404.cible  (objet avec type) → remplace TOUTE la cible (ex. regex projet).
+   * Même logique de surcharge que la grille de criticité / G210.
+   *
+   * @param {object|null} controles
+   * @returns {object} cible nommage
+   */
+  resolveG404Cible(controles) {
+    const g = controles?.G404;
+    if (g && g.cible && typeof g.cible === 'object' && !Array.isArray(g.cible) && g.cible.type) {
+      return g.cible;
+    }
+
+    let prefixes = [];
+    let exceptions = [];
+    let ignoreCasse = false;
+    try {
+      const norm = this.loadWorksetPrefixesNorm();
+      prefixes = norm.prefixes.map(String);
+      exceptions = Array.isArray(norm.exceptions) ? norm.exceptions.map(String) : [];
+      ignoreCasse = norm.ignoreCasse === true;
+    } catch (_) {
+      prefixes = ['ZG_', 'ZL_', 'S_', 'CR_', 'EL_', 'GM_', 'PI_', 'PL_', 'VE_', 'PR_', 'TP_'];
+      exceptions = ['Niveaux et quadrillages partagés', 'Vues, niveaux et grilles partagés', 'Sous-projet 1', 'Sous-projet1'];
+    }
+
+    if (g) {
+      if (Array.isArray(g.prefixes)) prefixes = g.prefixes.map(String);
+      if (Array.isArray(g.exceptions)) exceptions = g.exceptions.map(String);
+      if (typeof g.ignoreCasse === 'boolean') ignoreCasse = g.ignoreCasse;
+    }
+
+    return { type: 'listePrefixes', prefixes, exceptions, ignoreCasse };
   }
 
   // ======== Config G210 (copie-contrôle) — norme maison + surcharge projet ========
@@ -431,6 +487,15 @@ class QcScoringService {
       return 'conforme';
     }
 
+    // Lot G404 (nommage/listePrefixes) : norme maison toujours active (comme G210),
+    // pas de cible projet requise. Surcharge via resolveG404Cible.
+    if (entry.forme === 'nommage' && controlCode === 'G404') {
+      const champ = entry.champListe || 'noms';
+      const noms = Array.isArray(outcome.valeurJson?.[champ]) ? outcome.valeurJson[champ] : [];
+      const { statut } = this.evaluerNommage(noms, this.resolveG404Cible(controles), controlCode);
+      return statut;
+    }
+
     const cible = controles?.[controlCode]?.cible ?? controles?.[controlCode]?.seuil;
     if (cible === undefined || cible === null) return null;
 
@@ -503,7 +568,7 @@ class QcScoringService {
         }
       }
       case 'nommage': {
-        // Lot NOMMAGE (G404 uniquement — G203/G205 refondus en etatReference) :
+        // Lot NOMMAGE (autres codes que G404, qui est géré plus haut via norme maison) :
         // valide la LISTE de noms relevée contre la convention en config (cible OBJET).
         // Conforme si TOUS les noms passent. Détail fautifs réinjecté via evaluerNommage.
         const champ = entry.champListe || 'noms';
@@ -562,6 +627,7 @@ class QcScoringService {
    *   { type: 'prefixe',  valeur: 'TT-' }
    *   { type: 'segments', separateur: '-', nbMin: 3, nbMax: 5 }   (nbMax optionnel)
    *   { type: 'regex',    motif: '^AX-[0-9]{2}$' }                (RegExp JavaScript, réservé développeur)
+   *   { type: 'listePrefixes', prefixes: ['ZG_','ZL_',…] }       (conforme si AU MOINS UN préfixe)
    * Options communes : ignoreCasse (bool, défaut false — les conventions sont sensibles
    * à la casse par défaut), exceptions (noms exacts exemptés, ex. « Niveaux et
    * quadrillages partagés » pour G404).
@@ -625,6 +691,24 @@ class QcScoringService {
           return aucun;
         }
         estConforme = (nom) => re.test(nom.trim());
+        break;
+      }
+      case 'listePrefixes': {
+        if (!Array.isArray(cible.prefixes) || cible.prefixes.length === 0) {
+          logger.warn(`[QC][Scoring] Cible nommage/listePrefixes sans 'prefixes' pour ${controlCode} — statut NULL`);
+          return aucun;
+        }
+        const prefixes = cible.prefixes
+          .map((p) => norm(String(p).trim()))
+          .filter((p) => p.length > 0);
+        if (prefixes.length === 0) {
+          logger.warn(`[QC][Scoring] Cible nommage/listePrefixes prefixes vides pour ${controlCode} — statut NULL`);
+          return aucun;
+        }
+        estConforme = (nom) => {
+          const n = norm(nom.trim());
+          return prefixes.some((p) => n.startsWith(p));
+        };
         break;
       }
       default:

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "description": "Norme maison G404 — préfixes autorisés des sous-projets utilisateur (WorksetKind.UserWorkset). Un nom est conforme s'il commence par AU MOINS UN de ces préfixes (sous-forme nommage/listePrefixes). Surchargeable par qc.project_config.config.controles.G404.{prefixes, exceptions, ignoreCasse} : une liste projet remplace la liste maison (même logique que la grille de criticité / qc-copy-monitor-norm). Ajouter un préfixe = éditer ce fichier. Exceptions : sous-projets système/Revit exemptés (comparaison trim + ignoreCasse selon la cible). Note : Revit FR crée « Sous-projet 1 » (avec espace) ; « Sous-projet1 » est aussi listé pour robustesse. Le sous-projet partagé axes/niveaux a deux libellés observés selon locale/modèle : « Niveaux et quadrillages partagés » (ELEC) et « Vues, niveaux et grilles partagés » (M_PR).",
+  "prefixes": ["ZG_", "ZL_", "S_", "CR_", "EL_", "GM_", "PI_", "PL_", "VE_", "PR_", "TP_"],
+  "exceptions": [
+    "Niveaux et quadrillages partagés",
+    "Vues, niveaux et grilles partagés",
+    "Sous-projet 1",
+    "Sous-projet1"
+  ],
+  "ignoreCasse": false
+}

@@ -148,9 +148,11 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   `FilteredWorksetCollector.OfKind(WorksetKind.UserWorkset)` → `Workset.Name` ; les
   sous-projets système vues/familles/normes sont exclus par `OfKind` ; « Niveaux et
   quadrillages partagés » est classé `UserWorkset` par l'API sans drapeau d'exclusion
-  fiable — il reste dans la liste relevée et s'exempte via `exceptions` en config,
-  jamais par un filtre de nom codé en dur). **G203/G205** ont été **refondus** en
-  contrôles d'état (`etatReference`) — voir section dédiée. API vérifiée 2024/2025.
+  fiable — il reste dans la liste relevée et s'exempte via `exceptions` en config /
+  norme maison, jamais par un filtre de nom codé en dur). Scoring **`listePrefixes`**
+  via `qc-workset-prefixes-norm.json` (11 préfixes maison, surcharge projet).
+  **G203/G205** ont été **refondus** en contrôles d'état (`etatReference`) — voir
+  section dédiée. API vérifiée 2024/2025.
   La forme `pattern` reste RÉSERVÉE à G103 (cible chaîne regex sur UNE valeur) ;
   piste d'unification future vers `nommage`, aucune action maintenant.
 - **Lot COORDONNÉES** (tous MODÈLE, hôte seul, sans lien ; API vérifiée identique
@@ -168,15 +170,15 @@ reçoit une erreur explicite l'invitant à se reconnecter.
 
 Valide une **liste de noms** relevée par l'extracteur (localisée par `champListe` du
 catalogue) contre une convention décrite dans
-`qc.project_config.config.controles[<code>].cible`. Chaque nom est marqué conforme ou
-non : le contrôle est `conforme` si TOUS les noms passent, `non_conforme` si au moins
-un échoue, et `valeur_json.nommage.nomsNonConformes` liste les noms à corriger.
-Sans cible : extraction réussie, `statut` NULL (comme partout). Liste vide (ou tous
+`qc.project_config.config.controles[<code>].cible` (ou, pour **G404**, la norme maison
+versionnée — voir ci-dessous). Chaque nom est marqué conforme ou non : le contrôle
+est `conforme` si TOUS les noms passent, `non_conforme` si au moins un échoue, et
+`valeur_json.nommage.nomsNonConformes` liste les noms à corriger.
+Sans cible (hors G404) : extraction réussie, `statut` NULL. Liste vide (ou tous
 les noms exemptés) : `conforme` (vérité par vacuité). Cible malformée ou regex
 invalide : `statut` NULL + warn — jamais de faux verdict.
 
-La cible est un **objet** avec un champ `type` (trois sous-formes, de la plus simple à
-la plus puissante) :
+La cible est un **objet** avec un champ `type` (quatre sous-formes) :
 
 1. **`prefixe`** — le nom doit commencer par le préfixe donné. Le cas le plus fréquent
    et le plus lisible :
@@ -200,12 +202,22 @@ la plus puissante) :
    { "controles": { "G404": { "cible": { "type": "regex", "motif": "^TT-[A-Z0-9-]+$" } } } }
    ```
 
-Options communes aux trois sous-formes :
+4. **`listePrefixes`** — le nom est conforme s'il commence par **au moins un** des
+   préfixes de la liste (après trim ; `ignoreCasse` comme les autres sous-formes).
+   Non conforme s'il ne commence par aucun. Agrégation inchangée (tous hors
+   exceptions doivent passer) :
+
+   ```json
+   { "type": "listePrefixes", "prefixes": ["ZG_","ZL_","EL_"], "ignoreCasse": false,
+     "exceptions": ["Niveaux et quadrillages partagés", "Sous-projet 1"] }
+   ```
+
+Options communes aux sous-formes :
 
 - `ignoreCasse` (défaut `false`) : comparaison insensible à la casse si `true` — par
   défaut les conventions de nommage sont sensibles à la casse.
-- `exceptions` : liste de noms exacts exemptés de la validation. Exemple typique,
-  exempter le sous-projet créé automatiquement par Revit :
+- `exceptions` : liste de noms exacts exemptés de la validation (trim ; casse selon
+  `ignoreCasse`). Exemple typique, exempter le sous-projet créé automatiquement par Revit :
 
   ```json
   { "controles": { "G404": { "cible": {
@@ -213,6 +225,42 @@ Options communes aux trois sous-formes :
       "exceptions": ["Niveaux et quadrillages partagés"]
   } } } }
   ```
+
+### G404 — norme maison `listePrefixes` (préfixes sous-projets)
+
+G404 utilise **toujours** la sous-forme `listePrefixes` via la norme maison
+`backend/config/qc-workset-prefixes-norm.json` (fichier versionné, même patron que
+la grille de criticité / `qc-copy-monitor-norm.json`). **Pas de cible projet
+requise** : le verdict est émis dès l'extraction.
+
+Liste maison des **11** préfixes Tetra Tech :
+
+`ZG_`, `ZL_`, `S_`, `CR_`, `EL_`, `GM_`, `PI_`, `PL_`, `VE_`, `PR_`, `TP_`
+
+Exceptions maison par défaut :
+
+- `Niveaux et quadrillages partagés` (observé ELEC)
+- `Vues, niveaux et grilles partagés` (variante locale observée M_PR — même rôle système)
+- `Sous-projet 1` (Revit FR, avec espace) et `Sous-projet1` (variante sans espace)
+
+**Ajouter un préfixe** = éditer `prefixes` dans `qc-workset-prefixes-norm.json`
+(commit versionné).
+
+**Surcharge projet** (`qc.project_config.config.controles.G404`) — une liste projet
+**remplace** le champ maison correspondant (pas de fusion) :
+
+```json
+{ "controles": { "G404": {
+    "prefixes": ["EL_", "ZL_"],
+    "exceptions": ["Niveaux et quadrillages partagés"],
+    "ignoreCasse": false
+} } }
+```
+
+`controles.G404.cible` (objet avec `type`) remplace **toute** la cible (ex. bascule
+projet vers `regex` / `prefixe`). L'extracteur relève toujours la liste complète
+`valeur_json.sousProjets` pour Power BI ; le verdict porte sur la conformité aux
+préfixes hors exceptions (`valeur_json.nommage.nomsNonConformes`).
 
 ## Formes de scoreur « coordonnees » et « angle » (lot COORDONNÉES)
 
