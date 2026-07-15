@@ -508,7 +508,11 @@ class QcRunService {
         // scoreByForme (statut seul) reste intact, aucun effet de bord sur outcome.
         let valeurJson = outcome.valeurJson ?? null;
         const entry = qcScoring.catalogEntry(code);
-        const cibleGenerique = projectConfig.controles?.[code]?.cible;
+        let cibleGenerique = projectConfig.controles?.[code]?.cible;
+        // G404 : cible EFFECTIVE = norme maison listePrefixes (+ surcharge projet)
+        if (entry?.forme === 'nommage' && code === 'G404') {
+          cibleGenerique = qcScoring.resolveG404Cible(projectConfig.controles);
+        }
         if (entry?.forme === 'nommage' && cibleGenerique != null && statut !== null) {
           const champ = entry.champListe || 'noms';
           const noms = Array.isArray(outcome.valeurJson?.[champ]) ? outcome.valeurJson[champ] : [];

@@ -13,7 +13,7 @@
     "G411": { "source": "modele", "forme": "comptage", "sens": "max", "libelle": "Types de groupes inutilisés" },
     "G502": { "source": "modele", "forme": "presence", "champListe": "parametres", "libelle": "Paramètres de projet présents" },
     "G507": { "source": "modele", "forme": "presenceProjet", "unite": "absents", "libelle": "Paramètres partagés attendus (liste variable par projet)" },
-    "G404": { "source": "modele", "forme": "nommage", "champListe": "sousProjets", "libelle": "Sous-projets utilisateur (convention de nommage)" },
+    "G404": { "source": "modele", "forme": "nommage", "champListe": "sousProjets", "libelle": "Sous-projets utilisateur (préfixes autorisés, liste maison listePrefixes)" },
     "G203": { "source": "modele", "forme": "etatReference", "unite": "fautifs", "libelle": "Niveaux pinnés (état, pas nommage)" },
     "G205": { "source": "modele", "forme": "etatReference", "unite": "fautifs", "libelle": "Axes pinnés et dans la design option principale" },
     "G111": { "source": "modele", "forme": "etatReference", "unite": "fautifs", "libelle": "Liens dans la design option principale" },
