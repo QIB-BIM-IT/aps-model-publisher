@@ -169,8 +169,9 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   2024/2025 — preuves dans `da-appbundle/QcExtractor/spike/coord-controls/API_VERIFIED.md`) :
   G104 (modèle/`egalite` — système d'unités longueur/aire/volume via `Document.GetUnits()`
   → `SpecTypeId.Length/Area/Volume`, `valeur_text` = jeton canonique `« longueur|aire|volume »`),
-  G105 (modèle/`presence` — champs `ProjectInfo`, `champListe='champsRenseignes'` = clés non
-  vides), G200 (modèle/`seuil` — écart point de base projet vs origine interne, comparaison
+  G105 (modèle/`infosProjet` — champs `ProjectInfo` via propriétés camelCase ; scoring
+  sur `controles.G105.champs[{cle,valeurAttendue,mode}]` avec modes presence/contenu/exact ;
+  sans liste : inventaire `valeur_json.champs`, statut NULL), G200 (modèle/`seuil` — écart point de base projet vs origine interne, comparaison
   INTERNE, `valeur_num` = plus grand écart absolu par axe en mètres), G201 (modèle/**`coordonnees`**
   — **survey point** `BasePoint.GetSurveyPoint(doc).SharedPosition`, PAS le point de base ;
   3 composantes ns/eo/elev en mètres), G202 (modèle/**`angle`** — angle de rotation du
@@ -334,6 +335,39 @@ distants de `2°` (pas `358°`). **Sans cible** : extraction réussie (angle dan
 
 - `angle` : angle de rotation du nord projet **attendu** au PEB, **en degrés**.
 - `tolerance` : écart angulaire maximal toléré, **en degrés** (ex. `0.5`).
+
+## Forme de scoreur « infosProjet » (G105 — valeurs ProjectInfo)
+
+G105 relève toujours l’inventaire `valeur_json.champs` (10 propriétés ProjectInfo
+camelCase : `address`, `author`, `buildingName`, `clientName`, `issueDate`, `name`,
+`number`, `organizationName`, `organizationDescription`, `status`). Mapping
+BuiltInParameter courant : `PROJECT_NUMBER`→`number`, `CLIENT_NAME`→`clientName`,
+`PROJECT_ADDRESS`→`address`, `PROJECT_NAME`→`name` (alias acceptés en config).
+
+**Sans** `controles.G105.champs` : extraction réussie, **statut NULL**.
+
+**Avec** liste :
+
+```json
+{ "controles": { "G105": { "champs": [
+  { "cle": "number", "valeurAttendue": "52934TT", "mode": "exact" },
+  { "cle": "CLIENT_NAME", "valeurAttendue": "Ville de Montreal", "mode": "presence" },
+  { "cle": "name", "valeurAttendue": "  Musee  ", "mode": "contenu" }
+] } } }
+```
+
+| Mode | Règle | Usage |
+|------|--------|--------|
+| `presence` | champ non vide (trim) | valeurs souples (client, adresse…) |
+| `contenu` (**défaut**) | trim + insensible à la casse | évite faux positifs d’écriture |
+| `exact` | `===` caractère près (casse et espaces significatifs) | n° de projet, codes |
+
+Verdict global : `conforme` si **tous** les champs passent ; sinon `non_conforme`.
+Détail : `valeur_json.infosProjet.champs[]` =
+`{cle, cleCanon, libelle, valeurRelevee, valeurAttendue, mode, conforme}`.
+
+Compat legacy : `cible: ["clientName","number"]` (tableau de chaînes) ⇒ mode `presence`
+par clé.
 
 ## Forme de scoreur « couverture » (lot G504 — codification UNIFORMAT)
 
