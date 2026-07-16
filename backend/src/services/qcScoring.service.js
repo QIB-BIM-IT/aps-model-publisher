@@ -577,10 +577,11 @@ class QcScoringService {
         return statut;
       }
       case 'angle': {
-        // Lot COORDONNÉES (G202) : conforme si l'angle relevé (valeur_num, en degrés) est à
-        // moins d'une tolérance ANGULAIRE de l'angle attendu, wrap-around géré (359° et 1°
-        // sont distants de 2°). Cible OBJET { angle, tolerance } en degrés. Cible malformée
-        // => statut NULL (jamais de faux verdict), aligné sur 'pattern'/'nommage'.
+        // Lot COORDONNÉES (G202) : compare l'angle de rotation du NORD PROJET relevé
+        // (valeur_num, degrés) à une cible HUMAINE en config — PAS au nord vrai / géographique
+        // comme référence implicite. Cible OBJET { angle, tolerance } en degrés.
+        // Conforme si distance angulaire ≤ tolérance ; wrap-around géré (359° et 1° = 2°).
+        // Sans cible (garde en tête de scoreByForme) : statut NULL.
         if (!cible || typeof cible !== 'object' || Array.isArray(cible)) {
           logger.warn(`[QC][Scoring] Cible angle malformée pour ${controlCode} (objet {angle,tolerance} attendu) — statut NULL`);
           return null;

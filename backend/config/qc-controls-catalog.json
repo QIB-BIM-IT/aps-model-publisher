@@ -436,16 +436,16 @@
       "source": "modele",
       "forme": "angle",
       "unite": "degres",
-      "libelle": "Angle au nord vrai (vs PEB)",
+      "libelle": "Angle du nord projet (orientation vs valeur attendue PEB)",
       "descriptionCible": {
         "typeWidget": "angle",
-        "libelle": "Angle attendu du nord projet",
-        "aide": "Angle attendu (degrés) de l’orientation du nord projet par rapport au nord vrai, plus une tolérance angulaire (wrap-around géré, ex. 359° et 1° = 2°). Laisser vide si non spécifié au PEB.",
+        "libelle": "Angle du nord projet attendu",
+        "aide": "Saisir l’angle de rotation attendu du nord projet (orientation de travail du modèle, en degrés) et une tolérance angulaire. Le scoreur compare l’angle relevé à cette valeur humaine — pas au nord géographique. Wrap-around géré (359° et 1° = 2°). Laisser vide si aucune exigence d’orientation au PEB (statut NULL).",
         "unite": "degres",
         "champs": [
           {
             "nom": "angle",
-            "libelle": "Angle attendu"
+            "libelle": "Angle attendu du nord projet"
           },
           {
             "nom": "tolerance",
@@ -457,8 +457,7 @@
           "numerique"
         ],
         "cleConfig": "cible",
-        "formatScoreur": "objet { angle, tolerance } — controles.G202.cible (forme angle)",
-        "ecartSignale": "Extracteur = angle nord projet ↔ nord VRAI (GetProjectPosition.Angle). Cahier dit « nord projet » : la cible PEB est bien cet angle, pas un azimut géographique absolu."
+        "formatScoreur": "objet { angle, tolerance } — controles.G202.cible (forme angle) ; sans cible → statut NULL"
       }
     },
     "G504": {
