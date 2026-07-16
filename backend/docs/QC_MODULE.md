@@ -14,6 +14,34 @@ la source de vérité runtime. G103 utilise le widget `recetteNommage` (assembla
 champs + séparateur, comparaison stricte). Voir les champs `formatScoreur` dans
 le catalogue pour le lien avec `qc.project_config`.
 
+## API configuration projet (lot 1 — couche données)
+
+Trois routes JWT additives (`qc.routes.js` + `qcProjectConfig.service.js`), sans
+modification des routes existantes ni de `database.js` :
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| `GET` | `/api/qc/controls/cible-descriptions` | Métadonnées formulaire (25 contrôles) : code, section, libellé, nature Auto/Mixte/Manuel, `descriptionCible` (sans détails techniques scoring) |
+| `GET` | `/api/qc/projects/:projectKey/config` | Lit `qc.project_config.config` ; absent → `{ controles: {}, criticite: null }` (aucune création) |
+| `PUT` / `POST` | `/api/qc/projects/:projectKey/config` | Upsert merge + **validation backend dérivée du catalogue** (`descriptionCible.validation`) |
+
+**Clé `projectId` (piège G507 — critique)** : `qc.project_config` est indexé par
+`projectId` au format **préfixé** `b.<guid>` — la **même** clé que
+`loadProjectConfig` (scoring) lit via
+`accProjectGuid` (guid nu) → `qc.projects.projectId` (`b.<guid>`) → `project_config`.
+Les routes acceptent `b.<guid>` **ou** un `accProjectGuid` nu, mais **écrivent /
+lisent toujours** sous le `projectId` préfixé résolu. Écrire sous le guid nu rend
+la config **invisible** au scoring (bug silencieux déjà rencontré sur G507).
+
+**Sémantique d'écriture** : **merge** au niveau `config.controles[code]` (mettre à
+jour / ajouter les contrôles fournis, préserver les autres). Un contrôle envoyé à
+`null` ou `{}` est retiré. `criticite` (racine) n'est touché que s'il est présent
+dans le body. Pas de remplacement total de la config.
+
+**Validation** : règles lues dans le catalogue (`nombrePositif`, `valeurDansListe`,
+`nonVide`, cohérence de type selon `typeWidget`) — pas de règles codées en dur dans
+la route. Rejet `400` sans écriture si une cible est invalide.
+
 ## Architecture
 
 ```
