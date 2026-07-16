@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchQcCibleDescriptions } from '../services/api';
-import WidgetRenderer, { isSimpleWidgetType } from '../components/qc-config/WidgetRenderer';
+import WidgetRenderer, {
+  isImplementedWidgetType,
+  isPartieBWidgetType,
+} from '../components/qc-config/WidgetRenderer';
 
 /**
- * Page de test isolée — lot 2 (ossature moteur + widgets simples).
- * Charge GET /api/qc/controls/cible-descriptions, rend les widgets simples,
- * capture la saisie dans l'état local (pas d'enregistrement en base).
+ * Page de test isolée — lot 2 (moteur + widgets simples + complexes partie A).
+ * Charge GET /api/qc/controls/cible-descriptions, capture la saisie dans l'état local
+ * (pas d'enregistrement en base).
  */
 export default function QcConfigTestPage() {
   const [loading, setLoading] = useState(true);
@@ -36,17 +39,24 @@ export default function QcConfigTestPage() {
     };
   }, []);
 
-  const simples = useMemo(
-    () => controles.filter((c) => isSimpleWidgetType(c?.descriptionCible?.typeWidget)),
+  const implemented = useMemo(
+    () => controles.filter((c) => isImplementedWidgetType(c?.descriptionCible?.typeWidget)),
     [controles]
   );
-  const autres = useMemo(
-    () => controles.filter((c) => !isSimpleWidgetType(c?.descriptionCible?.typeWidget)),
+  const partieB = useMemo(
+    () => controles.filter((c) => isPartieBWidgetType(c?.descriptionCible?.typeWidget)),
     [controles]
   );
 
   function setControlValue(code, valeur) {
-    setConfig((prev) => ({ ...prev, [code]: valeur }));
+    setConfig((prev) => {
+      if (valeur === null || valeur === undefined) {
+        const next = { ...prev };
+        delete next[code];
+        return next;
+      }
+      return { ...prev, [code]: valeur };
+    });
   }
 
   return (
@@ -55,8 +65,8 @@ export default function QcConfigTestPage() {
         QC Config — page de test (lot 2)
       </h2>
       <p style={{ margin: '0 0 20px', fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
-        Moteur adaptatif + widgets simples. État capturé en direct ci-dessous — aucun
-        enregistrement en base dans ce lot.
+        Moteur adaptatif + widgets simples et complexes (partie A). État capturé en direct
+        ci-dessous — aucun enregistrement en base dans ce lot.
       </p>
 
       {loading ? (
@@ -81,15 +91,15 @@ export default function QcConfigTestPage() {
 
       {!loading && !error ? (
         <p style={{ fontSize: 13, color: '#475569', marginBottom: 16 }}>
-          Contrôles simples rendus :{' '}
-          <strong>{simples.map((c) => c.code).join(', ') || '(aucun)'}</strong>
-          {' '}({simples.length}) — reportés au 2e temps :{' '}
-          {autres.map((c) => `${c.code}(${c.descriptionCible?.typeWidget})`).join(', ') || '—'}
+          Contrôles rendus :{' '}
+          <strong>{implemented.map((c) => c.code).join(', ') || '(aucun)'}</strong>
+          {' '}({implemented.length}) — partie B (à venir) :{' '}
+          {partieB.map((c) => `${c.code}(${c.descriptionCible?.typeWidget})`).join(', ') || '—'}
         </p>
       ) : null}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {simples.map((c) => (
+        {implemented.map((c) => (
           <section
             key={c.code}
             style={{
@@ -132,9 +142,31 @@ export default function QcConfigTestPage() {
             />
           </section>
         ))}
+
+        {/* Placeholders partie B — visibles pour le suivi */}
+        {partieB.map((c) => (
+          <section
+            key={c.code}
+            style={{
+              border: '1px dashed #cbd5e1',
+              borderRadius: 10,
+              padding: 14,
+              background: '#f8fafc',
+            }}
+          >
+            <div style={{ marginBottom: 10 }}>
+              <span style={{ fontWeight: 700, fontSize: 14 }}>{c.code}</span>
+              <span style={{ fontSize: 13, color: '#334155', marginLeft: 8 }}>{c.libelle}</span>
+            </div>
+            <WidgetRenderer
+              descriptionCible={c.descriptionCible}
+              valeur={config[c.code]}
+              onChange={(v) => setControlValue(c.code, v)}
+            />
+          </section>
+        ))}
       </div>
 
-      {/* Preuve de capture — état page en direct */}
       <div style={{ marginTop: 28 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>
           État config capturé (live)
