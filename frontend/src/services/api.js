@@ -342,4 +342,14 @@ export async function exportPDFsFromCache(params) {
   }
 }
 
+// ----- QC config (formulaire) -----
+/** GET /api/qc/controls/cible-descriptions — métadonnées formulaire (lot 1 API). */
+export async function fetchQcCibleDescriptions() {
+  const { data } = await api.get('/api/qc/controls/cible-descriptions');
+  if (!data?.success) {
+    throw new Error(data?.message || 'Échec chargement des descriptions de cible QC');
+  }
+  return data;
+}
+
 export default api;
