@@ -10,9 +10,9 @@ Chaque entrée de `backend/config/qc-controls-catalog.json` porte un bloc additi
 **`descriptionCible`** (widget, libellés, aide, défauts, validation) destiné à un
 futur formulaire web adaptatif. Ce bloc **ne pilote pas** l'extraction ni le scoring ;
 seuls les champs historiques (`source`, `forme`, `champListe`, `libelle`, …) restent
-la source de vérité runtime. G103 est marqué `aTraiterSeparement: true` (widget
-nommage à concevoir séparément). Voir les champs `formatScoreur` / `ecartSignale`
-dans le catalogue pour le lien avec `qc.project_config`.
+la source de vérité runtime. G103 utilise le widget `recetteNommage` (assemblage
+champs + séparateur, comparaison stricte). Voir les champs `formatScoreur` dans
+le catalogue pour le lien avec `qc.project_config`.
 
 ## Architecture
 
@@ -142,7 +142,8 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   groupes inutilisés), G502 (modèle/presence, paramètres de projet — lecture des noms
   uniquement, `Definition.ParameterGroup` interdit car supprimé de l'API 2025).
 - **Lot 1** : G101 (méta/`egalite` — écart entre version PEB cible et `revitProjectVersion`
-  réelle), G103 (méta/`pattern` — nom de fichier vs regex de convention), G402
+  réelle), G103 (méta/**`recetteNommage`** — nom DM assemblé champ+séparateur,
+  comparaison stricte ; repli legacy `cible` regex), G402
   (modèle/comptage — variantes présentes, jugement de superfluité humain), G410
   (modèle/comptage — vues `NotPlaced` hors gabarits, liste plafonnée à 200 noms).
   **G309 / G310 RETIRÉS** du parc actif (voir section « Retraits »).
@@ -163,8 +164,9 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   via `qc-workset-prefixes-norm.json` (11 préfixes maison, surcharge projet).
   **G203/G205** ont été **refondus** en contrôles d'état (`etatReference`) — voir
   section dédiée. API vérifiée 2024/2025.
-  La forme `pattern` reste RÉSERVÉE à G103 (cible chaîne regex sur UNE valeur) ;
-  piste d'unification future vers `nommage`, aucune action maintenant.
+  La forme `pattern` (regex sur `valeur_text`) reste disponible en **repli legacy**
+  pour G103 si `cible` est une chaîne regex et qu’aucune `recette` n’est fournie ;
+  le chemin nominal est `recetteNommage`.
 - **Lot COORDONNÉES** (tous MODÈLE, hôte seul, sans lien ; API vérifiée identique
   2024/2025 — preuves dans `da-appbundle/QcExtractor/spike/coord-controls/API_VERIFIED.md`) :
   G104 (modèle/`egalite` — système d'unités longueur/aire/volume via `Document.GetUnits()`
@@ -368,6 +370,33 @@ Détail : `valeur_json.infosProjet.champs[]` =
 
 Compat legacy : `cible: ["clientName","number"]` (tableau de chaînes) ⇒ mode `presence`
 par clé.
+
+## Forme de scoreur « recetteNommage » (G103 — nom de fichier)
+
+G103 est **MÉTA** : le nom vient de `meta.fileName` (Data Management), stocké dans
+`valeur_text` (+ `valeur_json.nomFichier`).
+
+**Sans** `controles.G103.recette` : extraction réussie, **statut NULL**.
+
+**Avec** recette — le coordonnateur assemble le nom attendu d’un fichier unique :
+
+```json
+{ "controles": { "G103": { "recette": {
+  "champs": ["52934TT", "M", "PR", "2025"],
+  "separateur": "_",
+  "extension": ".rvt"
+} } } }
+```
+
+- `nomAttendu` = `champs.join(separateur) + extension` (extension optionnelle,
+  concaténée telle quelle — inclure le `.` si voulu).
+- Comparaison **STRICTE** (`===`) : casse et caractères significatifs, **aucune**
+  normalisation (contrairement à G105 `contenu`).
+- `valeur_json.recetteNommage` =
+  `{ nomReleve, nomAttenduAssemble, conforme, champsAttendus, separateur, extension, source }`.
+
+**Compat pattern** : si pas de `recette` mais `cible` string (regex), l’ancien scoreur
+`pattern` s’applique (`source: "pattern-legacy"`).
 
 ## Forme de scoreur « couverture » (lot G504 — codification UNIFORMAT)
 

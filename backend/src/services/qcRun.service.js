@@ -528,6 +528,17 @@ class QcRunService {
           );
           valeurJson = { ...(outcome.valeurJson || {}), infosProjet: { champs: detail } };
         }
+        // G103 recetteNommage : nom attendu assemblé vs nom relevé
+        if (entry?.forme === 'recetteNommage' && statut !== null) {
+          const { detail } = qcScoring.evaluerRecetteNommage(
+            outcome.valeurText,
+            projectConfig.controles?.[code],
+            code
+          );
+          if (detail) {
+            valeurJson = { ...(outcome.valeurJson || {}), recetteNommage: detail };
+          }
+        }
         // Lot COORDONNÉES (option A, comme 'nommage') : le détail par axe (dont l'axe fautif)
         // est réinjecté dans valeur_json via la méthode PURE evaluerCoordonnees — contrat de
         // scoreByForme (statut seul) intact, aucun effet de bord sur outcome.

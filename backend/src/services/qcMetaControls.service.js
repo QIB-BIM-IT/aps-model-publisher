@@ -58,8 +58,9 @@ class QcMetaControlsService {
       logger.warn(`[QC][Meta] G102 en échec d'extraction: ${e.message}`);
     }
 
-    // G103 — nom du fichier (attribut DM). Conformité à la convention de nommage via
-    // pattern en config projet (forme 'pattern') ; sans cible : statut NULL.
+    // G103 — nom du fichier (attribut DM). Scoring : forme 'recetteNommage'
+    // (assemblage champs+séparateur) ; sans recette : statut NULL. Legacy pattern
+    // (cible regex) encore supporté en repli.
     try {
       const nom = meta?.fileName;
       if (!nom) {
@@ -69,6 +70,7 @@ class QcMetaControlsService {
         controlCode: 'G103',
         etatExtraction: 'extrait',
         valeurText: String(nom),
+        valeurJson: { nomFichier: String(nom) },
       });
     } catch (e) {
       outcomes.push({ controlCode: 'G103', etatExtraction: 'echec', erreur: e.message });

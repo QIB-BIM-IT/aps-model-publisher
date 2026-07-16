@@ -62,11 +62,34 @@
     },
     "G103": {
       "source": "meta",
-      "forme": "pattern",
+      "forme": "recetteNommage",
       "libelle": "Nom du fichier (convention de nommage)",
       "descriptionCible": {
-        "aTraiterSeparement": true,
-        "note": "Widget nommage complexe (sous-formes prefixe / segments / regex sur valeur_text). Conception dédiée hors de ce lot."
+        "typeWidget": "recetteNommage",
+        "libelle": "Convention de nommage du fichier",
+        "aide": "Assemblez le nom attendu du fichier champ par champ, séparés par un séparateur (défaut « _ »). L’outil joint les valeurs et compare STRICTEMENT au nom réel (casse et caractères significatifs — aucune normalisation). Extension optionnelle (ex. .rvt) concaténée après les champs. Sans recette : nom relevé, statut NULL. Une ancienne cible regex (pattern) reste acceptée en repli.",
+        "champs": {
+          "typeWidget": "listeOrdonnee",
+          "libelle": "Valeurs des champs (dans l’ordre)",
+          "element": "une valeur de champ",
+          "defaut": []
+        },
+        "separateur": {
+          "typeWidget": "menu",
+          "libelle": "Séparateur",
+          "choix": ["_", "-", "."],
+          "defaut": "_"
+        },
+        "extension": {
+          "typeWidget": "texte",
+          "libelle": "Extension (optionnelle)",
+          "defaut": ".rvt",
+          "aide": "Concaténée telle quelle après les champs joints (inclure le point, ex. .rvt)."
+        },
+        "defaut": "",
+        "validation": ["comparaisonStricte"],
+        "cleConfig": "recette",
+        "formatScoreur": "controles.G103.recette = { champs, separateur, extension } ; repli legacy cible = regex string"
       }
     },
     "G402": {

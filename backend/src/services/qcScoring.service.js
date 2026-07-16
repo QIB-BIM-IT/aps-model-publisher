@@ -438,6 +438,14 @@ class QcScoringService {
       return statut;
     }
 
+    // Lot G103 (recetteNommage) : assemblage champs + séparateur (+ extension optionnelle).
+    // Comparaison STRICTE au caractère près. Sans recette : statut NULL.
+    // Repli legacy : controles.G103.cible (chaîne regex) → forme pattern historique.
+    if (entry.forme === 'recetteNommage') {
+      const { statut } = this.evaluerRecetteNommage(outcome.valeurText, controles?.[controlCode], controlCode);
+      return statut;
+    }
+
     // Lot G210 (copieControle) : norme maison STRICTE 100 % — pas de cible requise.
     // conforme SEULEMENT si TOUS les axes et TOUS les niveaux SOUMIS À AUDIT sont
     // monitorés (0 fautif). Les niveaux exclus n'entrent pas dans le calcul.
@@ -563,9 +571,9 @@ class QcScoringService {
         return String(releve).trim() === String(cible).trim() ? 'conforme' : 'non_conforme';
       }
       case 'pattern': {
-        // Lot 1 (G103) : conforme si valeur_text matche la regex cible (convention de
-        // nommage). Regex invalide en config => statut NULL + warn (pas de faux verdict).
-        // Forme RÉSERVÉE à G103 (cible chaîne) — les listes de noms passent par 'nommage'.
+        // Legacy / générique : conforme si valeur_text matche la regex cible.
+        // G103 nominal = forme 'recetteNommage' (gérée plus haut) ; ce case reste
+        // pour une cible regex si un contrôle catalogue pointe encore vers 'pattern'.
         if (typeof outcome.valeurText !== 'string') return null;
         try {
           return new RegExp(String(cible)).test(outcome.valeurText) ? 'conforme' : 'non_conforme';
@@ -626,6 +634,76 @@ class QcScoringService {
       default:
         return null;
     }
+  }
+
+  /**
+   * Forme 'recetteNommage' (G103) — méthode PURE.
+   * Assemble nomAttendu = champs.join(separateur) + extension (si fournie),
+   * compare STRICTEMENT à valeurText (nom DM). Pas de normalisation.
+   * Config : controles.G103.recette = { champs: string[], separateur?, extension? }
+   * Repli legacy : controles.G103.cible (regex string) — ancien scoreur pattern.
+   *
+   * Extension : si non vide, concaténée telle quelle après les champs joints
+   * (ex. champs+ "_" + ".rvt" → "A_B.rvt"). Si vide/absente, le nom assemblé
+   * est uniquement les champs joints (l'extension peut être dans le dernier champ).
+   *
+   * @param {string|null|undefined} nomReleve - outcome.valeurText
+   * @param {object|null} cfgG103 - controles.G103
+   * @param {string} [controlCode]
+   * @returns {{statut: string|null, detail: object|null}}
+   */
+  evaluerRecetteNommage(nomReleve, cfgG103, controlCode = 'G103') {
+    const aucun = { statut: null, detail: null };
+    if (typeof nomReleve !== 'string') return aucun;
+
+    const recette = cfgG103?.recette;
+    if (recette && typeof recette === 'object' && Array.isArray(recette.champs) && recette.champs.length > 0) {
+      const champs = recette.champs.map((c) => String(c));
+      const separateur = recette.separateur != null && String(recette.separateur).length
+        ? String(recette.separateur)
+        : '_';
+      let extension = recette.extension != null ? String(recette.extension) : '';
+      // Si l'utilisateur omet le point, on ne l'ajoute pas automatiquement (strict / explicite)
+      const nomAttendu = champs.join(separateur) + extension;
+      const conforme = nomReleve === nomAttendu;
+      return {
+        statut: conforme ? 'conforme' : 'non_conforme',
+        detail: {
+          nomReleve,
+          nomAttenduAssemble: nomAttendu,
+          conforme,
+          champsAttendus: champs,
+          separateur,
+          extension: extension || null,
+          source: 'recette',
+        },
+      };
+    }
+
+    // Legacy pattern (cible regex chaîne)
+    if (cfgG103?.cible != null && typeof cfgG103.cible === 'string' && cfgG103.cible.length) {
+      try {
+        const ok = new RegExp(String(cfgG103.cible)).test(nomReleve);
+        return {
+          statut: ok ? 'conforme' : 'non_conforme',
+          detail: {
+            nomReleve,
+            nomAttenduAssemble: null,
+            conforme: ok,
+            champsAttendus: null,
+            separateur: null,
+            extension: null,
+            source: 'pattern-legacy',
+            pattern: cfgG103.cible,
+          },
+        };
+      } catch (e) {
+        logger.warn(`[QC][Scoring] Pattern legacy invalide pour ${controlCode}: ${e.message}`);
+        return aucun;
+      }
+    }
+
+    return aucun;
   }
 
   /**
