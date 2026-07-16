@@ -6,6 +6,7 @@ import Login from './pages/Login.jsx';
 import AuthCallback from './pages/AuthCallback.jsx';
 import GlobalDashboard from './pages/GlobalDashboard.jsx';
 import PlanningPage from './pages/PlanningPage.jsx';
+import QcConfigTestPage from './pages/QcConfigTestPage.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 function Root() {
@@ -32,6 +33,16 @@ function Root() {
             element={
               <ProtectedRoute>
                 <PlanningPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* QC config — page de test isolée (lot 2 moteur + widgets simples) */}
+          <Route
+            path="qc-config-test"
+            element={
+              <ProtectedRoute>
+                <QcConfigTestPage />
               </ProtectedRoute>
             }
           />
