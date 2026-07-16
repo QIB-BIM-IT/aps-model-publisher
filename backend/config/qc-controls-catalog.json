@@ -339,19 +339,45 @@
     },
     "G105": {
       "source": "modele",
-      "forme": "presence",
+      "forme": "infosProjet",
       "champListe": "champsRenseignes",
-      "libelle": "Informations projet (champs ProjectInfo renseignés)",
+      "libelle": "Informations projet (valeurs ProjectInfo vs attendues)",
       "descriptionCible": {
-        "typeWidget": "liste",
-        "libelle": "Champs projet requis",
-        "aide": "Lister les champs ProjectInfo qui doivent être renseignés. Le scoreur compare les clés API anglaises (clientName, address, number, name, …), pas les libellés français affichés.",
-        "element": "un champ",
+        "typeWidget": "table",
+        "libelle": "Champs projet à valider",
+        "aide": "Cocher les champs ProjectInfo à contrôler, saisir la valeur attendue et le mode : presence (non vide), contenu (trim + casse, défaut — évite les faux positifs), exact (caractère près). Clés catalogue camelCase (number, clientName…) ; alias BuiltInParameter acceptés (PROJECT_NUMBER, CLIENT_NAME…). Sans liste : inventaire seul, statut NULL.",
+        "colonnes": [
+          {
+            "nom": "cle",
+            "type": "menu",
+            "libelle": "Champ",
+            "choix": [
+              { "valeur": "number", "libelle": "Numéro de projet" },
+              { "valeur": "name", "libelle": "Nom du projet" },
+              { "valeur": "clientName", "libelle": "Nom du client" },
+              { "valeur": "address", "libelle": "Adresse du projet" },
+              { "valeur": "author", "libelle": "Auteur" },
+              { "valeur": "buildingName", "libelle": "Nom du bâtiment" },
+              { "valeur": "issueDate", "libelle": "Date d’émission" },
+              { "valeur": "organizationName", "libelle": "Nom de l’organisation" },
+              { "valeur": "organizationDescription", "libelle": "Description de l’organisation" },
+              { "valeur": "status", "libelle": "Statut" }
+            ]
+          },
+          { "nom": "valeurAttendue", "type": "texte", "libelle": "Valeur attendue" },
+          {
+            "nom": "mode",
+            "type": "menu",
+            "libelle": "Mode",
+            "choix": ["presence", "contenu", "exact"],
+            "defaut": "contenu"
+          }
+        ],
         "defaut": [
-          "clientName",
-          "address",
-          "number",
-          "name"
+          { "cle": "number", "valeurAttendue": "", "mode": "exact" },
+          { "cle": "clientName", "valeurAttendue": "", "mode": "presence" },
+          { "cle": "name", "valeurAttendue": "", "mode": "contenu" },
+          { "cle": "address", "valeurAttendue": "", "mode": "contenu" }
         ],
         "libellesAffichage": {
           "clientName": "Nom du client",
@@ -359,12 +385,9 @@
           "number": "Numéro de projet",
           "name": "Nom du projet"
         },
-        "validation": [
-          "nonVide"
-        ],
-        "cleConfig": "cible",
-        "formatScoreur": "tableau de clés API ProjectInfo — controles.G105.cible (forme presence, champListe champsRenseignes)",
-        "ecartSignale": "Cahier demandait des libellés FR en défaut ; le scoreur exige les clés API (clientName, …). Défauts = clés API ; libellesAffichage pour le formulaire."
+        "validation": [],
+        "cleConfig": "champs",
+        "formatScoreur": "controles.G105.champs = [{ cle, valeurAttendue, mode }] — forme infosProjet ; sans liste → statut NULL"
       }
     },
     "G200": {

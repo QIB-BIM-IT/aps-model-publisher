@@ -519,6 +519,15 @@ class QcRunService {
           const { nomsNonConformes } = qcScoring.evaluerNommage(noms, cibleGenerique, code);
           valeurJson = { ...(outcome.valeurJson || {}), nommage: { nomsNonConformes } };
         }
+        // G105 infosProjet : détail par champ (valeur relevée vs attendue, mode, conforme)
+        if (entry?.forme === 'infosProjet' && statut !== null) {
+          const { detail } = qcScoring.evaluerInfosProjet(
+            outcome.valeurJson,
+            projectConfig.controles?.[code],
+            code
+          );
+          valeurJson = { ...(outcome.valeurJson || {}), infosProjet: { champs: detail } };
+        }
         // Lot COORDONNÉES (option A, comme 'nommage') : le détail par axe (dont l'axe fautif)
         // est réinjecté dans valeur_json via la méthode PURE evaluerCoordonnees — contrat de
         // scoreByForme (statut seul) intact, aucun effet de bord sur outcome.

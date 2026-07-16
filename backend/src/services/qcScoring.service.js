@@ -431,6 +431,13 @@ class QcScoringService {
       return j.parametres.every((p) => p && p.present === true) ? 'conforme' : 'non_conforme';
     }
 
+    // Lot G105 (infosProjet) : liste de champs ProjectInfo avec valeurAttendue + mode
+    // (presence | contenu | exact). Sans config → inventaire seul, statut NULL.
+    if (entry.forme === 'infosProjet') {
+      const { statut } = this.evaluerInfosProjet(outcome.valeurJson, controles?.[controlCode], controlCode);
+      return statut;
+    }
+
     // Lot G210 (copieControle) : norme maison STRICTE 100 % — pas de cible requise.
     // conforme SEULEMENT si TOUS les axes et TOUS les niveaux SOUMIS À AUDIT sont
     // monitorés (0 fautif). Les niveaux exclus n'entrent pas dans le calcul.
@@ -619,6 +626,115 @@ class QcScoringService {
       default:
         return null;
     }
+  }
+
+  /**
+   * Forme 'infosProjet' (G105) — méthode PURE.
+   * Valide une liste de champs ProjectInfo contre des valeurs attendues en config.
+   * Config : controles.G105.champs = [{ cle, valeurAttendue?, mode? }]
+   * Modes : presence | contenu (défaut, trim+casse) | exact (caractère près).
+   * Clés canoniques = propriétés ProjectInfo camelCase (catalogue) ; alias BuiltInParameter
+   * acceptés (PROJECT_NUMBER → number, CLIENT_NAME → clientName, …).
+   * Sans liste champs (et sans cible legacy tableau) → statut NULL (inventaire seul).
+   *
+   * @param {object|null} valeurJson - outcome.valeurJson ({ champs, champsRenseignes })
+   * @param {object|null} cfgG105 - controles.G105
+   * @param {string} [controlCode]
+   * @returns {{statut: string|null, detail: object[]}}
+   */
+  evaluerInfosProjet(valeurJson, cfgG105, controlCode = 'G105') {
+    const aucun = { statut: null, detail: [] };
+    const LIBELLES = {
+      address: 'Adresse du projet',
+      author: 'Auteur',
+      buildingName: 'Nom du bâtiment',
+      clientName: 'Nom du client',
+      issueDate: 'Date d’émission',
+      name: 'Nom du projet',
+      number: 'Numéro de projet',
+      organizationName: 'Nom de l’organisation',
+      organizationDescription: 'Description de l’organisation',
+      status: 'Statut',
+    };
+    // Alias BuiltInParameter / libellés techniques → clé extracteur camelCase
+    const ALIAS = {
+      PROJECT_NUMBER: 'number',
+      PROJECT_NAME: 'name',
+      PROJECT_ADDRESS: 'address',
+      CLIENT_NAME: 'clientName',
+      PROJECT_AUTHOR: 'author',
+      AUTHOR: 'author',
+      BUILDING_NAME: 'buildingName',
+      ISSUE_DATE: 'issueDate',
+      ORGANIZATION_NAME: 'organizationName',
+      ORGANIZATION_DESCRIPTION: 'organizationDescription',
+      PROJECT_STATUS: 'status',
+      STATUS: 'status',
+    };
+
+    const resolveCle = (raw) => {
+      const s = String(raw || '').trim();
+      if (!s) return null;
+      if (ALIAS[s]) return ALIAS[s];
+      if (ALIAS[s.toUpperCase()]) return ALIAS[s.toUpperCase()];
+      // camelCase catalogue déjà canonique
+      if (Object.prototype.hasOwnProperty.call(LIBELLES, s)) return s;
+      // insensible à la casse sur les clés canoniques
+      const lower = s.toLowerCase();
+      const found = Object.keys(LIBELLES).find((k) => k.toLowerCase() === lower);
+      return found || null;
+    };
+
+    let specs = Array.isArray(cfgG105?.champs) ? cfgG105.champs : null;
+    // Compat legacy : cible = ["clientName","number"] → mode presence
+    if ((!specs || specs.length === 0) && Array.isArray(cfgG105?.cible) && cfgG105.cible.length > 0
+        && cfgG105.cible.every((x) => typeof x === 'string')) {
+      specs = cfgG105.cible.map((cle) => ({ cle, mode: 'presence' }));
+    }
+    if (!specs || specs.length === 0) return aucun;
+
+    const releves = (valeurJson && typeof valeurJson.champs === 'object' && valeurJson.champs)
+      ? valeurJson.champs
+      : {};
+
+    const detail = [];
+    for (const spec of specs) {
+      if (!spec || typeof spec !== 'object') continue;
+      const cleCanon = resolveCle(spec.cle);
+      const cleAffiche = String(spec.cle || '').trim() || cleCanon || '?';
+      const modeRaw = typeof spec.mode === 'string' ? spec.mode.trim().toLowerCase() : '';
+      const mode = modeRaw === 'presence' || modeRaw === 'exact' || modeRaw === 'contenu'
+        ? modeRaw
+        : 'contenu'; // défaut documenté : normalisé (évite faux positifs)
+      const valeurAttendue = spec.valeurAttendue == null ? '' : String(spec.valeurAttendue);
+      const valeurRelevee = cleCanon && releves[cleCanon] != null ? String(releves[cleCanon]) : '';
+
+      let conforme = false;
+      if (!cleCanon) {
+        conforme = false; // clé inconnue
+      } else if (mode === 'presence') {
+        conforme = valeurRelevee.trim().length > 0;
+      } else if (mode === 'exact') {
+        conforme = valeurRelevee === valeurAttendue;
+      } else {
+        // contenu : trim + insensible à la casse
+        conforme = valeurRelevee.trim().toLowerCase() === valeurAttendue.trim().toLowerCase();
+      }
+
+      detail.push({
+        cle: cleAffiche,
+        cleCanon: cleCanon || null,
+        libelle: (cleCanon && LIBELLES[cleCanon]) || cleAffiche,
+        valeurRelevee,
+        valeurAttendue: mode === 'presence' ? null : valeurAttendue,
+        mode,
+        conforme,
+      });
+    }
+
+    if (detail.length === 0) return aucun;
+    const statut = detail.every((d) => d.conforme) ? 'conforme' : 'non_conforme';
+    return { statut, detail };
   }
 
   /**
