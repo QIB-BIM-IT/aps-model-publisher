@@ -1,5 +1,7 @@
 // src/models/qc/QCJob.js
-// Table qc.jobs — config de contrôle QC planifiable (cron non branché dans cette tranche).
+// Table qc.jobs — config de contrôle QC planifiable.
+// CRUD API : /api/qc/jobs (B1). Scheduler/cron : NON branché tant que B2 n'est pas livré
+// (scheduleEnabled est persisté seulement — voir qcJob.service.js).
 // ⚠️ Ce modèle ne doit JAMAIS être requis avant sequelize.sync() (voir models/qc/index.js) :
 // le schéma qc est géré par les migrations umzug, pas par sync.
 

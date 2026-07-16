@@ -25,6 +25,31 @@ modification des routes existantes ni de `database.js` :
 | `GET` | `/api/qc/projects/:projectKey/config` | Lit `qc.project_config.config` ; absent → `{ controles: {}, criticite: null }` (aucune création) |
 | `PUT` / `POST` | `/api/qc/projects/:projectKey/config` | Upsert merge + **validation backend dérivée du catalogue** (`descriptionCible.validation`) |
 
+## API tâches QC planifiables (B1 — CRUD `qc.jobs`, sans scheduler)
+
+Routes JWT additives (`qc.routes.js` + `qcJob.service.js`). **Aucune** modification de
+`scheduler.service.js`, des tables/routes public, ni de `qcRun.service` (exécution).
+**Pas de** `POST /api/qc/jobs/:id/run` en B1 (réservé B2).
+
+| Méthode | Chemin | Rôle |
+|---|---|---|
+| `POST` | `/api/qc/jobs` | Créer une tâche QC (`projectId` **préfixé** `b.<guid>`, `modelUrn` lineage requis) |
+| `GET` | `/api/qc/jobs` | Lister (`?projectId=`, `?active=`) — include User → `userName` (« Planifiée par ») |
+| `GET` | `/api/qc/jobs/:id` | Détail |
+| `PATCH` | `/api/qc/jobs/:id` | Modifier nom / cron / timezone / cibles / `scheduleEnabled` |
+| `DELETE` | `/api/qc/jobs/:id` | Supprimer (les `qc.runs` liés gardent `jobId` NULL) |
+
+**Planification inactive en B1** : `scheduleEnabled` est **persisté** en base, mais le
+scheduler Node **ignore** encore `qc.jobs`. La réponse inclut `schedulingActive: false`
+et une `schedulingNote`. Le branchement cron + « Run now » (appel `qcRunService.startRun`)
+est l’étape **B2**.
+
+**Cible modèle** : une seule maquette par job (`modelUrn` / `modelName`), aligné sur le
+schéma `qc.jobs` existant — pas de liste JSONB, pas de migration. `accProjectGuid` /
+`accModelGuid` optionnels (guid nus **en plus** de `projectId` préfixé).
+
+**Pas de colonnes notification** sur `qc.jobs` aujourd’hui — non inventées en B1.
+
 **Clé `projectId` (piège G507 — critique)** : `qc.project_config` est indexé par
 `projectId` au format **préfixé** `b.<guid>` — la **même** clé que
 `loadProjectConfig` (scoring) lit via
