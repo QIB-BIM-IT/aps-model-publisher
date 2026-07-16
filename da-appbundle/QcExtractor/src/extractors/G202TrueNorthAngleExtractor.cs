@@ -4,12 +4,16 @@ using Autodesk.Revit.DB;
 namespace QcExtractor.Extractors
 {
     /// <summary>
-    /// G202 — angle au nord (nord projet vs nord VRAI). API vérifiée identique Revit 2024/2025 :
-    /// Document.ActiveProjectLocation.GetProjectPosition(XYZ.Zero).Angle — rotation en radians
-    /// entre le nord projet et le nord vrai, lue à l'origine interne. Convertie en degrés et
-    /// normalisée sur [0, 360).
-    /// valeur_num = angle en degrés pour le scoreur backend 'angle' (comparaison à une cible avec
-    /// tolérance angulaire, wrap-around géré). Sans cible : statut NULL.
+    /// G202 — angle de rotation du NORD PROJET (orientation du modèle).
+    /// API vérifiée identique Revit 2024/2025 :
+    /// Document.ActiveProjectLocation.GetProjectPosition(XYZ.Zero).Angle — rotation en
+    /// radians du nord projet par rapport au nord vrai, lue à l'origine interne.
+    /// Convertie en degrés et normalisée sur [0, 360).
+    /// valeur_num = cet angle (degrés) pour le scoreur backend 'angle', qui le compare à
+    /// une cible HUMAINE en config { angle, tolerance } — JAMAIS au nord vrai comme
+    /// cible implicite (0°). Sans cible : extraction réussie, statut NULL.
+    /// valeur_json.angleNordProjet = même valeur (libellé clair) ; angleNordVrai conservé
+    /// en alias pour compatibilité des lectures historiques.
     /// </summary>
     public class G202TrueNorthAngleExtractor : IControlExtractor
     {
@@ -30,6 +34,8 @@ namespace QcExtractor.Extractors
                 ValeurJson = new
                 {
                     unite = "degres",
+                    angleNordProjet = normalise,
+                    // Alias historique (même valeur) — ne pas interpréter comme « cible = nord vrai »
                     angleNordVrai = normalise,
                     radians = pos.Angle,
                 },

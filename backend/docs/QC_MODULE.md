@@ -173,8 +173,10 @@ reçoit une erreur explicite l'invitant à se reconnecter.
   vides), G200 (modèle/`seuil` — écart point de base projet vs origine interne, comparaison
   INTERNE, `valeur_num` = plus grand écart absolu par axe en mètres), G201 (modèle/**`coordonnees`**
   — **survey point** `BasePoint.GetSurveyPoint(doc).SharedPosition`, PAS le point de base ;
-  3 composantes ns/eo/elev en mètres), G202 (modèle/**`angle`** — angle au nord VRAI via
-  `ActiveProjectLocation.GetProjectPosition(XYZ.Zero).Angle`, degrés normalisés `[0,360)`).
+  3 composantes ns/eo/elev en mètres), G202 (modèle/**`angle`** — angle de rotation du
+  **nord projet** via `GetProjectPosition(XYZ.Zero).Angle`, comparé à une cible humaine
+  `{angle,tolerance}` — pas au nord géographique comme référence implicite ; sans cible :
+  statut NULL).
 
 ## Forme de scoreur « nommage » (lot NOMMAGE)
 
@@ -309,23 +311,28 @@ Cible lisible par un non-développeur — coordonnées attendues + une toléranc
   } } } }
   ```
 
-### `angle` — G202, angle au nord vrai (vs PEB)
+### `angle` — G202, angle du nord projet (vs valeur attendue)
 
-L'extracteur relève `valeur_num` = angle au nord vrai en degrés, normalisé sur
-`[0, 360)`. La cible est l'angle attendu du PEB + une **tolérance angulaire** en degrés.
-Le contrôle est `conforme` si la **distance angulaire** relevé↔attendu est ≤ tolérance.
-La distance angulaire gère le **wrap-around** : `359°` et `1°` sont distants de `2°`
-(et non `358°`), donc une cible proche de `0°` reste conforme pour un relevé proche de
-`360°` si l'écart réel est dans la tolérance.
+G202 mesure l’**angle de rotation du nord projet** (orientation de travail du modèle) :
+API `Document.ActiveProjectLocation.GetProjectPosition(XYZ.Zero).Angle`, convertie en
+degrés et normalisée sur `[0, 360)`. Cet angle est la rotation du nord projet par
+rapport au nord vrai dans Revit — c’est l’orientation du modèle, **pas** une cible
+implicite « nord géographique = 0° ».
+
+Le scoreur compare `valeur_num` à une **valeur attendue saisie par le coordonnateur**
+dans `controles.G202.cible` + une **tolérance angulaire**. Conforme si la distance
+angulaire relevé↔attendu est ≤ tolérance. **Wrap-around** : `359°` et `1°` sont
+distants de `2°` (pas `358°`). **Sans cible** : extraction réussie (angle dans
+`valeur_json.angleNordProjet`), `statut` NULL — cas fréquent sans exigence d’orientation.
 
 ```json
 { "controles": { "G202": { "cible": {
-    "angle": 0.0,
+    "angle": 90.0,
     "tolerance": 0.5
 } } } }
 ```
 
-- `angle` : l'angle attendu du PEB entre nord projet et nord vrai, **en degrés**.
+- `angle` : angle de rotation du nord projet **attendu** au PEB, **en degrés**.
 - `tolerance` : écart angulaire maximal toléré, **en degrés** (ex. `0.5`).
 
 ## Forme de scoreur « couverture » (lot G504 — codification UNIFORMAT)
