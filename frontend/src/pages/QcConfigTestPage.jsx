@@ -1,12 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchQcCibleDescriptions } from '../services/api';
-import WidgetRenderer, {
-  isImplementedWidgetType,
-  isPartieBWidgetType,
-} from '../components/qc-config/WidgetRenderer';
+import WidgetRenderer, { isImplementedWidgetType } from '../components/qc-config/WidgetRenderer';
 
 /**
- * Page de test isolée — lot 2 (moteur + widgets simples + complexes partie A).
+ * Page de test isolée — lot 2 (moteur complet : 25 contrôles).
  * Charge GET /api/qc/controls/cible-descriptions, capture la saisie dans l'état local
  * (pas d'enregistrement en base).
  */
@@ -43,8 +40,8 @@ export default function QcConfigTestPage() {
     () => controles.filter((c) => isImplementedWidgetType(c?.descriptionCible?.typeWidget)),
     [controles]
   );
-  const partieB = useMemo(
-    () => controles.filter((c) => isPartieBWidgetType(c?.descriptionCible?.typeWidget)),
+  const unknown = useMemo(
+    () => controles.filter((c) => !isImplementedWidgetType(c?.descriptionCible?.typeWidget)),
     [controles]
   );
 
@@ -65,8 +62,8 @@ export default function QcConfigTestPage() {
         QC Config — page de test (lot 2)
       </h2>
       <p style={{ margin: '0 0 20px', fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
-        Moteur adaptatif + widgets simples et complexes (partie A). État capturé en direct
-        ci-dessous — aucun enregistrement en base dans ce lot.
+        Moteur adaptatif complet (25 contrôles). État capturé en direct ci-dessous — aucun
+        enregistrement en base dans ce lot.
       </p>
 
       {loading ? (
@@ -93,8 +90,15 @@ export default function QcConfigTestPage() {
         <p style={{ fontSize: 13, color: '#475569', marginBottom: 16 }}>
           Contrôles rendus :{' '}
           <strong>{implemented.map((c) => c.code).join(', ') || '(aucun)'}</strong>
-          {' '}({implemented.length}) — partie B (à venir) :{' '}
-          {partieB.map((c) => `${c.code}(${c.descriptionCible?.typeWidget})`).join(', ') || '—'}
+          {' '}({implemented.length}/{controles.length})
+          {unknown.length ? (
+            <span style={{ color: '#b91c1c' }}>
+              {' '}
+              — non couverts : {unknown.map((c) => `${c.code}(${c.descriptionCible?.typeWidget})`).join(', ')}
+            </span>
+          ) : (
+            <span style={{ color: '#15803d' }}> — couverture complète</span>
+          )}
         </p>
       ) : null}
 
@@ -102,6 +106,7 @@ export default function QcConfigTestPage() {
         {implemented.map((c) => (
           <section
             key={c.code}
+            data-code={c.code}
             style={{
               border: '1px solid #e2e8f0',
               borderRadius: 10,
@@ -130,33 +135,13 @@ export default function QcConfigTestPage() {
                 }}
               >
                 {c.descriptionCible?.typeWidget}
+                {c.descriptionCible?.cleConfig
+                  ? ` · ${c.descriptionCible.cleConfig}`
+                  : ''}
               </span>
               {c.nature ? (
                 <span style={{ fontSize: 11, color: '#64748b' }}>{c.nature}</span>
               ) : null}
-            </div>
-            <WidgetRenderer
-              descriptionCible={c.descriptionCible}
-              valeur={config[c.code]}
-              onChange={(v) => setControlValue(c.code, v)}
-            />
-          </section>
-        ))}
-
-        {/* Placeholders partie B — visibles pour le suivi */}
-        {partieB.map((c) => (
-          <section
-            key={c.code}
-            style={{
-              border: '1px dashed #cbd5e1',
-              borderRadius: 10,
-              padding: 14,
-              background: '#f8fafc',
-            }}
-          >
-            <div style={{ marginBottom: 10 }}>
-              <span style={{ fontWeight: 700, fontSize: 14 }}>{c.code}</span>
-              <span style={{ fontSize: 13, color: '#334155', marginLeft: 8 }}>{c.libelle}</span>
             </div>
             <WidgetRenderer
               descriptionCible={c.descriptionCible}
