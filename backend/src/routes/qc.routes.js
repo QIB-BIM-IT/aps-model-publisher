@@ -2,19 +2,24 @@
 // Routes du module QC BIM (tranche verticale G408).
 //
 // ⚠️ Ce fichier est requis par server.js AVANT connectDB()/sync() : il ne doit requérir
-// AUCUN modèle qc au chargement (qcRun.service charge ses modèles paresseusement).
+// AUCUN modèle qc au chargement (qcRun.service / qcProjectConfig.service chargent
+// leurs modèles paresseusement).
 //
 // Routes :
 //  - POST /api/qc/runs           (auth JWT) lance un run QC manuel
 //  - GET  /api/qc/runs           (auth JWT) liste les runs récents
 //  - GET  /api/qc/runs/:id       (auth JWT) détail d'un run + résultats + warnings
 //  - POST /api/qc/da-callback    (jeton HMAC dans l'URL) complétion onComplete de DA
+//  - GET  /api/qc/controls/cible-descriptions  (auth JWT) catalogue formulaire (lot 1)
+//  - GET  /api/qc/projects/:projectKey/config  (auth JWT) lecture config projet
+//  - PUT|POST /api/qc/projects/:projectKey/config (auth JWT) écriture merge + validation
 
 const express = require('express');
 const router = express.Router();
 const logger = require('../config/logger');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const qcRunService = require('../services/qcRun.service');
+const qcProjectConfigService = require('../services/qcProjectConfig.service');
 
 function notReady(res) {
   return res.status(503).json({
@@ -148,5 +153,61 @@ router.post('/da-callback', express.json({ limit: '1mb' }), async (req, res) => 
     .then((r) => logger.info(`[QC] Callback DA runId=${runId}: handled=${r.handled} (${r.reason || r.status || ''})`))
     .catch((e) => logger.error(`[QC] Callback DA runId=${runId} erreur: ${e.message}`));
 });
+
+// ---------------------------------------------------------------------------
+// Lot 1 — formulaire de configuration (couche données uniquement)
+// Clé project_config = projectId PRÉFIXÉ "b.<guid>" (voir qcProjectConfig.service).
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/qc/controls/cible-descriptions
+ * Métadonnées formulaire par contrôle actif (descriptionCible, nature Auto/Mixte/Manuel).
+ * N'expose pas les détails techniques d'extraction inutiles au rendu.
+ */
+router.get('/controls/cible-descriptions', authenticateToken, async (req, res) => {
+  try {
+    const payload = qcProjectConfigService.getCibleDescriptions();
+    return res.json({ success: true, ...payload });
+  } catch (err) {
+    logger.error(`[QC] GET /controls/cible-descriptions: ${err.message}`);
+    return res.status(httpStatus(err)).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * GET /api/qc/projects/:projectKey/config
+ * projectKey = "b.<guid>" OU accProjectGuid nu (résolu comme le scoreur).
+ * Aucune ligne créée en lecture ; config absente → { controles: {}, criticite: null }.
+ */
+router.get('/projects/:projectKey/config', authenticateToken, async (req, res) => {
+  try {
+    const result = await qcProjectConfigService.getProjectConfig(req.params.projectKey);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error(`[QC] GET /projects/:projectKey/config: ${err.message}`);
+    return res.status(httpStatus(err)).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * PUT|POST /api/qc/projects/:projectKey/config
+ * Body: { controles?: { [code]: object|null }, criticite?: object|null }
+ * Validation dérivée du catalogue (descriptionCible.validation) avant écriture.
+ * Merge au niveau controles[code] ; upsert sous projectId préfixé.
+ */
+async function writeProjectConfig(req, res) {
+  try {
+    const result = await qcProjectConfigService.upsertProjectConfig(req.params.projectKey, req.body);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error(`[QC] ${req.method} /projects/:projectKey/config: ${err.message}`);
+    const body = { success: false, message: err.message };
+    if (Array.isArray(err.errors)) body.errors = err.errors;
+    return res.status(httpStatus(err)).json(body);
+  }
+}
+
+router.put('/projects/:projectKey/config', authenticateToken, writeProjectConfig);
+router.post('/projects/:projectKey/config', authenticateToken, writeProjectConfig);
 
 module.exports = router;
