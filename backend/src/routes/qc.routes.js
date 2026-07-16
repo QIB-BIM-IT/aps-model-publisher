@@ -13,6 +13,7 @@
 //  - GET  /api/qc/controls/cible-descriptions  (auth JWT) catalogue formulaire (lot 1)
 //  - GET  /api/qc/projects/:projectKey/config  (auth JWT) lecture config projet
 //  - PUT|POST /api/qc/projects/:projectKey/config (auth JWT) écriture merge + validation
+//  - POST/GET/PATCH/DELETE /api/qc/jobs[/:id] (auth JWT) CRUD tâches QC (B1 — sans run/scheduler)
 
 const express = require('express');
 const router = express.Router();
@@ -20,6 +21,7 @@ const logger = require('../config/logger');
 const { authenticateToken } = require('../middleware/auth.middleware');
 const qcRunService = require('../services/qcRun.service');
 const qcProjectConfigService = require('../services/qcProjectConfig.service');
+const qcJobService = require('../services/qcJob.service');
 
 function notReady(res) {
   return res.status(503).json({
@@ -209,5 +211,91 @@ async function writeProjectConfig(req, res) {
 
 router.put('/projects/:projectKey/config', authenticateToken, writeProjectConfig);
 router.post('/projects/:projectKey/config', authenticateToken, writeProjectConfig);
+
+// ---------------------------------------------------------------------------
+// B1 — CRUD tâches QC (qc.jobs)
+// Miroir Publish/PDF/Copie, SANS POST .../run et SANS branchement scheduler.
+// scheduleEnabled est persisté mais inactif jusqu'à B2 (schedulingActive: false).
+// ⚠️ Ne pas requérir les modèles qc au chargement de ce fichier (lazy via service).
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/qc/jobs
+ * Body: name?, projectId (b.<guid>), projectName?, hubId?, modelUrn (ou itemUrn),
+ *       modelName?, region?, accProjectGuid?, accModelGuid?,
+ *       scheduleEnabled? (défaut false), cronExpression?, timezone?
+ */
+router.post('/jobs', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const job = await qcJobService.createJob(req.userId, req.body || {});
+    return res.status(201).json({ success: true, data: job });
+  } catch (err) {
+    logger.error(`[QC] POST /jobs: ${err.message}`);
+    return res.status(httpStatus(err)).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * GET /api/qc/jobs?projectId=&active=
+ * Liste globale (comme Publish) ; filtre optionnel projectId (b.<guid>).
+ */
+router.get('/jobs', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const jobs = await qcJobService.listJobs({
+      projectId: req.query.projectId,
+      active: req.query.active,
+    });
+    return res.json({ success: true, data: jobs });
+  } catch (err) {
+    logger.error(`[QC] GET /jobs: ${err.message}`);
+    return res.status(httpStatus(err)).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * GET /api/qc/jobs/:id
+ */
+router.get('/jobs/:id', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const job = await qcJobService.getJobById(req.params.id);
+    return res.json({ success: true, data: job });
+  } catch (err) {
+    logger.error(`[QC] GET /jobs/:id: ${err.message}`);
+    return res.status(httpStatus(err)).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * PATCH /api/qc/jobs/:id
+ * Persiste name/cron/timezone/cibles/scheduleEnabled. Aucun effet scheduler en B1.
+ */
+router.patch('/jobs/:id', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const job = await qcJobService.updateJob(req.params.id, req.body || {});
+    return res.json({ success: true, data: job });
+  } catch (err) {
+    logger.error(`[QC] PATCH /jobs/:id: ${err.message}`);
+    return res.status(httpStatus(err)).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * DELETE /api/qc/jobs/:id
+ * Les runs liés gardent jobId NULL (ON DELETE SET NULL) — preuve conservée.
+ */
+router.delete('/jobs/:id', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    await qcJobService.deleteJob(req.params.id);
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error(`[QC] DELETE /jobs/:id: ${err.message}`);
+    return res.status(httpStatus(err)).json({ success: false, message: err.message });
+  }
+});
 
 module.exports = router;
