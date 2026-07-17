@@ -24,6 +24,7 @@ import api, {
   deleteCopyJob,
   runCopyJobNow,
   getCopyRuns,
+  fetchQcJobs,
 } from '../services/api';
 import { PDFExportModal } from '../components/PDFExportModal';
 
@@ -733,6 +734,9 @@ export default function PlanningPage() {
   const [copyJobs, setCopyJobs] = React.useState([]);
   const copyRunsRef = React.useRef([]);
 
+  /** Tâches QC (lecture F1d — création/actions en F1e). */
+  const [qcJobs, setQcJobs] = React.useState([]);
+
   // État du modal de création de copie
   const [showCopyModal, setShowCopyModal] = React.useState(false);
   const [copyDestProjects, setCopyDestProjects] = React.useState([]);
@@ -834,10 +838,11 @@ export default function PlanningPage() {
             setHasProjectAccess(false);
             // Charger les jobs/runs du projet via notre API (pas besoin d'accès ACC)
             try {
-              const [pubJobs, pdfJobs, cpJobs, pubRuns, pdfRuns, cpRuns] = await Promise.all([
+              const [pubJobs, pdfJobs, cpJobs, qcList, pubRuns, pdfRuns, cpRuns] = await Promise.all([
                 getPublishJobs({ projectId: preSelectProject }),
                 getPDFExportJobs({ projectId: preSelectProject }),
                 getCopyJobs({ projectId: preSelectProject }),
+                fetchQcJobs({ projectId: preSelectProject }),
                 getRuns({ projectId: preSelectProject, limit: 50 }),
                 getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
                 getCopyRuns({ projectId: preSelectProject, limit: 50 }),
@@ -845,6 +850,7 @@ export default function PlanningPage() {
               setJobs(Array.isArray(pubJobs) ? pubJobs : []);
               setPdfExportJobs(Array.isArray(pdfJobs) ? pdfJobs : []);
               setCopyJobs(Array.isArray(cpJobs) ? cpJobs : []);
+              setQcJobs(Array.isArray(qcList) ? qcList : []);
               publishRunsRef.current = Array.isArray(pubRuns) ? pubRuns : [];
               pdfRunsRef.current = Array.isArray(pdfRuns) ? pdfRuns : [];
               copyRunsRef.current = Array.isArray(cpRuns) ? cpRuns : [];
@@ -875,6 +881,7 @@ export default function PlanningPage() {
     setJobName('');
     setPdfExportJobs([]);
     setCopyJobs([]);
+    setQcJobs([]);
     setJobs([]);
     setRuns([]);
     publishRunsRef.current = [];
@@ -909,10 +916,11 @@ export default function PlanningPage() {
           setTopFolders([]);
           // Charger les jobs/runs du projet inaccessible via notre API
           try {
-            const [pubJobs, pdfJobs, cpJobs, pubRuns, pdfRuns, cpRuns] = await Promise.all([
+            const [pubJobs, pdfJobs, cpJobs, qcList, pubRuns, pdfRuns, cpRuns] = await Promise.all([
               getPublishJobs({ projectId: preSelectProject }),
               getPDFExportJobs({ projectId: preSelectProject }),
               getCopyJobs({ projectId: preSelectProject }),
+              fetchQcJobs({ projectId: preSelectProject }),
               getRuns({ projectId: preSelectProject, limit: 50 }),
               getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
               getCopyRuns({ projectId: preSelectProject, limit: 50 }),
@@ -920,6 +928,7 @@ export default function PlanningPage() {
             setJobs(Array.isArray(pubJobs) ? pubJobs : []);
             setPdfExportJobs(Array.isArray(pdfJobs) ? pdfJobs : []);
             setCopyJobs(Array.isArray(cpJobs) ? cpJobs : []);
+            setQcJobs(Array.isArray(qcList) ? qcList : []);
             publishRunsRef.current = Array.isArray(pubRuns) ? pubRuns : [];
             pdfRunsRef.current = Array.isArray(pdfRuns) ? pdfRuns : [];
             copyRunsRef.current = Array.isArray(cpRuns) ? cpRuns : [];
@@ -946,9 +955,12 @@ export default function PlanningPage() {
     if (!hubId || !projectId) {
       setTopFolders([]);
       setPdfExportJobs([]);
+      setCopyJobs([]);
+      setQcJobs([]);
       setRuns([]);
       publishRunsRef.current = [];
       pdfRunsRef.current = [];
+      copyRunsRef.current = [];
       setJobType(null);
       setJobName('');
       setHasProjectAccess(null);
@@ -964,14 +976,30 @@ export default function PlanningPage() {
       const data = await fetchTopFolders(hubId, projectId);
       setTopFolders(data);
       setHasProjectAccess(true);
-      await Promise.all([refreshJobs(), refreshRuns(), refreshPdfJobs(), refreshPdfRuns(), refreshCopyJobs(), refreshCopyRuns()]);
+      await Promise.all([
+        refreshJobs(),
+        refreshRuns(),
+        refreshPdfJobs(),
+        refreshPdfRuns(),
+        refreshCopyJobs(),
+        refreshCopyRuns(),
+        refreshQcJobs(),
+      ]);
     } catch (e) {
       const status = e?.response?.status || e?.status;
       const msg = e?.message || '';
       if (status === 403 || status === 500 && (msg.includes('403') || msg.includes('BIM360DM_ERROR'))) {
         setHasProjectAccess(false);
         setTopFolders([]);
-        await Promise.all([refreshJobs(), refreshRuns(), refreshPdfJobs(), refreshPdfRuns(), refreshCopyJobs(), refreshCopyRuns()]);
+        await Promise.all([
+          refreshJobs(),
+          refreshRuns(),
+          refreshPdfJobs(),
+          refreshPdfRuns(),
+          refreshCopyJobs(),
+          refreshCopyRuns(),
+          refreshQcJobs(),
+        ]);
       } else {
         setError(e?.message || 'Erreur dossiers');
         setHasProjectAccess(true); // Autre erreur, pas un problème d'accès
@@ -1148,6 +1176,22 @@ export default function PlanningPage() {
         setError(e?.message || 'Erreur copy runs');
       } finally {
         if (!silent) setLoadingRuns(false);
+      }
+    },
+    [selectedProject]
+  );
+
+  const refreshQcJobs = React.useCallback(
+    async ({ silent = false } = {}) => {
+      if (!selectedProject) return;
+      if (!silent) setLoadingJobs(true);
+      try {
+        const list = await fetchQcJobs({ projectId: selectedProject });
+        setQcJobs(Array.isArray(list) ? list : []);
+      } catch (e) {
+        setError(e?.message || 'Erreur tâches QC');
+      } finally {
+        if (!silent) setLoadingJobs(false);
       }
     },
     [selectedProject]
@@ -1819,8 +1863,12 @@ export default function PlanningPage() {
       setJobs([]);
       setRuns([]);
       setPdfExportJobs([]);
+      // Fix préexistant : copyJobs était oublié ici → aussi qcJobs (F1d)
+      setCopyJobs([]);
+      setQcJobs([]);
       publishRunsRef.current = [];
       pdfRunsRef.current = [];
+      copyRunsRef.current = [];
     }
   }, [selectedHub, selectedProject]);
 
@@ -1877,8 +1925,16 @@ export default function PlanningPage() {
     const hasRunningJobs = jobs.some((j) => j.status === 'running');
     const hasRunningPdfJobs = pdfExportJobs.some((j) => j.status === 'running');
     const hasRunningCopyJobs = copyJobs.some((j) => j.status === 'running');
-    return hasRunningRuns || hasRunningJobs || hasRunningPdfJobs || hasRunningCopyJobs || autoRefreshActive;
-  }, [selectedProject, runs, jobs, pdfExportJobs, copyJobs, autoRefreshActive]);
+    const hasRunningQcJobs = qcJobs.some((j) => j.status === 'running');
+    return (
+      hasRunningRuns ||
+      hasRunningJobs ||
+      hasRunningPdfJobs ||
+      hasRunningCopyJobs ||
+      hasRunningQcJobs ||
+      autoRefreshActive
+    );
+  }, [selectedProject, runs, jobs, pdfExportJobs, copyJobs, qcJobs, autoRefreshActive]);
 
   React.useEffect(() => {
     if (!shouldAutoRefresh) return undefined;
@@ -1890,12 +1946,22 @@ export default function PlanningPage() {
       void refreshPdfJobs({ silent: true });
       void refreshCopyRuns({ silent: true });
       void refreshCopyJobs({ silent: true });
+      void refreshQcJobs({ silent: true });
     };
 
     tick();
     const interval = setInterval(tick, 3000);
     return () => clearInterval(interval);
-  }, [shouldAutoRefresh, refreshRuns, refreshJobs, refreshPdfRuns, refreshPdfJobs, refreshCopyRuns, refreshCopyJobs]);
+  }, [
+    shouldAutoRefresh,
+    refreshRuns,
+    refreshJobs,
+    refreshPdfRuns,
+    refreshPdfJobs,
+    refreshCopyRuns,
+    refreshCopyJobs,
+    refreshQcJobs,
+  ]);
 
   // Polling « léger » dédié à la confirmation webhook ACC : le webhook dm.version.added
   // arrive APRÈS la fin du run (success/partial). On continue donc à rafraîchir les runs
@@ -2618,7 +2684,13 @@ export default function PlanningPage() {
           {!selectedProject && hasProjectAccess !== false ? (
             <p style={{ color: '#9ca3af' }}>Sélectionne un projet</p>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 24 }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                gap: 16,
+              }}
+            >
               {/* Colonne Publish */}
               <div>
                 <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
@@ -2939,6 +3011,100 @@ export default function PlanningPage() {
                               </Button>
                             </div>
                           )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Colonne QC — lecture seule F1d (actions câblées en F1e) */}
+              <div>
+                <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
+                  ✅ Tâches QC ({qcJobs.length})
+                </h4>
+                {loadingJobs ? (
+                  <p style={{ color: '#6b7280', fontSize: 13 }}>Chargement...</p>
+                ) : qcJobs.length === 0 ? (
+                  <p style={{ color: '#9ca3af', fontSize: 13 }}>Aucune tâche QC</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {qcJobs.map((j) => {
+                      const cronParts =
+                        typeof j.cronExpression === 'string' ? j.cronExpression.trim().split(/\s+/) : [];
+                      const minutePart = cronParts[0];
+                      const hourPart = cronParts[1];
+                      const isSimpleTime = /^\d+$/.test(hourPart || '') && /^\d+$/.test(minutePart || '');
+                      const displayTime = isSimpleTime
+                        ? `${hourPart.padStart(2, '0')}:${minutePart.padStart(2, '0')}`
+                        : j.cronExpression
+                          ? 'Planification personnalisée'
+                          : 'Non planifiée';
+                      const statusLabel = !j.scheduleEnabled ? 'Pausé' : j.status || 'idle';
+                      const badgeStyles = !j.scheduleEnabled
+                        ? { background: 'rgba(148, 163, 184, 0.2)', color: '#475569' }
+                        : j.status === 'running'
+                          ? {
+                              background: 'rgba(99, 102, 241, 0.35)',
+                              color: '#3730a3',
+                              border: '1px solid rgba(99, 102, 241, 0.4)',
+                            }
+                          : j.status === 'error'
+                            ? {
+                                background: 'rgba(239, 68, 68, 0.2)',
+                                color: '#b91c1c',
+                                border: '1px solid rgba(239, 68, 68, 0.35)',
+                              }
+                            : {
+                                background: 'rgba(99, 102, 241, 0.2)',
+                                color: '#4338ca',
+                                border: '1px solid rgba(99, 102, 241, 0.35)',
+                              };
+
+                      return (
+                        <div
+                          key={j.id}
+                          style={{
+                            padding: '10px 12px',
+                            background: 'rgba(99, 102, 241, 0.1)',
+                            borderRadius: 8,
+                            border: '1px solid rgba(99, 102, 241, 0.3)',
+                            fontSize: 13,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                          }}
+                        >
+                          <div style={{ fontWeight: 600, color: '#1f2937' }}>{j.name || 'Sans nom'}</div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            {j.modelName || j.modelUrn?.slice(0, 24) || 'Maquette'} • 🕐 {displayTime} •{' '}
+                            {j.timezone || 'UTC'}
+                          </div>
+                          <div style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic' }}>
+                            Planifiée par :{' '}
+                            <span style={{ fontWeight: 500, color: '#475569' }}>
+                              {j.userName || 'Utilisateur inconnu'}
+                            </span>
+                          </div>
+                          <div>
+                            <span
+                              style={{
+                                padding: '4px 10px',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                ...badgeStyles,
+                              }}
+                            >
+                              {statusLabel}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                            Actions (pause / run / modifier / supprimer) — F1e
+                          </div>
                         </div>
                       );
                     })}
