@@ -210,7 +210,7 @@ export default function QcConfigPage() {
   const loadProjectConfig = useCallback(
     async (projectId) => {
       if (!projectId || !String(projectId).startsWith('b.')) {
-        setError('Identifiant projet invalide (attendu b.<guid>)');
+        setError('Projet invalide — sélectionnez un projet ACC dans la liste.');
         return;
       }
       setLoadingConfig(true);
@@ -344,9 +344,9 @@ export default function QcConfigPage() {
       <div style={pageInner}>
         <h1 style={pageTitle}>Configuration QC — par projet</h1>
         <p style={pageSubtitle}>
-          Choisissez un hub puis un projet ACC. Les cibles s&apos;appliquent à tous les runs QC
-          de ce projet (clé <code style={{ color: '#cbd5e1' }}>b.&lt;guid&gt;</code>). Les
-          maquettes à auditer se choisissent à la création de tâche (F1).
+          Sélectionnez un projet pour définir ses cibles de contrôle qualité. Ces cibles
+          serviront à évaluer les maquettes de ce projet. Le choix des maquettes à auditer
+          se fait au moment de planifier une tâche QC.
         </p>
 
         {/* Sélection hub / projet — carte type Planning */}
@@ -426,8 +426,16 @@ export default function QcConfigPage() {
 
           {loadedProjectId ? (
             <p style={{ ...muted, marginTop: 16, marginBottom: 0 }}>
-              Config chargée pour <strong style={{ color: '#0f172a' }}>{loadedProjectId}</strong>
-              {existsInDb ? ' (existante en base)' : ' (aucune config encore — défauts widgets)'}
+              Configuration chargée pour le projet{' '}
+              <strong style={{ color: '#0f172a' }}>
+                {nameOf(
+                  projects.find((p) => idOf(p) === selectedProject),
+                  loadedProjectId
+                )}
+              </strong>
+              {existsInDb
+                ? ' (déjà enregistrée).'
+                : ' (aucune configuration enregistrée — valeurs par défaut affichées).'}
             </p>
           ) : null}
         </div>
