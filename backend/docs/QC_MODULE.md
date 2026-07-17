@@ -42,13 +42,22 @@ Routes JWT additives (`qc.routes.js` + `qcJob.service.js`). **Aucune** modificat
 **Planification inactive en B1** : `scheduleEnabled` est **persisté** en base, mais le
 scheduler Node **ignore** encore `qc.jobs`. La réponse inclut `schedulingActive: false`
 et une `schedulingNote`. Le branchement cron + « Run now » (appel `qcRunService.startRun`)
-est l’étape **B2**.
+est l’étape **B2 partie 2**.
+
+**B2 partie 1 — sync statut job à la finalisation du run** (`qcRun.service.js`) : quand un
+`qc.runs` porte un `jobId`, la finalisation (`handleCompletion`, timeout de polling, garde
+pré-soumission, échec de submit) met à jour `qc.jobs.status` :
+`success` → `idle`, `failed`/timeout → `error`. Sans `jobId` (run manuel) : no-op.
+Idempotent ; job introuvable → log sans faire échouer le run. Pas de `lastRun` /
+`nextRun` sur `qc.jobs` (absents du schéma) — le calcul cron reste B2.2 / scheduler.
+**Le scheduler n’est pas touché** dans cette partie.
 
 **Cible modèle** : une seule maquette par job (`modelUrn` / `modelName`), aligné sur le
 schéma `qc.jobs` existant — pas de liste JSONB, pas de migration. `accProjectGuid` /
 `accModelGuid` optionnels (guid nus **en plus** de `projectId` préfixé).
 
 **Pas de colonnes notification** sur `qc.jobs` aujourd’hui — non inventées en B1.
+**Statuts job** (`qc.job_status`) : `idle` | `running` | `error`.
 
 **Clé `projectId` (piège G507 — critique)** : `qc.project_config` est indexé par
 `projectId` au format **préfixé** `b.<guid>` — la **même** clé que
