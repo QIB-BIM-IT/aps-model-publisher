@@ -161,9 +161,9 @@ export default function WidgetRenderer({ descriptionCible, valeur, onChange }) {
         <div
           style={{
             padding: 12,
-            borderRadius: 8,
-            border: '1px dashed #cbd5e1',
-            background: '#f8fafc',
+            borderRadius: 10,
+            border: '1px dashed rgba(148, 163, 184, 0.45)',
+            background: 'rgba(248, 250, 252, 0.9)',
             fontSize: 13,
             color: '#64748b',
           }}

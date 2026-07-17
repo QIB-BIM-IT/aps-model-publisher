@@ -1,5 +1,6 @@
 import React from 'react';
 import WidgetChrome from './WidgetChrome';
+import { warnPanel } from './widgetStyles';
 
 /**
  * Widget contrôlé — typeWidget: indicatif (G402, G314)
@@ -13,18 +14,7 @@ export default function IndicatifWidget({ descriptionCible }) {
 
   return (
     <WidgetChrome descriptionCible={descriptionCible}>
-      <div
-        style={{
-          padding: '10px 12px',
-          borderRadius: 6,
-          background: '#fffbeb',
-          border: '1px solid #fde68a',
-          fontSize: 13,
-          color: '#92400e',
-        }}
-      >
-        {mention}
-      </div>
+      <div style={warnPanel}>{mention}</div>
     </WidgetChrome>
   );
 }
