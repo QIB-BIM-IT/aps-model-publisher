@@ -52,6 +52,7 @@ function jobTypeLabel(jobType) {
   if (jobType === 'pdf-export') return 'Export PDF';
   if (jobType === 'file-copy') return 'Copie de fichiers';
   if (jobType === 'publish') return 'Publication';
+  if (jobType === 'qc') return 'Contrôle qualité';
   return 'Tâche';
 }
 

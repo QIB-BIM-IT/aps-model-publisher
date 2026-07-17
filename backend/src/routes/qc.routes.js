@@ -13,7 +13,8 @@
 //  - GET  /api/qc/controls/cible-descriptions  (auth JWT) catalogue formulaire (lot 1)
 //  - GET  /api/qc/projects/:projectKey/config  (auth JWT) lecture config projet
 //  - PUT|POST /api/qc/projects/:projectKey/config (auth JWT) écriture merge + validation
-//  - POST/GET/PATCH/DELETE /api/qc/jobs[/:id] (auth JWT) CRUD tâches QC (B1 — sans run/scheduler)
+//  - POST/GET/PATCH/DELETE /api/qc/jobs[/:id] (auth JWT) CRUD tâches QC
+//  - POST /api/qc/jobs/:id/run (auth JWT) Run Now — scheduler async B2.2
 
 const express = require('express');
 const router = express.Router();
@@ -213,9 +214,8 @@ router.put('/projects/:projectKey/config', authenticateToken, writeProjectConfig
 router.post('/projects/:projectKey/config', authenticateToken, writeProjectConfig);
 
 // ---------------------------------------------------------------------------
-// B1 — CRUD tâches QC (qc.jobs)
-// Miroir Publish/PDF/Copie, SANS POST .../run et SANS branchement scheduler.
-// scheduleEnabled est persisté mais inactif jusqu'à B2 (schedulingActive: false).
+// CRUD tâches QC (qc.jobs) + Run Now (B2.2)
+// Planification via scheduler (async DA, sans lock projet).
 // ⚠️ Ne pas requérir les modèles qc au chargement de ce fichier (lazy via service).
 // ---------------------------------------------------------------------------
 
@@ -270,7 +270,7 @@ router.get('/jobs/:id', authenticateToken, async (req, res) => {
 
 /**
  * PATCH /api/qc/jobs/:id
- * Persiste name/cron/timezone/cibles/scheduleEnabled. Aucun effet scheduler en B1.
+ * Persiste name/cron/timezone/cibles/scheduleEnabled (+ replanifie si besoin).
  */
 router.patch('/jobs/:id', authenticateToken, async (req, res) => {
   if (!qcRunService.isReady()) return notReady(res);
@@ -294,6 +294,21 @@ router.delete('/jobs/:id', authenticateToken, async (req, res) => {
     return res.json({ success: true });
   } catch (err) {
     logger.error(`[QC] DELETE /jobs/:id: ${err.message}`);
+    return res.status(httpStatus(err)).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/qc/jobs/:id/run — Run Now (B2.2)
+ * Branche scheduler QC async : soumet DA et rend la main (pas de lock projet).
+ */
+router.post('/jobs/:id/run', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const run = await qcJobService.runJobNow(req.params.id);
+    return res.status(202).json({ success: true, data: run });
+  } catch (err) {
+    logger.error(`[QC] POST /jobs/:id/run: ${err.message}`);
     return res.status(httpStatus(err)).json({ success: false, message: err.message });
   }
 });

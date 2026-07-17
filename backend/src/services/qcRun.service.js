@@ -339,7 +339,8 @@ class QcRunService {
    * - pas de jobId (run manuel) → no-op
    * - job supprimé → log + continue (le run reste finalisé)
    * - idempotent : réécrire idle/error est sans effet de bord
-   * - pas de lastRun (colonne absente de qc.jobs) ; pas de nextRun (scheduler B2.2)
+   * - lastRun mis à jour si la colonne existe (migration 0005)
+   * - nextRun non touché ici (calculé par le scheduler à la soumission)
    *
    * @param {object} run - instance QCRun (ou plain) avec jobId
    * @param {'success'|'failed'} terminalStatus
@@ -353,7 +354,8 @@ class QcRunService {
 
     try {
       const { QCJob } = this.getModels();
-      const [updated] = await QCJob.update({ status: jobStatus }, { where: { id: jobId } });
+      const patch = { status: jobStatus, lastRun: new Date() };
+      const [updated] = await QCJob.update(patch, { where: { id: jobId } });
       if (updated === 0) {
         logger.warn(
           `[QC] Job ${jobId} introuvable pour sync statut après run ${run.id || '?'} ` +

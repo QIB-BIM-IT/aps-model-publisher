@@ -112,6 +112,11 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 
     await require('./services/qcRun.service').init().catch((e) => logger.error(`⚠️ Module QC non initialisé (mode dégradé, fonctionnalités existantes intactes): ${e.message}`)); // 🆕 QC BIM — chargé APRÈS sync(), schéma qc géré par umzug
 
+    // B2.2 — planifier les QCJob après init QC (migrations + modèles). Ne touche pas Publish/PDF/Copie.
+    await scheduler.initQcSchedule().catch((e) =>
+      logger.error(`⚠️ Scheduler QC non initialisé: ${e.message}`)
+    );
+
     const server = app.listen(PORT, () => {
       logger.info(`🚀 Serveur démarré sur le port ${PORT}`);
       logger.info(`📊 Environnement: ${process.env.NODE_ENV || 'development'}`);

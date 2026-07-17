@@ -29,10 +29,12 @@ QCJob.init(
     modelUrn: { type: DataTypes.STRING(512), allowNull: true },
     modelName: { type: DataTypes.STRING, allowNull: true },
 
-    // Planification (inactif dans cette tranche)
+    // Planification (scheduler branché en B2.2 — fire-and-forget, sans lock projet)
     scheduleEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     cronExpression: { type: DataTypes.STRING(64), allowNull: true },
     timezone: { type: DataTypes.STRING(64), allowNull: false, defaultValue: 'UTC' },
+    nextRun: { type: DataTypes.DATE, allowNull: true },
+    lastRun: { type: DataTypes.DATE, allowNull: true },
 
     // Colonne de type qc.job_status côté DB ; STRING + validation côté modèle
     // pour éviter que Sequelize ne cherche/génère ses propres types enum.
