@@ -1,13 +1,15 @@
 import React from 'react';
 import WidgetChrome from './WidgetChrome';
-import StringListEditor from './StringListEditor';
-import { inputStyle, labelStyle } from './widgetStyles';
+import { inputStyle, labelStyle, aideStyle } from './widgetStyles';
+import { labelBuiltinCategoryFr } from '../builtinCategoryLabelsFr';
 
 /**
  * Widget contrôlé — typeWidget: parametreUniformat (G504)
  * Forme scoreur (resolveUniformatConfig) :
  *   controles.G504 = { parametre: { kind, valeur }, categories: string[] }
  * (cible numérique optionnelle pour activer la porte — hors scope minimal ici).
+ *
+ * Affichage catégories : noms d'interface Revit FR ; valeurs stockées = BuiltInCategory (OST_…).
  * props: { descriptionCible, valeur, onChange }
  */
 
@@ -26,10 +28,25 @@ function parseParamKey(key) {
   return { kind, valeur };
 }
 
+function uniqueBics(list) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of list || []) {
+    const bic = String(raw || '').trim();
+    if (!bic || seen.has(bic)) continue;
+    seen.add(bic);
+    out.push(bic);
+  }
+  return out;
+}
+
 export default function ParametreUniformatWidget({ descriptionCible, valeur, onChange }) {
   const paramMeta = descriptionCible?.parametreSource || {};
   const catMeta = descriptionCible?.categories || {};
   const choix = Array.isArray(paramMeta.choix) ? paramMeta.choix : [];
+  const whitelist = uniqueBics(
+    Array.isArray(catMeta.defaut) ? catMeta.defaut : []
+  );
 
   const current =
     valeur && typeof valeur === 'object' && !Array.isArray(valeur) ? valeur : null;
@@ -40,19 +57,32 @@ export default function ParametreUniformatWidget({ descriptionCible, valeur, onC
         ? paramMeta.defaut
         : null;
   const categories = Array.isArray(current?.categories)
-    ? current.categories
-    : Array.isArray(catMeta.defaut)
-      ? catMeta.defaut
-      : [];
+    ? uniqueBics(current.categories)
+    : whitelist.slice();
 
   function commit(nextParam, nextCats) {
     onChange({
       parametre: nextParam,
-      categories: nextCats,
+      categories: uniqueBics(nextCats),
     });
   }
 
+  function toggleCategory(bic, checked) {
+    if (checked) {
+      if (categories.includes(bic)) return;
+      commit(parametre, [...categories, bic]);
+    } else {
+      commit(
+        parametre,
+        categories.filter((c) => c !== bic)
+      );
+    }
+  }
+
   const selectValue = parametre ? paramKey(parametre) : '';
+  const selectedSet = new Set(categories);
+  // Afficher la liste blanche + toute catégorie déjà en config hors liste
+  const displayList = uniqueBics([...whitelist, ...categories]);
 
   return (
     <WidgetChrome descriptionCible={descriptionCible}>
@@ -81,11 +111,49 @@ export default function ParametreUniformatWidget({ descriptionCible, valeur, onC
       </div>
       <div>
         <span style={labelStyle}>{catMeta.libelle || 'Catégories'}</span>
-        <StringListEditor
-          items={categories}
-          onChange={(cats) => commit(parametre, cats)}
-          placeholder={catMeta.element || 'BuiltInCategory'}
-        />
+        <span style={{ ...aideStyle, marginBottom: 8 }}>
+          Noms tels qu&apos;affichés dans Revit (français). La configuration enregistre
+          l&apos;identifiant technique stable utilisé au contrôle.
+        </span>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            maxHeight: 280,
+            overflowY: 'auto',
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: '1px solid rgba(148, 163, 184, 0.3)',
+            background: 'rgba(248, 250, 252, 0.9)',
+          }}
+        >
+          {displayList.map((bic) => {
+            const checked = selectedSet.has(bic);
+            const label = labelBuiltinCategoryFr(bic);
+            return (
+              <label
+                key={bic}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  fontSize: 13,
+                  color: '#0f172a',
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => toggleCategory(bic, e.target.checked)}
+                  style={{ accentColor: '#2563eb' }}
+                />
+                <span style={{ fontWeight: 500 }}>{label}</span>
+              </label>
+            );
+          })}
+        </div>
       </div>
     </WidgetChrome>
   );
