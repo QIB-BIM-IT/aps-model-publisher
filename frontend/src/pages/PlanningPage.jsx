@@ -25,6 +25,9 @@ import api, {
   runCopyJobNow,
   getCopyRuns,
   fetchQcJobs,
+  patchQcJob,
+  runQcJobNow,
+  deleteQcJob,
 } from '../services/api';
 import { PDFExportModal } from '../components/PDFExportModal';
 
@@ -734,8 +737,16 @@ export default function PlanningPage() {
   const [copyJobs, setCopyJobs] = React.useState([]);
   const copyRunsRef = React.useRef([]);
 
-  /** Tâches QC (lecture F1d — création/actions en F1e). */
+  /** Tâches QC (actions F1e — création = lot suivant). */
   const [qcJobs, setQcJobs] = React.useState([]);
+  /** Édition inline QC (ne touche pas au formulaire de création des 3 types). */
+  const [editingQcJob, setEditingQcJob] = React.useState(null);
+  const [qcEditName, setQcEditName] = React.useState('');
+  const [qcEditHour, setQcEditHour] = React.useState('02:00');
+  const [qcEditTimezone, setQcEditTimezone] = React.useState(DEFAULT_TIMEZONE);
+  const [qcEditRecurrenceType, setQcEditRecurrenceType] = React.useState('daily');
+  const [qcEditDayOfWeek, setQcEditDayOfWeek] = React.useState(1);
+  const [qcEditSaving, setQcEditSaving] = React.useState(false);
 
   // État du modal de création de copie
   const [showCopyModal, setShowCopyModal] = React.useState(false);
@@ -882,6 +893,7 @@ export default function PlanningPage() {
     setPdfExportJobs([]);
     setCopyJobs([]);
     setQcJobs([]);
+    setEditingQcJob(null);
     setJobs([]);
     setRuns([]);
     publishRunsRef.current = [];
@@ -957,6 +969,7 @@ export default function PlanningPage() {
       setPdfExportJobs([]);
       setCopyJobs([]);
       setQcJobs([]);
+      setEditingQcJob(null);
       setRuns([]);
       publishRunsRef.current = [];
       pdfRunsRef.current = [];
@@ -1805,6 +1818,108 @@ export default function PlanningPage() {
     }
   }
 
+  // ========== QC JOB HANDLERS (F1e — colonne QC uniquement) ==========
+
+  function resetQcEditForm() {
+    setEditingQcJob(null);
+    setQcEditName('');
+    setQcEditHour('02:00');
+    setQcEditTimezone(DEFAULT_TIMEZONE);
+    setQcEditRecurrenceType('daily');
+    setQcEditDayOfWeek(1);
+    setQcEditSaving(false);
+  }
+
+  async function handleToggleQcJob(job) {
+    try {
+      await patchQcJob(job.id, { scheduleEnabled: !job.scheduleEnabled });
+      await refreshQcJobs({ silent: true });
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur maj QC'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  async function handleRunQcJob(job) {
+    try {
+      await runQcJobNow(job.id);
+      setToast('🚀 Contrôle QC lancé!');
+      setTimeout(() => setToast(''), 3000);
+      triggerAutoRefreshWindow(60000);
+      setQcJobs((prev) =>
+        prev.map((j) =>
+          j.id === job.id ? { ...j, status: 'running', lastRun: new Date().toISOString() } : j
+        )
+      );
+      await refreshQcJobs({ silent: true });
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur lancement QC'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  async function handleDeleteQcJob(job) {
+    if (!window.confirm('Supprimer cette tâche QC?')) return;
+    try {
+      await deleteQcJob(job.id);
+      if (editingQcJob?.id === job.id) resetQcEditForm();
+      await refreshQcJobs({ silent: true });
+      setToast('✅ Tâche QC supprimée');
+      setTimeout(() => setToast(''), 3000);
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur suppression QC'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  function handleEditQcJob(job) {
+    setEditingQcJob(job);
+    setQcEditName(job.name || '');
+    const cronParts = (job.cronExpression || '0 2 * * *').split(/\s+/);
+    const minute = cronParts[0] || '0';
+    const hour = cronParts[1] || '2';
+    setQcEditHour(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`);
+    setQcEditTimezone(job.timezone || DEFAULT_TIMEZONE);
+    const dayOfWeek = cronParts[4];
+    const isWeekly = dayOfWeek && dayOfWeek !== '*';
+    setQcEditRecurrenceType(isWeekly ? 'weekly' : 'daily');
+    if (isWeekly) setQcEditDayOfWeek(parseInt(dayOfWeek, 10));
+    setToast('✏️ Mode édition QC');
+    setTimeout(() => setToast(''), 3000);
+  }
+
+  async function handleSaveQcJob() {
+    if (!editingQcJob) return;
+    const name = (qcEditName || '').trim();
+    if (!name) {
+      setToast('⚠️ Donne un nom à la tâche QC');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+    try {
+      setQcEditSaving(true);
+      const cronExpression = generateCronExpression(
+        qcEditRecurrenceType,
+        qcEditHour,
+        qcEditDayOfWeek
+      );
+      await patchQcJob(editingQcJob.id, {
+        name,
+        cronExpression,
+        timezone: qcEditTimezone,
+      });
+      setToast('✅ Tâche QC mise à jour!');
+      setTimeout(() => setToast(''), 3000);
+      resetQcEditForm();
+      await refreshQcJobs({ silent: true });
+    } catch (e) {
+      setToast('❌ ' + (e?.message || 'Erreur maj QC'));
+      setTimeout(() => setToast(''), 3000);
+    } finally {
+      setQcEditSaving(false);
+    }
+  }
+
   React.useEffect(() => {
     loadHubs();
   }, []);
@@ -1866,6 +1981,7 @@ export default function PlanningPage() {
       // Fix préexistant : copyJobs était oublié ici → aussi qcJobs (F1d)
       setCopyJobs([]);
       setQcJobs([]);
+      setEditingQcJob(null);
       publishRunsRef.current = [];
       pdfRunsRef.current = [];
       copyRunsRef.current = [];
@@ -2067,6 +2183,14 @@ export default function PlanningPage() {
     }
     return base;
   }, [timezone]);
+
+  const qcEditTimezoneOptions = React.useMemo(() => {
+    const base = [...TIMEZONE_OPTIONS];
+    if (qcEditTimezone && !base.some((option) => option.value === qcEditTimezone)) {
+      base.push({ value: qcEditTimezone, label: `🌐 ${qcEditTimezone}` });
+    }
+    return base;
+  }, [qcEditTimezone]);
 
   return (
     <>
@@ -3018,7 +3142,7 @@ export default function PlanningPage() {
                 )}
               </div>
 
-              {/* Colonne QC — lecture seule F1d (actions câblées en F1e) */}
+              {/* Colonne QC — actions F1e (création = lot suivant) */}
               <div>
                 <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
                   ✅ Tâches QC ({qcJobs.length})
@@ -3060,6 +3184,7 @@ export default function PlanningPage() {
                                 color: '#4338ca',
                                 border: '1px solid rgba(99, 102, 241, 0.35)',
                               };
+                      const isEditingThis = editingQcJob?.id === j.id;
 
                       return (
                         <div
@@ -3102,9 +3227,197 @@ export default function PlanningPage() {
                               {statusLabel}
                             </span>
                           </div>
-                          <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
-                            Actions (pause / run / modifier / supprimer) — F1e
-                          </div>
+                          {hasProjectAccess === false ? (
+                            <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                              🔒 Lecture seule — pas d'accès au projet
+                            </div>
+                          ) : isEditingThis ? (
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: 8,
+                                marginTop: 4,
+                                padding: 10,
+                                background: 'rgba(248, 250, 252, 0.95)',
+                                borderRadius: 8,
+                                border: '1px solid rgba(99, 102, 241, 0.25)',
+                              }}
+                            >
+                              <div style={{ fontSize: 12, fontWeight: 600, color: '#4338ca' }}>
+                                Modifier la tâche QC
+                              </div>
+                              <div style={{ fontSize: 11, color: '#64748b' }}>
+                                Maquette (non modifiable) :{' '}
+                                <strong>{j.modelName || j.modelUrn?.slice(0, 32) || '—'}</strong>
+                              </div>
+                              <label style={{ fontSize: 11, fontWeight: 600, color: '#475569' }}>
+                                Nom
+                                <input
+                                  type="text"
+                                  value={qcEditName}
+                                  onChange={(e) => setQcEditName(e.target.value)}
+                                  style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    marginTop: 4,
+                                    padding: '8px 10px',
+                                    borderRadius: 8,
+                                    border: '1px solid rgba(148, 163, 184, 0.4)',
+                                    fontSize: 13,
+                                    boxSizing: 'border-box',
+                                  }}
+                                />
+                              </label>
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <label style={{ flex: '1 1 100px', fontSize: 11, fontWeight: 600, color: '#475569' }}>
+                                  Récurrence
+                                  <select
+                                    value={qcEditRecurrenceType}
+                                    onChange={(e) => setQcEditRecurrenceType(e.target.value)}
+                                    style={{
+                                      display: 'block',
+                                      width: '100%',
+                                      marginTop: 4,
+                                      padding: '8px 10px',
+                                      borderRadius: 8,
+                                      border: '1px solid rgba(148, 163, 184, 0.4)',
+                                      fontSize: 13,
+                                    }}
+                                  >
+                                    <option value="daily">📅 Quotidien</option>
+                                    <option value="weekly">📆 Hebdomadaire</option>
+                                  </select>
+                                </label>
+                                {qcEditRecurrenceType === 'weekly' && (
+                                  <label style={{ flex: '1 1 100px', fontSize: 11, fontWeight: 600, color: '#475569' }}>
+                                    Jour
+                                    <select
+                                      value={qcEditDayOfWeek}
+                                      onChange={(e) => setQcEditDayOfWeek(Number(e.target.value))}
+                                      style={{
+                                        display: 'block',
+                                        width: '100%',
+                                        marginTop: 4,
+                                        padding: '8px 10px',
+                                        borderRadius: 8,
+                                        border: '1px solid rgba(148, 163, 184, 0.4)',
+                                        fontSize: 13,
+                                      }}
+                                    >
+                                      {DAY_OF_WEEK_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                )}
+                                <label style={{ flex: '1 1 100px', fontSize: 11, fontWeight: 600, color: '#475569' }}>
+                                  Heure
+                                  <select
+                                    value={qcEditHour}
+                                    onChange={(e) => setQcEditHour(e.target.value)}
+                                    style={{
+                                      display: 'block',
+                                      width: '100%',
+                                      marginTop: 4,
+                                      padding: '8px 10px',
+                                      borderRadius: 8,
+                                      border: '1px solid rgba(148, 163, 184, 0.4)',
+                                      fontSize: 13,
+                                    }}
+                                  >
+                                    {HOUR_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label style={{ flex: '1 1 140px', fontSize: 11, fontWeight: 600, color: '#475569' }}>
+                                  Fuseau
+                                  <select
+                                    value={qcEditTimezone}
+                                    onChange={(e) => setQcEditTimezone(e.target.value)}
+                                    style={{
+                                      display: 'block',
+                                      width: '100%',
+                                      marginTop: 4,
+                                      padding: '8px 10px',
+                                      borderRadius: 8,
+                                      border: '1px solid rgba(148, 163, 184, 0.4)',
+                                      fontSize: 13,
+                                    }}
+                                  >
+                                    {qcEditTimezoneOptions.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                <Button
+                                  variant="primary"
+                                  onClick={() => handleSaveQcJob()}
+                                  disabled={qcEditSaving}
+                                  style={{ padding: '6px 12px', fontSize: 12 }}
+                                >
+                                  {qcEditSaving ? 'Enregistrement…' : '💾 Enregistrer'}
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => resetQcEditForm()}
+                                  disabled={qcEditSaving}
+                                  style={{ padding: '6px 12px', fontSize: 12 }}
+                                >
+                                  Annuler
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleToggleQcJob(j)}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                {j.scheduleEnabled ? '⏸️ Pause' : '▶️ Activer'}
+                              </Button>
+                              <Button
+                                variant="primary"
+                                onClick={() => handleRunQcJob(j)}
+                                disabled={j.status === 'running'}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                🚀 Run Now
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                onClick={() => handleEditQcJob(j)}
+                                style={{
+                                  padding: '6px 12px',
+                                  fontSize: 12,
+                                  background: '#8b5cf6',
+                                  color: 'white',
+                                  border: 'none',
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.background = '#7c3aed')}
+                                onMouseLeave={(e) => (e.currentTarget.style.background = '#8b5cf6')}
+                              >
+                                ✏️ Modifier
+                              </Button>
+                              <Button
+                                variant="danger"
+                                onClick={() => handleDeleteQcJob(j)}
+                                style={{ padding: '6px 12px', fontSize: 12 }}
+                              >
+                                🗑️ Supprimer
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
