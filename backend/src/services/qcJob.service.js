@@ -1,9 +1,8 @@
 // src/services/qcJob.service.js
 // CRUD des tâches QC planifiables (qc.jobs) — étape B1.
 //
-// ⚠️ B1 : scheduleEnabled est PERSISTÉ uniquement. Le scheduler (scheduler.service.js)
-// n'est PAS branché sur qc.jobs — une tâche avec scheduleEnabled=true n'est PAS
-// réellement planifiée tant que B2 n'est pas livré. Aucun run now ici (B2).
+// B2.2 : scheduleEnabled branché sur scheduler.initQcSchedule / scheduleJob
+// (exécution async fire-and-forget, sans lock projet). Run now : POST /api/qc/jobs/:id/run.
 //
 // ⚠️ Modèles qc chargés PARESSEUSEMENT (jamais avant sequelize.sync()) — voir getModels().
 //
@@ -186,11 +185,22 @@ class QcJobService {
     return {
       ...data,
       userName: user?.name || user?.email || 'Utilisateur inconnu',
-      // Indique clairement au client que le cron n'est pas actif côté serveur (B1)
-      schedulingActive: false,
-      schedulingNote:
-        'B1: scheduleEnabled est persisté mais le scheduler n\'exécute pas encore les tâches QC (branchement prévu en B2).',
+      // B2.2 : le scheduler planifie les QCJob scheduleEnabled (async, sans lock projet)
+      schedulingActive: data.scheduleEnabled === true,
+      schedulingNote: data.scheduleEnabled
+        ? 'Planification active (soumission DA async ; finalisation via callback/poll).'
+        : 'Planification inactive (scheduleEnabled=false).',
     };
+  }
+
+  _scheduler() {
+    return require('./scheduler.service');
+  }
+
+  async _applySchedule(job) {
+    const scheduler = this._scheduler();
+    if (job.scheduleEnabled) await scheduler.scheduleJob(job);
+    else scheduler.unscheduleJob(job.id);
   }
 
   async createJob(userId, body) {
@@ -220,8 +230,9 @@ class QcJobService {
       status: 'idle',
     });
 
+    await this._applySchedule(job);
     logger.info(
-      `[QC][Jobs] Créé id=${job.id} projectId=${job.projectId} scheduleEnabled=${job.scheduleEnabled} (persistance seule — scheduler non branché B1)`
+      `[QC][Jobs] Créé id=${job.id} projectId=${job.projectId} scheduleEnabled=${job.scheduleEnabled}`
     );
     return this.getJobById(job.id);
   }
@@ -306,8 +317,9 @@ class QcJobService {
     }
 
     await job.save();
+    await this._applySchedule(job);
     logger.info(
-      `[QC][Jobs] Modifié id=${job.id} scheduleEnabled=${job.scheduleEnabled} (persistance seule — scheduler non branché B1)`
+      `[QC][Jobs] Modifié id=${job.id} scheduleEnabled=${job.scheduleEnabled}`
     );
     return this.getJobById(job.id);
   }
@@ -316,9 +328,31 @@ class QcJobService {
     const { QCJob } = this.getModels();
     const job = await QCJob.findByPk(id);
     if (!job) throw httpError(404, 'Tâche QC introuvable');
+    try {
+      this._scheduler().unscheduleJob(job.id);
+    } catch (_) {}
     await job.destroy();
     logger.info(`[QC][Jobs] Supprimé id=${id}`);
     return true;
+  }
+
+  /**
+   * Run Now — délègue au scheduler (branche QC async, sans lock projet).
+   */
+  async runJobNow(id) {
+    const { QCJob } = this.getModels();
+    const job = await QCJob.findByPk(id);
+    if (!job) throw httpError(404, 'Tâche QC introuvable');
+    const { run, alreadyRunning, projectBusy } = await this._scheduler().runJobNow(job.id, { job });
+    if (alreadyRunning) {
+      const err = httpError(409, 'Cette tâche QC est déjà en cours');
+      throw err;
+    }
+    if (projectBusy) {
+      // Ne devrait pas arriver pour QC (pas de lock projet) — garde défensive
+      throw httpError(503, 'Projet occupé');
+    }
+    return run;
   }
 }
 

@@ -38,6 +38,7 @@ Routes JWT additives (`qc.routes.js` + `qcJob.service.js`). **Aucune** modificat
 | `GET` | `/api/qc/jobs/:id` | Détail |
 | `PATCH` | `/api/qc/jobs/:id` | Modifier nom / cron / timezone / cibles / `scheduleEnabled` |
 | `DELETE` | `/api/qc/jobs/:id` | Supprimer (les `qc.runs` liés gardent `jobId` NULL) |
+| `POST` | `/api/qc/jobs/:id/run` | Run Now — soumission DA async via scheduler (sans lock projet) |
 
 **Planification inactive en B1** : `scheduleEnabled` est **persisté** en base, mais le
 scheduler Node **ignore** encore `qc.jobs`. La réponse inclut `schedulingActive: false`
@@ -47,10 +48,17 @@ est l’étape **B2 partie 2**.
 **B2 partie 1 — sync statut job à la finalisation du run** (`qcRun.service.js`) : quand un
 `qc.runs` porte un `jobId`, la finalisation (`handleCompletion`, timeout de polling, garde
 pré-soumission, échec de submit) met à jour `qc.jobs.status` :
-`success` → `idle`, `failed`/timeout → `error`. Sans `jobId` (run manuel) : no-op.
-Idempotent ; job introuvable → log sans faire échouer le run. Pas de `lastRun` /
-`nextRun` sur `qc.jobs` (absents du schéma) — le calcul cron reste B2.2 / scheduler.
-**Le scheduler n’est pas touché** dans cette partie.
+`success` → `idle`, `failed`/timeout → `error` (+ `lastRun` si colonne présente).
+Sans `jobId` (run manuel) : no-op. Idempotent ; job introuvable → log sans crash.
+
+**B2 partie 2 — scheduler QC** (`scheduler.service.js` + `POST /api/qc/jobs/:id/run`) :
+branche **async** early-return (`runQcJob`) — `startRun` puis rendu de la main, **sans**
+`acquireProjectLock` (QC lecture seule). Token = même `apsAuth.ensureValidToken(job.userId)`
+que Publish (refresh_token en `public.users`). `initQcSchedule()` après `qcRun.init()` ;
+rattrapage créneaux manqués (même `MISSED_RUN_GRACE_MIN`). Migration `0005` :
+`nextRun` / `lastRun` sur `qc.jobs`. Le chemin sync Publish/PDF/Copie est inchangé.
+**Mails d’échec QC** : label `jobTypeLabel('qc')` prêt, mais les jobs QC n’ont pas encore
+de champs notification — pas d’envoi mail QC pour l’instant.
 
 **Cible modèle** : une seule maquette par job (`modelUrn` / `modelName`), aligné sur le
 schéma `qc.jobs` existant — pas de liste JSONB, pas de migration. `accProjectGuid` /

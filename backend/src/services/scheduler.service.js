@@ -34,7 +34,14 @@ const PROJECT_LOCK_MAX_WAIT_MS = 10 * 60 * 1000; // 10 minutes max d'attente dan
  */
 function calculateNextRun(cronExpression, timezone = 'UTC') {
   try {
-    const interval = cronParser.parse(cronExpression, {
+    // cron-parser v5 : API CronExpressionParser.parse (plus de cronParser.parse)
+    const parse =
+      (cronParser.CronExpressionParser && cronParser.CronExpressionParser.parse) ||
+      cronParser.parse;
+    if (typeof parse !== 'function') {
+      throw new Error('cron-parser: aucune fonction parse disponible');
+    }
+    const interval = parse(cronExpression, {
       tz: timezone,
       currentDate: new Date(),
     });
@@ -98,9 +105,11 @@ async function scheduleJob(job) {
 }
 
 /**
- * Détermine le type de job (publish ou pdf-export)
+ * Détermine le type de job (publish | pdf-export | file-copy | qc)
+ * QC en tête ; checks des 3 types existants INCHANGÉS.
  */
 function getJobType(job) {
+  if (job.constructor.name === 'QCJob') return 'qc';
   if (job.constructor.name === 'CopyJob') return 'file-copy';
   if (job.constructor.name === 'PDFExportJob') return 'pdf-export';
   if (job.constructor.name === 'PublishJob') return 'publish';
@@ -108,6 +117,89 @@ function getJobType(job) {
   if (job.fileUrn && job.selectionMode) return 'pdf-export';
   if (job.models && Array.isArray(job.models)) return 'publish';
   return null;
+}
+
+/**
+ * Résout un job par id : QC (schéma qc) d'abord, puis PDF→Copy→Publish (ordre public inchangé).
+ * Lazy-require des modèles qc (disponibles après qcRun.init / migrations).
+ */
+async function resolveJobById(jobId) {
+  try {
+    const { QCJob } = require('../models/qc');
+    const qcJob = await QCJob.findByPk(jobId);
+    if (qcJob) return qcJob;
+  } catch (e) {
+    logger.debug(`[Scheduler] QCJob lookup indisponible: ${e.message}`);
+  }
+  let job = await PDFExportJob.findByPk(jobId);
+  if (!job) job = await CopyJob.findByPk(jobId);
+  if (!job) job = await PublishJob.findByPk(jobId);
+  return job;
+}
+
+/**
+ * Branche QC async (B2.2) — fire-and-forget, SANS lock projet.
+ * Token Autodesk : même mécanisme que Publish (apsAuth.ensureValidToken via startRun
+ * sur le userId propriétaire du job / refresh_token en public.users).
+ * Finalisation job idle/error : qcRun._syncAssociatedJobStatus (PR #192).
+ */
+async function runQcJob(job) {
+  const User = require('../models/User');
+  const qcRunService = require('./qcRun.service');
+
+  if (!qcRunService.isReady()) {
+    throw new Error('Module QC non initialisé — impossible de lancer le job QC');
+  }
+  if (!job.modelUrn) {
+    throw new Error('QCJob sans modelUrn — cible modèle requise');
+  }
+  if (!job.userId) {
+    throw new Error('QCJob sans userId — propriétaire requis pour le token Autodesk');
+  }
+
+  const owner = await User.findByPk(job.userId);
+  if (!owner) {
+    throw new Error(`Propriétaire du job QC introuvable (userId=${job.userId})`);
+  }
+
+  job.status = 'running';
+  job.lastRun = new Date();
+  if (job.scheduleEnabled && job.cronExpression) {
+    const next = calculateNextRun(job.cronExpression, job.timezone || 'UTC');
+    if (next) job.nextRun = next;
+  }
+  await job.save();
+
+  try {
+    const run = await qcRunService.startRun({
+      user: {
+        id: owner.id,
+        name: owner.name,
+        autodeskId: owner.autodeskId,
+      },
+      designation: {
+        projectId: job.projectId,
+        itemUrn: job.modelUrn,
+        fileName: job.modelName || undefined,
+        hubId: job.hubId || undefined,
+      },
+      runType: 'quotidien',
+      jobId: job.id,
+    });
+    logger.info(
+      `[Scheduler] QC job ${job.id} soumis async (run=${run?.id}, status=${run?.status}) — pas de lock projet, finalisation via callback/poll`
+    );
+    return run;
+  } catch (e) {
+    try {
+      await job.reload();
+      if (job.status === 'running') {
+        job.status = 'error';
+        await job.save();
+      }
+    } catch (_) {}
+    throw e;
+  }
 }
 
 /**
@@ -212,26 +304,37 @@ async function runJob(jobId, jobInstance = null, options = {}) {
       return null;
     }
 
+    // Résolution tôt pour brancher QC AVANT le lock projet / chemin sync
+    if (!job) {
+      job = jobInstance || (await resolveJobById(jobId));
+    }
+    if (!job) {
+      logger.warn(`[Scheduler] Job ${jobId} introuvable`);
+      return null;
+    }
+    jobType = getJobType(job);
+    if (!jobType) {
+      logger.error(`[Scheduler] Impossible de déterminer le type du job ${jobId}`);
+      return null;
+    }
+
+    // —— Branche QC async (early-return) : pas de lock projet, pas d'executeRun sync ——
+    if (jobType === 'qc') {
+      RUNNING.add(key);
+      try {
+        return await runQcJob(job);
+      } catch (e) {
+        logger.error(`[Scheduler] Echec job QC ${jobId}: ${e.message}`);
+        throw e;
+      } finally {
+        RUNNING.delete(key);
+      }
+    }
+
     RUNNING.add(key);
     try {
-      // Chercher dans tous les types de job
-      job = await PDFExportJob.findByPk(jobId);
-      if (!job) job = await CopyJob.findByPk(jobId);
-      if (!job) job = await PublishJob.findByPk(jobId);
+      // Types public : ordre de lookup historique conservé dans resolveJobById (PDF→Copy→Publish)
 
-      if (!job) {
-        logger.warn(`[Scheduler] Job ${jobId} introuvable`);
-        RUNNING.delete(key);
-        return null;
-      }
-
-      jobType = getJobType(job);
-      if (!jobType) {
-        logger.error(`[Scheduler] Impossible de déterminer le type du job ${jobId}`);
-        RUNNING.delete(key);
-        return null;
-      }
-      
       // 🆕 Acquérir un lock sur le projet pour éviter les accès concurrents
       projectId = job.projectId;
       const queueStartTime = Date.now(); // 🆕 Temps où le job entre dans la file
@@ -437,14 +540,26 @@ async function runJobNow(jobId, options = {}) {
 
   let job = options.job || null;
   if (!job) {
-    job = await PDFExportJob.findByPk(jobId);
-    if (!job) job = await CopyJob.findByPk(jobId);
-    if (!job) job = await PublishJob.findByPk(jobId);
+    job = await resolveJobById(jobId);
   }
 
   if (!job) {
     logger.warn(`[Scheduler] Job ${jobId} introuvable`);
     return { run: null, alreadyRunning: false };
+  }
+
+  // —— QC Run Now : async, sans lock projet ——
+  if (getJobType(job) === 'qc') {
+    RUNNING.add(key);
+    try {
+      const run = await runQcJob(job);
+      return { run, alreadyRunning: false };
+    } catch (e) {
+      logger.error(`[Scheduler] runJobNow QC error: ${e.message}`);
+      throw e;
+    } finally {
+      RUNNING.delete(key);
+    }
   }
 
   // 🆕 Acquérir le lock projet avec file d'attente
@@ -647,6 +762,93 @@ async function init() {
 }
 
 /**
+ * B2.2 — Planification / recover / rattrapage des QCJob.
+ * À appeler APRÈS qcRun.service.init() (migrations qc + modèles chargés).
+ * Ne touche pas au chemin sync Publish/PDF/Copie.
+ */
+async function initQcSchedule() {
+  let QCJob;
+  let QCRun;
+  try {
+    ({ QCJob, QCRun } = require('../models/qc'));
+  } catch (e) {
+    logger.warn(`[Scheduler] initQcSchedule: modèles qc indisponibles (${e.message})`);
+    return;
+  }
+
+  // Recover : QCJob 'running' sans run encore en vol → idle
+  try {
+    const stuckJobs = await QCJob.findAll({ where: { status: 'running' } });
+    let recovered = 0;
+    for (const j of stuckJobs) {
+      let active = null;
+      try {
+        active = await QCRun.findOne({
+          where: { jobId: j.id, status: ['queued', 'submitted', 'running'] },
+        });
+      } catch (_) {}
+      if (active) continue; // run encore en cours — polling QC s'en charge
+      j.status = 'idle';
+      await j.save();
+      recovered += 1;
+    }
+    if (recovered) {
+      logger.warn(`[Scheduler] ${recovered} QCJob(s) 'running' orphelin(s) réinitialisé(s) à 'idle'`);
+    }
+  } catch (e) {
+    logger.error(`[Scheduler] Crash-safety QCJob error: ${e.message}`);
+  }
+
+  // Missed runs QC (même fenêtre de grâce)
+  const missedJobIds = [];
+  try {
+    const graceMin = Math.max(1, parseFloat(process.env.MISSED_RUN_GRACE_MIN || '120') || 120);
+    const graceMs = graceMin * 60 * 1000;
+    const now = Date.now();
+    const jobs = await QCJob.findAll({ where: { scheduleEnabled: true } });
+    for (const job of jobs) {
+      if (!job.nextRun) continue;
+      const next = new Date(job.nextRun).getTime();
+      if (next >= now) continue;
+      if (now - next > graceMs) continue;
+      const last = job.lastRun ? new Date(job.lastRun).getTime() : 0;
+      if (last >= next) continue;
+      missedJobIds.push(job.id);
+    }
+    if (missedJobIds.length) {
+      logger.warn(
+        `[Scheduler] ${missedJobIds.length} créneau(x) QC manqué(s) détecté(s) (grâce ${graceMin} min) — rattrapage`
+      );
+    }
+  } catch (e) {
+    logger.error(`[Scheduler] Erreur détection créneaux QC manqués: ${e.message}`);
+  }
+
+  // Planifier les QCJob actifs
+  try {
+    const qcJobs = await QCJob.findAll({
+      where: { scheduleEnabled: true },
+      order: [['createdAt', 'ASC']],
+    });
+    for (const j of qcJobs) await scheduleJob(j);
+    logger.info(`[Scheduler] ${qcJobs.length} QCJob(s) planifié(s) au démarrage`);
+  } catch (e) {
+    logger.error(`[Scheduler] Erreur init QCJobs: ${e.message}`);
+  }
+
+  if (missedJobIds.length) {
+    missedJobIds.forEach((jobId, i) => {
+      setTimeout(() => {
+        logger.info(`[Scheduler] Rattrapage du créneau QC manqué pour job ${jobId}`);
+        runJobNow(jobId).catch((e) =>
+          logger.error(`[Scheduler] Rattrapage QC job ${jobId} échec: ${e.message}`)
+        );
+      }, i * 5000);
+    });
+  }
+}
+
+/**
  * Envoie un email d'alerte (échec ou tâche bloquée) au propriétaire de la tâche.
  * Gating "niveau A" : on envoie par défaut, sauf si le propriétaire a désactivé
  * la préférence globale `preferences.notificationEmail`.
@@ -810,6 +1012,7 @@ function startStuckWatchdog() {
 
 module.exports = {
   init,
+  initQcSchedule,
   scheduleJob,
   unscheduleJob,
   runJobNow,
