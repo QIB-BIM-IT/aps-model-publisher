@@ -86,6 +86,7 @@ class QcRunService {
         endedAtUtc: new Date(),
         message: 'Run interrompu avant soumission du workitem (redémarrage du serveur)',
       });
+      await this._syncAssociatedJobStatus(run, 'failed');
       logger.warn(`[QC] Run orphelin marqué failed: ${run.id}`);
     }
 
@@ -286,6 +287,7 @@ class QcRunService {
       await run
         .update({ status: 'failed', endedAtUtc: new Date(), message: `Soumission workitem échouée: ${e.message}` })
         .catch(() => {});
+      await this._syncAssociatedJobStatus(run, 'failed');
       throw e;
     }
   }
@@ -325,10 +327,50 @@ class QcRunService {
       },
     });
     logger.warn(`[QC] Run ${run.id} refusé (garde=${guard}): ${message}`);
+    await this._syncAssociatedJobStatus(run, 'failed');
     return run;
   }
 
   // ======== Complétion (double canal, verrou EN BASE) ========
+
+  /**
+   * B2 partie 1 — après finalisation d'un run, aligne QCJob.status si jobId présent.
+   * - success → idle ; failed/timeout → error
+   * - pas de jobId (run manuel) → no-op
+   * - job supprimé → log + continue (le run reste finalisé)
+   * - idempotent : réécrire idle/error est sans effet de bord
+   * - pas de lastRun (colonne absente de qc.jobs) ; pas de nextRun (scheduler B2.2)
+   *
+   * @param {object} run - instance QCRun (ou plain) avec jobId
+   * @param {'success'|'failed'} terminalStatus
+   */
+  async _syncAssociatedJobStatus(run, terminalStatus) {
+    const jobId = run?.jobId;
+    if (!jobId) return;
+
+    const jobStatus = terminalStatus === 'success' ? 'idle' : 'error';
+    if (!['idle', 'error'].includes(jobStatus)) return;
+
+    try {
+      const { QCJob } = this.getModels();
+      const [updated] = await QCJob.update({ status: jobStatus }, { where: { id: jobId } });
+      if (updated === 0) {
+        logger.warn(
+          `[QC] Job ${jobId} introuvable pour sync statut après run ${run.id || '?'} ` +
+            `(supprimé entre-temps ?) — run finalisé quand même`
+        );
+        return;
+      }
+      logger.info(
+        `[QC] Job ${jobId} status → ${jobStatus} (run ${run.id || '?'} terminal=${terminalStatus})`
+      );
+    } catch (e) {
+      // Ne jamais faire échouer la finalisation du run à cause du job
+      logger.warn(
+        `[QC] Sync job ${jobId} après run ${run.id || '?'} échouée: ${e.message}`
+      );
+    }
+  }
 
   /**
    * Point d'entrée unique de finalisation — appelé par le callback onComplete ET par le polling.
@@ -340,7 +382,11 @@ class QcRunService {
 
     const run = await QCRun.findByPk(runId);
     if (!run || !run.daWorkitemId) return { handled: false, reason: 'run inconnu ou sans workitem' };
-    if (['success', 'failed'].includes(run.status)) return { handled: false, reason: 'déjà finalisé' };
+    if (['success', 'failed'].includes(run.status)) {
+      // Idempotence / guérison : si le run est déjà terminal, ré-aligner le job (no-op si déjà OK)
+      await this._syncAssociatedJobStatus(run, run.status);
+      return { handled: false, reason: 'déjà finalisé' };
+    }
 
     // Ne jamais faire confiance au callback : on relit le statut réel du workitem.
     const workitem = await qcDa.getWorkitem(run.daWorkitemId);
@@ -365,6 +411,7 @@ class QcRunService {
     try {
       if (wiStatus === 'success') {
         await this._finalizeSuccess(run, workitem);
+        await this._syncAssociatedJobStatus(run, 'success');
       } else {
         const message = await this._buildFailureMessage(run, workitem, wiStatus);
         await run.update({
@@ -374,12 +421,14 @@ class QcRunService {
           stats: { ...run.stats, reportUrl: workitem.reportUrl || null, daStats: workitem.stats || null },
         });
         logger.warn(`[QC] Run ${runId} échoué (workitem ${wiStatus}) — report: ${workitem.reportUrl || 'n/a'}`);
+        await this._syncAssociatedJobStatus(run, 'failed');
       }
       return { handled: true, status: wiStatus };
     } catch (e) {
       await run
         .update({ status: 'failed', endedAtUtc: new Date(), message: `Finalisation échouée: ${e.message}` })
         .catch(() => {});
+      await this._syncAssociatedJobStatus(run, 'failed');
       logger.error(`[QC] Finalisation du run ${runId} échouée: ${e.message}`);
       return { handled: true, status: 'failed', error: e.message };
     }
@@ -613,7 +662,11 @@ class QcRunService {
             },
             { where: { id: runId, status: ['queued', 'submitted'] } }
           );
-          if (claimed === 1) logger.error(`[QC] ⏱️ Run ${runId} timeout de polling`);
+          if (claimed === 1) {
+            logger.error(`[QC] ⏱️ Run ${runId} timeout de polling`);
+            const timedOut = await QCRun.findByPk(runId);
+            if (timedOut) await this._syncAssociatedJobStatus(timedOut, 'failed');
+          }
           return;
         }
 
