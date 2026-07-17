@@ -25,6 +25,8 @@ import api, {
   runCopyJobNow,
   getCopyRuns,
   fetchQcJobs,
+  fetchQcRuns,
+  fetchQcProjectConfig,
   createQcJob,
   patchQcJob,
   runQcJobNow,
@@ -338,7 +340,7 @@ function RevitIcon() {
   return <FileIcon ext="rvt" />;
 }
 
-function mergeRuns(publishList = [], pdfList = [], copyList = []) {
+function mergeRuns(publishList = [], pdfList = [], copyList = [], qcList = []) {
   const normalizedPublish = Array.isArray(publishList)
     ? publishList.map((run) => ({ ...run, jobType: run.jobType || 'publish' }))
     : [];
@@ -348,12 +350,38 @@ function mergeRuns(publishList = [], pdfList = [], copyList = []) {
   const normalizedCopy = Array.isArray(copyList)
     ? copyList.map((run) => ({ ...run, jobType: 'file-copy' }))
     : [];
+  // QC : statut technique uniquement (success/failed) — pas de verdict conformité
+  const normalizedQc = Array.isArray(qcList)
+    ? qcList.map((run) => {
+        const fileName = run.stats?.fileName || run.job?.modelName || null;
+        const jobName =
+          run.job?.name || (fileName ? `QC — ${fileName}` : run.name) || 'QC';
+        return {
+          ...run,
+          jobType: 'qc',
+          jobName,
+          name: jobName,
+          startedAt: run.startedAt || run.startedAtUtc || null,
+          endedAt: run.endedAt || run.endedAtUtc || null,
+          // Ne pas réutiliser les compteurs fichier Publish
+          items: [],
+          results: [],
+          stats: {
+            ...(run.stats && typeof run.stats === 'object' ? run.stats : {}),
+            okCount: undefined,
+            failCount: undefined,
+          },
+        };
+      })
+    : [];
 
-  return [...normalizedPublish, ...normalizedPdf, ...normalizedCopy].sort((a, b) => {
-    const dateA = new Date(a.createdAt || a.startedAt || 0).getTime();
-    const dateB = new Date(b.createdAt || b.startedAt || 0).getTime();
-    return dateB - dateA;
-  });
+  return [...normalizedPublish, ...normalizedPdf, ...normalizedCopy, ...normalizedQc].sort(
+    (a, b) => {
+      const dateA = new Date(a.createdAt || a.startedAt || 0).getTime();
+      const dateB = new Date(b.createdAt || b.startedAt || 0).getTime();
+      return dateB - dateA;
+    }
+  );
 }
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => {
@@ -738,8 +766,11 @@ export default function PlanningPage() {
   const [copyJobs, setCopyJobs] = React.useState([]);
   const copyRunsRef = React.useRef([]);
 
-  /** Tâches QC (actions F1e — création = lot suivant). */
+  /** Tâches QC (actions F1e) + runs historique F1f. */
   const [qcJobs, setQcJobs] = React.useState([]);
+  const qcRunsRef = React.useRef([]);
+  /** Pop-up blocage création QC si aucune config projet. */
+  const [showQcConfigGate, setShowQcConfigGate] = React.useState(false);
   /** Édition inline QC (ne touche pas au formulaire de création des 3 types). */
   const [editingQcJob, setEditingQcJob] = React.useState(null);
   const [qcEditName, setQcEditName] = React.useState('');
@@ -850,15 +881,17 @@ export default function PlanningPage() {
             setHasProjectAccess(false);
             // Charger les jobs/runs du projet via notre API (pas besoin d'accès ACC)
             try {
-              const [pubJobs, pdfJobs, cpJobs, qcList, pubRuns, pdfRuns, cpRuns] = await Promise.all([
-                getPublishJobs({ projectId: preSelectProject }),
-                getPDFExportJobs({ projectId: preSelectProject }),
-                getCopyJobs({ projectId: preSelectProject }),
-                fetchQcJobs({ projectId: preSelectProject }),
-                getRuns({ projectId: preSelectProject, limit: 50 }),
-                getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
-                getCopyRuns({ projectId: preSelectProject, limit: 50 }),
-              ]);
+              const [pubJobs, pdfJobs, cpJobs, qcList, pubRuns, pdfRuns, cpRuns, qcRuns] =
+                await Promise.all([
+                  getPublishJobs({ projectId: preSelectProject }),
+                  getPDFExportJobs({ projectId: preSelectProject }),
+                  getCopyJobs({ projectId: preSelectProject }),
+                  fetchQcJobs({ projectId: preSelectProject }),
+                  getRuns({ projectId: preSelectProject, limit: 50 }),
+                  getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
+                  getCopyRuns({ projectId: preSelectProject, limit: 50 }),
+                  fetchQcRuns({ projectId: preSelectProject, limit: 50 }),
+                ]);
               setJobs(Array.isArray(pubJobs) ? pubJobs : []);
               setPdfExportJobs(Array.isArray(pdfJobs) ? pdfJobs : []);
               setCopyJobs(Array.isArray(cpJobs) ? cpJobs : []);
@@ -866,7 +899,15 @@ export default function PlanningPage() {
               publishRunsRef.current = Array.isArray(pubRuns) ? pubRuns : [];
               pdfRunsRef.current = Array.isArray(pdfRuns) ? pdfRuns : [];
               copyRunsRef.current = Array.isArray(cpRuns) ? cpRuns : [];
-              setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
+              qcRunsRef.current = Array.isArray(qcRuns) ? qcRuns : [];
+              setRuns(
+                mergeRuns(
+                  publishRunsRef.current,
+                  pdfRunsRef.current,
+                  copyRunsRef.current,
+                  qcRunsRef.current
+                )
+              );
             } catch (e2) {
               console.warn('Erreur chargement jobs pour projet inaccessible:', e2);
             }
@@ -900,6 +941,7 @@ export default function PlanningPage() {
     publishRunsRef.current = [];
     pdfRunsRef.current = [];
     copyRunsRef.current = [];
+    qcRunsRef.current = [];
     setHasProjectAccess(null);
   }, []);
 
@@ -929,15 +971,17 @@ export default function PlanningPage() {
           setTopFolders([]);
           // Charger les jobs/runs du projet inaccessible via notre API
           try {
-            const [pubJobs, pdfJobs, cpJobs, qcList, pubRuns, pdfRuns, cpRuns] = await Promise.all([
-              getPublishJobs({ projectId: preSelectProject }),
-              getPDFExportJobs({ projectId: preSelectProject }),
-              getCopyJobs({ projectId: preSelectProject }),
-              fetchQcJobs({ projectId: preSelectProject }),
-              getRuns({ projectId: preSelectProject, limit: 50 }),
-              getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
-              getCopyRuns({ projectId: preSelectProject, limit: 50 }),
-            ]);
+            const [pubJobs, pdfJobs, cpJobs, qcList, pubRuns, pdfRuns, cpRuns, qcRuns] =
+              await Promise.all([
+                getPublishJobs({ projectId: preSelectProject }),
+                getPDFExportJobs({ projectId: preSelectProject }),
+                getCopyJobs({ projectId: preSelectProject }),
+                fetchQcJobs({ projectId: preSelectProject }),
+                getRuns({ projectId: preSelectProject, limit: 50 }),
+                getPDFExportRuns({ projectId: preSelectProject, limit: 50 }),
+                getCopyRuns({ projectId: preSelectProject, limit: 50 }),
+                fetchQcRuns({ projectId: preSelectProject, limit: 50 }),
+              ]);
             setJobs(Array.isArray(pubJobs) ? pubJobs : []);
             setPdfExportJobs(Array.isArray(pdfJobs) ? pdfJobs : []);
             setCopyJobs(Array.isArray(cpJobs) ? cpJobs : []);
@@ -945,7 +989,15 @@ export default function PlanningPage() {
             publishRunsRef.current = Array.isArray(pubRuns) ? pubRuns : [];
             pdfRunsRef.current = Array.isArray(pdfRuns) ? pdfRuns : [];
             copyRunsRef.current = Array.isArray(cpRuns) ? cpRuns : [];
-            setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
+            qcRunsRef.current = Array.isArray(qcRuns) ? qcRuns : [];
+            setRuns(
+              mergeRuns(
+                publishRunsRef.current,
+                pdfRunsRef.current,
+                copyRunsRef.current,
+                qcRunsRef.current
+              )
+            );
           } catch (e2) {
             console.warn('Erreur chargement jobs pour projet inaccessible:', e2);
           }
@@ -975,6 +1027,7 @@ export default function PlanningPage() {
       publishRunsRef.current = [];
       pdfRunsRef.current = [];
       copyRunsRef.current = [];
+      qcRunsRef.current = [];
       setJobType(null);
       setJobName('');
       setHasProjectAccess(null);
@@ -998,6 +1051,7 @@ export default function PlanningPage() {
         refreshCopyJobs(),
         refreshCopyRuns(),
         refreshQcJobs(),
+        refreshQcRuns(),
       ]);
     } catch (e) {
       const status = e?.response?.status || e?.status;
@@ -1013,6 +1067,7 @@ export default function PlanningPage() {
           refreshCopyJobs(),
           refreshCopyRuns(),
           refreshQcJobs(),
+          refreshQcRuns(),
         ]);
       } else {
         setError(e?.message || 'Erreur dossiers');
@@ -1135,7 +1190,14 @@ export default function PlanningPage() {
       try {
         const list = await getRuns({ hubId: selectedHub, projectId: selectedProject, limit: 50 });
         publishRunsRef.current = Array.isArray(list) ? list : [];
-        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
+        setRuns(
+          mergeRuns(
+            publishRunsRef.current,
+            pdfRunsRef.current,
+            copyRunsRef.current,
+            qcRunsRef.current
+          )
+        );
       } catch (e) {
         setError(e?.message || 'Erreur historique');
       } finally {
@@ -1153,7 +1215,14 @@ export default function PlanningPage() {
       try {
         const list = await getPDFExportRuns({ projectId: selectedProject, limit: 50 });
         pdfRunsRef.current = Array.isArray(list) ? list : [];
-        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
+        setRuns(
+          mergeRuns(
+            publishRunsRef.current,
+            pdfRunsRef.current,
+            copyRunsRef.current,
+            qcRunsRef.current
+          )
+        );
       } catch (e) {
         setError(e?.message || 'Erreur PDF runs');
       } finally {
@@ -1186,7 +1255,14 @@ export default function PlanningPage() {
       try {
         const list = await getCopyRuns({ projectId: selectedProject, limit: 50 });
         copyRunsRef.current = Array.isArray(list) ? list : [];
-        setRuns(mergeRuns(publishRunsRef.current, pdfRunsRef.current, copyRunsRef.current));
+        setRuns(
+          mergeRuns(
+            publishRunsRef.current,
+            pdfRunsRef.current,
+            copyRunsRef.current,
+            qcRunsRef.current
+          )
+        );
       } catch (e) {
         setError(e?.message || 'Erreur copy runs');
       } finally {
@@ -1207,6 +1283,30 @@ export default function PlanningPage() {
         setError(e?.message || 'Erreur tâches QC');
       } finally {
         if (!silent) setLoadingJobs(false);
+      }
+    },
+    [selectedProject]
+  );
+
+  const refreshQcRuns = React.useCallback(
+    async ({ silent = false } = {}) => {
+      if (!selectedProject) return;
+      if (!silent) setLoadingRuns(true);
+      try {
+        const list = await fetchQcRuns({ projectId: selectedProject, limit: 50 });
+        qcRunsRef.current = Array.isArray(list) ? list : [];
+        setRuns(
+          mergeRuns(
+            publishRunsRef.current,
+            pdfRunsRef.current,
+            copyRunsRef.current,
+            qcRunsRef.current
+          )
+        );
+      } catch (e) {
+        setError(e?.message || 'Erreur runs QC');
+      } finally {
+        if (!silent) setLoadingRuns(false);
       }
     },
     [selectedProject]
@@ -1514,6 +1614,27 @@ export default function PlanningPage() {
     }
   }
 
+  /** Vérifie qu'une config QC projet existe (ligne en base). Absence totale → bloquer. */
+  async function ensureQcProjectConfigOrGate() {
+    if (!selectedProject) {
+      setToast('⚠️ Sélectionne un projet');
+      setTimeout(() => setToast(''), 3000);
+      return false;
+    }
+    try {
+      const data = await fetchQcProjectConfig(selectedProject);
+      if (!data?.exists) {
+        setShowQcConfigGate(true);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      setToast('❌ ' + (e?.response?.data?.message || e?.message || 'Erreur config QC'));
+      setTimeout(() => setToast(''), 3000);
+      return false;
+    }
+  }
+
   /** Création tâche QC — 1 maquette (règle PDF). Handlers Publish/PDF/Copie intacts. */
   async function handleCreateQcJob() {
     const selectedCount = Object.keys(selectedItems).length;
@@ -1533,6 +1654,9 @@ export default function PlanningPage() {
       setTimeout(() => setToast(''), 3000);
       return;
     }
+
+    const hasConfig = await ensureQcProjectConfigOrGate();
+    if (!hasConfig) return;
 
     const modelUrn =
       selectedFile.publishUrn || selectedFile.data?.urn || selectedFile.urn || selectedFile.id;
@@ -1910,7 +2034,10 @@ export default function PlanningPage() {
           j.id === job.id ? { ...j, status: 'running', lastRun: new Date().toISOString() } : j
         )
       );
-      await refreshQcJobs({ silent: true });
+      await Promise.all([
+        refreshQcJobs({ silent: true }),
+        refreshQcRuns({ silent: true }),
+      ]);
     } catch (e) {
       setToast('❌ ' + (e?.message || 'Erreur lancement QC'));
       setTimeout(() => setToast(''), 3000);
@@ -2044,6 +2171,7 @@ export default function PlanningPage() {
       publishRunsRef.current = [];
       pdfRunsRef.current = [];
       copyRunsRef.current = [];
+      qcRunsRef.current = [];
     }
   }, [selectedHub, selectedProject]);
 
@@ -2123,6 +2251,7 @@ export default function PlanningPage() {
       void refreshCopyRuns({ silent: true });
       void refreshCopyJobs({ silent: true });
       void refreshQcJobs({ silent: true });
+      void refreshQcRuns({ silent: true });
     };
 
     tick();
@@ -2137,6 +2266,7 @@ export default function PlanningPage() {
     refreshCopyRuns,
     refreshCopyJobs,
     refreshQcJobs,
+    refreshQcRuns,
   ]);
 
   // Polling « léger » dédié à la confirmation webhook ACC : le webhook dm.version.added
@@ -2468,8 +2598,8 @@ export default function PlanningPage() {
                     style={{
                       padding: '10px 16px',
                       width: '100%',
-                      background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                      boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
+                      background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                      boxShadow: '0 4px 14px rgba(124, 58, 237, 0.35)',
                     }}
                   >
                     Configurer le QC
@@ -2867,7 +2997,7 @@ export default function PlanningPage() {
                       📋 Créer tâche Copie
                     </Button>
                     <Button
-                      onClick={() => {
+                      onClick={async () => {
                         const selectedCount = Object.keys(selectedItems).length;
                         if (selectedCount === 0) {
                           setToast('⚠️ Sélectionne 1 maquette');
@@ -2879,6 +3009,8 @@ export default function PlanningPage() {
                           setTimeout(() => setToast(''), 3000);
                           return;
                         }
+                        const ok = await ensureQcProjectConfigOrGate();
+                        if (!ok) return;
                         setJobType('qc');
                         setJobName('');
                       }}
@@ -3704,9 +3836,9 @@ export default function PlanningPage() {
                 </thead>
                 <tbody>
                   {runs.map((r, index) => {
-                    const okCount = r.stats?.okCount ?? 0;
-                    const failCount = r.stats?.failCount ?? 0;
-                    const totalFiles = Array.isArray(r.items) ? r.items.length : 0;
+                    const isQc = r.jobType === 'qc';
+                    const okCount = isQc ? null : (r.stats?.okCount ?? 0);
+                    const failCount = isQc ? null : (r.stats?.failCount ?? 0);
                     const jobIdShort = r.jobId ? String(r.jobId).slice(0, 8) : String(r.id).slice(0, 8);
 
                     // Durée réelle (du lancement jusqu'à la confirmation webhook ACC si dispo),
@@ -3721,7 +3853,7 @@ export default function PlanningPage() {
                       } else {
                         ms = s.realDurationMs || s.durationMs || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
                       }
-                      durationConfirmed = !!(s.webhookReceived || s.webhookEndTime);
+                      durationConfirmed = !isQc && !!(s.webhookReceived || s.webhookEndTime);
                       if (ms) {
                         const seconds = Math.round(ms / 1000);
                         durationText = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
@@ -3742,6 +3874,48 @@ export default function PlanningPage() {
                       statusColor = '#f59e0b';
                       statusBg = 'rgba(245, 158, 11, 0.15)';
                     }
+
+                    const typeBadge =
+                      r.jobType === 'qc'
+                        ? {
+                            label: '✅ QC',
+                            background: 'rgba(124, 58, 237, 0.25)',
+                            color: '#6d28d9',
+                            border: '1px solid rgba(124, 58, 237, 0.35)',
+                          }
+                        : r.jobType === 'file-copy'
+                          ? {
+                              label: '📋 Copie',
+                              background: 'rgba(245, 158, 11, 0.3)',
+                              color: '#92400e',
+                              border: '1px solid rgba(245, 158, 11, 0.3)',
+                            }
+                          : r.jobType === 'pdf-export'
+                            ? {
+                                label: '📄 PDF',
+                                background: 'rgba(16, 185, 129, 0.3)',
+                                color: '#059669',
+                                border: '1px solid rgba(16, 185, 129, 0.3)',
+                              }
+                            : {
+                                label: '🚀 Publish',
+                                background: 'rgba(59, 130, 246, 0.15)',
+                                color: '#1d4ed8',
+                                border: 'none',
+                              };
+
+                    // Statut technique QC (pas de verdict conformité)
+                    const statusLabel = isQc
+                      ? r.status === 'success'
+                        ? 'Réussi'
+                        : r.status === 'failed'
+                          ? 'Échoué'
+                          : r.status === 'running'
+                            ? 'En cours'
+                            : r.status === 'queued' || r.status === 'submitted'
+                              ? 'En file'
+                              : r.status || '—'
+                      : r.status;
 
                     return (
                       <tr
@@ -3781,11 +3955,11 @@ export default function PlanningPage() {
                               borderRadius: 4,
                               fontSize: 11,
                               fontWeight: 600,
-                              background: r.jobType === 'file-copy' ? 'rgba(245, 158, 11, 0.3)' : r.jobType === 'pdf-export' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.15)',
-                              color: r.jobType === 'file-copy' ? '#92400e' : r.jobType === 'pdf-export' ? '#059669' : '#1d4ed8',
-                              border: r.jobType === 'file-copy' ? '1px solid rgba(245, 158, 11, 0.3)' : r.jobType === 'pdf-export' ? '1px solid rgba(16, 185, 129, 0.3)' : 'none'
+                              background: typeBadge.background,
+                              color: typeBadge.color,
+                              border: typeBadge.border,
                             }}>
-                              {r.jobType === 'file-copy' ? '📋 Copie' : r.jobType === 'pdf-export' ? '📄 PDF' : '🚀 Publish'}
+                              {typeBadge.label}
                             </span>
                             <span style={{ fontFamily: 'monospace' }}>{jobIdShort}</span>
                           </div>
@@ -3835,31 +4009,35 @@ export default function PlanningPage() {
                             borderRight: '1px solid rgba(148, 163, 184, 0.1)',
                           }}
                         >
-                          <ModelDetailsTooltip results={r.results} items={r.items} />
+                          {isQc ? (
+                            <span style={{ color: '#94a3b8' }}>—</span>
+                          ) : (
+                            <ModelDetailsTooltip results={r.results} items={r.items} />
+                          )}
                         </td>
                         <td
                           style={{
                             padding: '12px',
                             textAlign: 'center',
-                            color: '#059669',
+                            color: isQc ? '#94a3b8' : '#059669',
                             fontWeight: 700,
                             fontSize: 15,
                             borderRight: '1px solid rgba(148, 163, 184, 0.1)',
                           }}
                         >
-                          {okCount}
+                          {isQc ? '—' : okCount}
                         </td>
                         <td
                           style={{
                             padding: '12px',
                             textAlign: 'center',
-                            color: failCount > 0 ? '#dc2626' : '#cbd5e1',
+                            color: isQc ? '#94a3b8' : failCount > 0 ? '#dc2626' : '#cbd5e1',
                             fontWeight: 700,
                             fontSize: 15,
                             borderRight: '1px solid rgba(148, 163, 184, 0.1)',
                           }}
                         >
-                          {failCount}
+                          {isQc ? '—' : failCount}
                         </td>
                         <td style={{ padding: '12px', borderRight: '1px solid rgba(148, 163, 184, 0.1)' }}>
                           <span
@@ -3879,7 +4057,7 @@ export default function PlanningPage() {
                             {r.status === 'success' && '✅'}
                             {r.status === 'failed' && '❌'}
                             {r.status === 'partial' && '⚠️'}
-                            {r.status}
+                            {statusLabel}
                           </span>
                         </td>
                         {/* Colonne Diagnostic */}
@@ -4208,6 +4386,73 @@ export default function PlanningPage() {
                 }}
               >
                 📋 Planifier la copie
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* F1f — blocage création QC si aucune config projet */}
+      {showQcConfigGate && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 20,
+          }}
+          onClick={() => setShowQcConfigGate(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff',
+              borderRadius: 14,
+              padding: 28,
+              maxWidth: 460,
+              width: '100%',
+              boxShadow: '0 20px 50px rgba(15, 23, 42, 0.35)',
+              border: '1px solid rgba(124, 58, 237, 0.25)',
+            }}
+          >
+            <div style={{ fontSize: 22, marginBottom: 8 }}>⚠️</div>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: 18, color: '#1f2937' }}>
+              Configuration QC manquante
+            </h3>
+            <p style={{ margin: '0 0 20px 0', fontSize: 14, color: '#475569', lineHeight: 1.5 }}>
+              Les cibles de contrôle qualité de ce projet ne sont pas configurées. Configurez-les
+              avant de planifier une tâche QC.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <Button
+                variant="secondary"
+                onClick={() => setShowQcConfigGate(false)}
+                style={{ padding: '10px 16px' }}
+              >
+                Annuler
+              </Button>
+              <Button
+                onClick={() => {
+                  setShowQcConfigGate(false);
+                  navigate('/qc-config', {
+                    state: {
+                      preSelectHub: selectedHub,
+                      preSelectProject: selectedProject,
+                    },
+                  });
+                }}
+                style={{
+                  padding: '10px 16px',
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                }}
+              >
+                Configurer le QC
               </Button>
             </div>
           </div>
