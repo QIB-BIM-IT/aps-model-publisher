@@ -1,5 +1,5 @@
 import React from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api, {
   fetchHubs,
   fetchProjects,
@@ -703,6 +703,7 @@ function Button({ children, onClick, variant = 'primary', disabled = false, styl
 
 export default function PlanningPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [hubs, setHubs] = React.useState([]);
   const [selectedHub, setSelectedHub] = React.useState('');
   const [projects, setProjects] = React.useState([]);
@@ -2203,6 +2204,27 @@ export default function PlanningPage() {
                     })
                   )}
                 </div>
+                {selectedProject ? (
+                  <Button
+                    type="button"
+                    onClick={() =>
+                      navigate('/qc-config', {
+                        state: {
+                          preSelectHub: selectedHub,
+                          preSelectProject: selectedProject,
+                        },
+                      })
+                    }
+                    style={{
+                      padding: '10px 16px',
+                      width: '100%',
+                      background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                      boxShadow: '0 4px 14px rgba(37, 99, 235, 0.35)',
+                    }}
+                  >
+                    Configurer le QC
+                  </Button>
+                ) : null}
               </div>
             )}
           </Card>
