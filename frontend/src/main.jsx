@@ -7,6 +7,7 @@ import AuthCallback from './pages/AuthCallback.jsx';
 import GlobalDashboard from './pages/GlobalDashboard.jsx';
 import PlanningPage from './pages/PlanningPage.jsx';
 import QcConfigTestPage from './pages/QcConfigTestPage.jsx';
+import QcConfigPage from './pages/QcConfigPage.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 function Root() {
@@ -43,6 +44,16 @@ function Root() {
             element={
               <ProtectedRoute>
                 <QcConfigTestPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* QC config F2 — formulaire réel grain projet (hub → projet, GET/PUT config) */}
+          <Route
+            path="qc-config"
+            element={
+              <ProtectedRoute>
+                <QcConfigPage />
               </ProtectedRoute>
             }
           />

@@ -352,4 +352,37 @@ export async function fetchQcCibleDescriptions() {
   return data;
 }
 
+/**
+ * GET /api/qc/projects/:projectKey/config
+ * projectKey = b.<guid> (préféré) ou accProjectGuid nu.
+ * @returns {{ projectId, exists, config: { controles, criticite }, ... }}
+ */
+export async function fetchQcProjectConfig(projectKey) {
+  const { data } = await api.get(
+    `/api/qc/projects/${encodeURIComponent(projectKey)}/config`
+  );
+  if (!data?.success) {
+    throw new Error(data?.message || 'Échec chargement de la config QC projet');
+  }
+  return data;
+}
+
+/**
+ * PUT /api/qc/projects/:projectKey/config
+ * Body: { controles?: { [code]: object|null }, criticite?: object|null }
+ * Erreurs 400 : err.response.data.errors[] + message.
+ */
+export async function saveQcProjectConfig(projectKey, payload) {
+  const { data } = await api.put(
+    `/api/qc/projects/${encodeURIComponent(projectKey)}/config`,
+    payload
+  );
+  if (!data?.success) {
+    const err = new Error(data?.message || 'Échec enregistrement config QC');
+    if (Array.isArray(data?.errors)) err.errors = data.errors;
+    throw err;
+  }
+  return data;
+}
+
 export default api;
