@@ -25,6 +25,7 @@ import api, {
   runCopyJobNow,
   getCopyRuns,
   fetchQcJobs,
+  createQcJob,
   patchQcJob,
   runQcJobNow,
   deleteQcJob,
@@ -1078,7 +1079,8 @@ export default function PlanningPage() {
       if (nxt[itemId]) {
         delete nxt[itemId];
       } else {
-        if (jobType === 'pdf-export' && Object.keys(nxt).length > 0) {
+        // PDF et QC : exactement 1 maquette (Publish/Copie restent multi)
+        if ((jobType === 'pdf-export' || jobType === 'qc') && Object.keys(nxt).length > 0) {
           const firstKey = Object.keys(nxt)[0];
           delete nxt[firstKey];
         }
@@ -1508,6 +1510,63 @@ export default function PlanningPage() {
       ]);
     } catch (e) {
       setToast('❌ ' + (e?.message || 'Erreur'));
+      setTimeout(() => setToast(''), 3000);
+    }
+  }
+
+  /** Création tâche QC — 1 maquette (règle PDF). Handlers Publish/PDF/Copie intacts. */
+  async function handleCreateQcJob() {
+    const selectedCount = Object.keys(selectedItems).length;
+    const selectedFile = Object.values(selectedItems)[0];
+    if (!selectedFile || selectedCount !== 1) {
+      setToast('⚠️ Sélectionne exactement 1 maquette pour le QC');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+    if (!selectedHub || !selectedProject) {
+      setToast('⚠️ Sélectionne un projet');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+    if (!jobName.trim()) {
+      setToast('⚠️ Donne un nom à la tâche');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    const modelUrn =
+      selectedFile.publishUrn || selectedFile.data?.urn || selectedFile.urn || selectedFile.id;
+    const modelName =
+      selectedFile.name || selectedFile.data?.name || nameOf(selectedFile, 'Maquette');
+    if (!modelUrn) {
+      setToast('⚠️ URN de maquette introuvable');
+      setTimeout(() => setToast(''), 3000);
+      return;
+    }
+
+    const projectObj = projects.find((p) => idOf(p) === selectedProject);
+    const projectName = nameOf(projectObj, '');
+
+    try {
+      await createQcJob({
+        name: jobName.trim(),
+        hubId: selectedHub,
+        projectId: selectedProject,
+        projectName,
+        modelUrn,
+        modelName,
+        scheduleEnabled: true,
+        cronExpression,
+        timezone,
+      });
+      setToast('✅ Tâche QC créée!');
+      setTimeout(() => setToast(''), 3000);
+      setJobName('');
+      setJobType(null);
+      setSelectedItems({});
+      await refreshQcJobs({ silent: true });
+    } catch (e) {
+      setToast('❌ ' + (e?.response?.data?.message || e?.message || 'Erreur création QC'));
       setTimeout(() => setToast(''), 3000);
     }
   }
@@ -1989,7 +2048,8 @@ export default function PlanningPage() {
   }, [selectedHub, selectedProject]);
 
   React.useEffect(() => {
-    if (jobType !== 'pdf-export') return;
+    // Troncature à 1 maquette pour PDF et QC (même règle)
+    if (jobType !== 'pdf-export' && jobType !== 'qc') return;
     setSelectedItems((prev) => {
       const keys = Object.keys(prev);
       if (keys.length <= 1) return prev;
@@ -2577,9 +2637,12 @@ export default function PlanningPage() {
                       value={jobName}
                       onChange={(e) => setJobName(e.target.value)}
                       placeholder={
-                        jobType === 'publish'
-                          ? 'Ex: Publish Revit - Quotidien'
-                          : 'Ex: Export PDF - Architecte'
+                        ({
+                          publish: 'Ex: Publish Revit - Quotidien',
+                          'pdf-export': 'Ex: Export PDF - Architecte',
+                          'file-copy': 'Ex: Copie fichiers - Quotidien',
+                          qc: 'Ex: Contrôle QC - Quotidien',
+                        }[jobType]) || 'Ex: Nom de la tâche'
                       }
                       style={{
                         width: '100%',
@@ -2594,7 +2657,32 @@ export default function PlanningPage() {
                     />
                   </div>
 
-                  {jobType === 'publish' && (
+                  {jobType === 'qc' && (
+                    <div
+                      style={{
+                        marginBottom: 16,
+                        padding: 12,
+                        background: 'rgba(99, 102, 241, 0.08)',
+                        borderRadius: 10,
+                        border: '1px solid rgba(99, 102, 241, 0.25)',
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#4338ca', marginBottom: 4 }}>
+                        Maquette contrôlée (1 seule)
+                      </div>
+                      <div style={{ fontSize: 13, color: '#1f2937', fontWeight: 500 }}>
+                        {Object.values(selectedItems)[0]?.name ||
+                          Object.values(selectedItems)[0]?.data?.name ||
+                          'Maquette sélectionnée'}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 8, fontStyle: 'italic' }}>
+                        Les cibles de contrôle se définissent via « Configurer le QC » — ici on planifie
+                        uniquement la tâche.
+                      </div>
+                    </div>
+                  )}
+
+                  {(jobType === 'publish' || jobType === 'qc') && (
                     <div style={{ marginBottom: 16 }}>
                       <h4 style={{ margin: '0 0 12px 0', fontSize: 14, fontWeight: 600, color: '#1f2937' }}>
                         🕐 Planification
@@ -2609,7 +2697,7 @@ export default function PlanningPage() {
                           <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
                             <input
                               type="radio"
-                              name="recurrence-publish"
+                              name={`recurrence-${jobType}`}
                               checked={recurrenceType === 'daily'}
                               onChange={() => setRecurrenceType('daily')}
                               style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
@@ -2619,7 +2707,7 @@ export default function PlanningPage() {
                           <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
                             <input
                               type="radio"
-                              name="recurrence-publish"
+                              name={`recurrence-${jobType}`}
                               checked={recurrenceType === 'weekly'}
                               onChange={() => setRecurrenceType('weekly')}
                               style={{ marginRight: 8, cursor: 'pointer', accentColor: '#2563eb' }}
@@ -2718,7 +2806,7 @@ export default function PlanningPage() {
 
               <div style={{ display: 'flex', gap: 12 }}>
                 {jobType === null ? (
-                  <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+                  <div style={{ display: 'flex', gap: 12, width: '100%', flexWrap: 'wrap' }}>
                     <Button
                       onClick={() => {
                         setJobType('publish');
@@ -2727,6 +2815,7 @@ export default function PlanningPage() {
                       style={{
                         padding: '12px 24px',
                         flex: 1,
+                        minWidth: 140,
                         background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
                       }}
                     >
@@ -2747,6 +2836,7 @@ export default function PlanningPage() {
                       style={{
                         padding: '12px 24px',
                         flex: 1,
+                        minWidth: 140,
                         background: Object.keys(selectedItems).length > 1
                           ? 'rgba(148, 163, 184, 0.3)'
                           : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
@@ -2770,10 +2860,41 @@ export default function PlanningPage() {
                       style={{
                         padding: '12px 24px',
                         flex: 1,
+                        minWidth: 140,
                         background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
                       }}
                     >
                       📋 Créer tâche Copie
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        const selectedCount = Object.keys(selectedItems).length;
+                        if (selectedCount === 0) {
+                          setToast('⚠️ Sélectionne 1 maquette');
+                          setTimeout(() => setToast(''), 3000);
+                          return;
+                        }
+                        if (selectedCount > 1) {
+                          setToast('⚠️ Le QC accepte exactement 1 maquette (comme le PDF)');
+                          setTimeout(() => setToast(''), 3000);
+                          return;
+                        }
+                        setJobType('qc');
+                        setJobName('');
+                      }}
+                      disabled={Object.keys(selectedItems).length > 1}
+                      style={{
+                        padding: '12px 24px',
+                        flex: 1,
+                        minWidth: 140,
+                        background: Object.keys(selectedItems).length > 1
+                          ? 'rgba(148, 163, 184, 0.3)'
+                          : 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                        opacity: Object.keys(selectedItems).length > 1 ? 0.5 : 1,
+                        cursor: Object.keys(selectedItems).length > 1 ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      ✅ Créer tâche QC
                     </Button>
                   </div>
                 ) : (
@@ -2791,7 +2912,21 @@ export default function PlanningPage() {
                       ← Retour
                     </Button>
                     <Button
-                      onClick={jobType === 'publish' ? handleCreatePublishJob : handleCreatePDFExportJob}
+                      onClick={() => {
+                        // Aiguillage explicite 4 types — jamais de fallback PDF pour Copie/QC
+                        if (jobType === 'publish') {
+                          void handleCreatePublishJob();
+                        } else if (jobType === 'pdf-export') {
+                          void handleCreatePDFExportJob();
+                        } else if (jobType === 'file-copy') {
+                          setShowCopyModal(true);
+                        } else if (jobType === 'qc') {
+                          void handleCreateQcJob();
+                        } else {
+                          setToast('⚠️ Type de tâche inconnu');
+                          setTimeout(() => setToast(''), 3000);
+                        }
+                      }}
                       style={{ padding: '12px 24px', flex: 1 }}
                     >
                       {editingJob ? '✏️ Mettre à jour' : '✅ Créer'}
