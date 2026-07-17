@@ -1,6 +1,6 @@
 import React from 'react';
 import WidgetChrome from './WidgetChrome';
-import { inputStyle, btnStyle, btnDanger, labelStyle } from './widgetStyles';
+import { inputStyle, btnStyle, btnDanger, labelStyle, subCard } from './widgetStyles';
 
 /**
  * Widget contrôlé — G105 (descriptionCible.typeWidget = "table", cleConfig = "champs")
@@ -66,15 +66,7 @@ export default function InfosProjetWidget({ descriptionCible, valeur, onChange }
           const mode = row?.mode || modeDefaut;
           const presence = mode === 'presence';
           return (
-            <div
-              key={i}
-              style={{
-                border: '1px solid #e2e8f0',
-                borderRadius: 8,
-                padding: 12,
-                background: '#f8fafc',
-              }}
-            >
+            <div key={i} style={subCard}>
               <div
                 style={{
                   display: 'flex',

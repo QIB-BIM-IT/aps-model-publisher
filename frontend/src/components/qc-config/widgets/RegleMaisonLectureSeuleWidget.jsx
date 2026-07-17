@@ -1,7 +1,7 @@
 import React from 'react';
 import WidgetChrome from './WidgetChrome';
 import StringListEditor from './StringListEditor';
-import { labelStyle } from './widgetStyles';
+import { labelStyle, infoPanel } from './widgetStyles';
 
 /**
  * Widget contrôlé — typeWidget: regleMaisonLectureSeule
@@ -20,16 +20,7 @@ export default function RegleMaisonLectureSeuleWidget({ descriptionCible, valeur
   if (!editable || editable.typeWidget !== 'liste') {
     return (
       <WidgetChrome descriptionCible={descriptionCible}>
-        <div
-          style={{
-            padding: '10px 12px',
-            borderRadius: 6,
-            background: '#f1f5f9',
-            border: '1px solid #e2e8f0',
-            fontSize: 13,
-            color: '#334155',
-          }}
-        >
+        <div style={infoPanel}>
           <strong style={{ display: 'block', marginBottom: 4 }}>Règle maison</strong>
           {regle || 'Aucune saisie — règle fixe appliquée à l’extraction.'}
         </div>
@@ -49,17 +40,7 @@ export default function RegleMaisonLectureSeuleWidget({ descriptionCible, valeur
 
   return (
     <WidgetChrome descriptionCible={descriptionCible}>
-      <div
-        style={{
-          padding: '10px 12px',
-          borderRadius: 6,
-          background: '#f1f5f9',
-          border: '1px solid #e2e8f0',
-          fontSize: 13,
-          color: '#334155',
-          marginBottom: 12,
-        }}
-      >
+      <div style={{ ...infoPanel, marginBottom: 12 }}>
         <strong style={{ display: 'block', marginBottom: 4 }}>Règle maison</strong>
         {regle || 'Règle fixe ; champ ci-dessous = seule surcharge projet.'}
       </div>

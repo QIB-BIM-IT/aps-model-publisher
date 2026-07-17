@@ -1,7 +1,7 @@
 import React from 'react';
 import WidgetChrome from './WidgetChrome';
 import StringListEditor from './StringListEditor';
-import { inputStyle, btnStyle, btnDanger, labelStyle } from './widgetStyles';
+import { inputStyle, btnStyle, btnDanger, labelStyle, subCard } from './widgetStyles';
 
 /**
  * Widget contrôlé — typeWidget: table (G508 paramètres 7D)
@@ -55,12 +55,7 @@ export default function TableWidget({ descriptionCible, valeur, onChange }) {
         {rows.map((row, i) => (
           <div
             key={i}
-            style={{
-              border: '1px solid #e2e8f0',
-              borderRadius: 8,
-              padding: 12,
-              background: '#f8fafc',
-            }}
+            style={subCard}
           >
             <div
               style={{

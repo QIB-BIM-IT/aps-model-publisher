@@ -7,6 +7,30 @@ import {
   saveQcProjectConfig,
 } from '../services/api';
 import WidgetRenderer, { isImplementedWidgetType } from '../components/qc-config/WidgetRenderer';
+import {
+  pageShell,
+  pageInner,
+  pageTitle,
+  pageSubtitle,
+  card,
+  cardTitle,
+  sectionTitle,
+  label,
+  input,
+  btnPrimary,
+  btnSecondary,
+  muted,
+  errorBanner,
+  successBanner,
+  controlCard,
+  controlCardReadonly,
+  projectListBox,
+  badge,
+  badgeMuted,
+  SECTION_TITLES,
+  sectionKeyFromCode,
+  controlNum,
+} from '../components/qc-config/qcTheme';
 
 function nameOf(node, fall = '') {
   if (!node) return fall;
@@ -79,27 +103,6 @@ export function toControlCfg(valeur, descriptionCible) {
 
   return { [cle]: valeur };
 }
-
-const selectStyle = {
-  width: '100%',
-  padding: '10px 12px',
-  borderRadius: 8,
-  border: '1px solid #cbd5e1',
-  background: '#fff',
-  fontSize: 14,
-  outline: 'none',
-};
-
-const btnPrimary = {
-  padding: '10px 18px',
-  borderRadius: 8,
-  border: 'none',
-  background: '#2563eb',
-  color: '#fff',
-  fontWeight: 600,
-  fontSize: 14,
-  cursor: 'pointer',
-};
 
 /**
  * Page isolée F2 — formulaire de configuration QC sur données réelles (grain projet).
@@ -257,24 +260,27 @@ export default function QcConfigPage() {
     [controlesMeta]
   );
 
-  const readOnlyControles = useMemo(
-    () =>
-      controlesMeta.filter(
-        (c) => isImplementedWidgetType(c?.descriptionCible?.typeWidget) && c.lectureSeule
-      ),
-    [controlesMeta]
-  );
-
+  /** Groupés par section du registre (1→6), tri numérique du code dans chaque section. */
   const bySection = useMemo(() => {
+    const all = controlesMeta
+      .filter((c) => isImplementedWidgetType(c?.descriptionCible?.typeWidget))
+      .slice()
+      .sort((a, b) => {
+        const sa = sectionKeyFromCode(a.code);
+        const sb = sectionKeyFromCode(b.code);
+        if (sa !== sb) return sa - sb;
+        return controlNum(a.code) - controlNum(b.code);
+      });
+
     const map = new Map();
-    const all = [...editableControles, ...readOnlyControles];
     for (const c of all) {
-      const sec = c.section || 'Autres';
-      if (!map.has(sec)) map.set(sec, []);
-      map.get(sec).push(c);
+      const key = sectionKeyFromCode(c.code);
+      const title = SECTION_TITLES[key] || c.section || 'Autres';
+      if (!map.has(title)) map.set(title, []);
+      map.get(title).push(c);
     }
-    return [...map.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]), 'fr'));
-  }, [editableControles, readOnlyControles]);
+    return [...map.entries()];
+  }, [controlesMeta]);
 
   function setControlValue(code, valeur) {
     setConfig((prev) => {
@@ -334,241 +340,203 @@ export default function QcConfigPage() {
     editableControles.length > 0;
 
   return (
-    <div style={{ padding: 24, maxWidth: 960, margin: '0 auto', color: '#0f172a' }}>
-      <h2 style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 700 }}>
-        Configuration QC — par projet
-      </h2>
-      <p style={{ margin: '0 0 20px', fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
-        Choisissez un hub puis un projet ACC. Les cibles s&apos;appliquent à tous les runs QC
-        de ce projet (clé <code>b.&lt;guid&gt;</code>). Les maquettes à auditer se choisissent
-        à la création de tâche (F1).
-      </p>
+    <div style={pageShell}>
+      <div style={pageInner}>
+        <h1 style={pageTitle}>Configuration QC — par projet</h1>
+        <p style={pageSubtitle}>
+          Choisissez un hub puis un projet ACC. Les cibles s&apos;appliquent à tous les runs QC
+          de ce projet (clé <code style={{ color: '#cbd5e1' }}>b.&lt;guid&gt;</code>). Les
+          maquettes à auditer se choisissent à la création de tâche (F1).
+        </p>
 
-      {/* Sélection hub / projet */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 16,
-          marginBottom: 20,
-        }}
-      >
-        <div>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-            Hub
-          </label>
-          {loadingHubs ? (
-            <p style={{ fontSize: 13, color: '#64748b' }}>Chargement des hubs…</p>
-          ) : (
-            <select
-              value={selectedHub}
-              onChange={(e) => setSelectedHub(e.target.value)}
-              style={selectStyle}
-            >
-              {hubs.map((h) => (
-                <option key={idOf(h)} value={idOf(h)}>
-                  {nameOf(h, idOf(h))}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-        <div>
-          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-            Projet
-          </label>
-          <input
-            type="search"
-            placeholder="Rechercher un projet…"
-            value={projectSearch}
-            onChange={(e) => setProjectSearch(e.target.value)}
-            disabled={!selectedHub || loadingProjects}
-            style={{ ...selectStyle, marginBottom: 8 }}
-          />
+        {/* Sélection hub / projet — carte type Planning */}
+        <div style={card}>
+          <h3 style={cardTitle}>Projet ACC</h3>
           <div
             style={{
-              maxHeight: 200,
-              overflowY: 'auto',
-              border: '1px solid #e2e8f0',
-              borderRadius: 8,
-              background: '#f8fafc',
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 20,
             }}
           >
-            {loadingProjects ? (
-              <p style={{ padding: 12, fontSize: 13, color: '#64748b' }}>Chargement…</p>
-            ) : filteredProjects.length === 0 ? (
-              <p style={{ padding: 12, fontSize: 13, color: '#94a3b8' }}>Aucun projet</p>
-            ) : (
-              filteredProjects.map((p) => {
-                const pid = idOf(p);
-                const selected = pid === selectedProject;
-                return (
-                  <button
-                    key={pid}
-                    type="button"
-                    onClick={() => setSelectedProject(pid)}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      border: 'none',
-                      borderBottom: '1px solid #e2e8f0',
-                      background: selected ? 'rgba(37, 99, 235, 0.12)' : 'transparent',
-                      color: selected ? '#1d4ed8' : '#1e293b',
-                      fontWeight: selected ? 600 : 400,
-                      fontSize: 13,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {nameOf(p, pid)}
-                    <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{pid}</div>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-      </div>
-
-      {loadedProjectId ? (
-        <p style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
-          Config chargée pour <strong>{loadedProjectId}</strong>
-          {existsInDb ? ' (existante en base)' : ' (aucune config encore — défauts widgets)'}
-        </p>
-      ) : null}
-
-      {error ? (
-        <div
-          style={{
-            padding: 12,
-            borderRadius: 8,
-            background: '#fef2f2',
-            border: '1px solid #fecaca',
-            color: '#b91c1c',
-            fontSize: 13,
-            marginBottom: 12,
-          }}
-        >
-          {error}
-          {validationErrors.length > 0 ? (
-            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
-              {validationErrors.map((msg, i) => (
-                <li key={i}>{msg}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
-
-      {successMsg ? (
-        <div
-          style={{
-            padding: 12,
-            borderRadius: 8,
-            background: '#f0fdf4',
-            border: '1px solid #bbf7d0',
-            color: '#15803d',
-            fontSize: 13,
-            marginBottom: 12,
-          }}
-        >
-          {successMsg}
-        </div>
-      ) : null}
-
-      {!selectedProject ? (
-        <p style={{ fontSize: 14, color: '#64748b' }}>
-          Sélectionnez un projet pour charger et modifier sa configuration QC.
-        </p>
-      ) : loadingConfig ? (
-        <p style={{ fontSize: 14, color: '#64748b' }}>Chargement de la configuration…</p>
-      ) : (
-        <>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20 }}>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={!canSave}
-              style={{
-                ...btnPrimary,
-                opacity: canSave ? 1 : 0.5,
-                cursor: canSave ? 'pointer' : 'not-allowed',
-              }}
-            >
-              {saving ? 'Enregistrement…' : 'Enregistrer la configuration'}
-            </button>
-            <button
-              type="button"
-              onClick={() => loadProjectConfig(selectedProject)}
-              disabled={loadingConfig || saving}
-              style={{
-                ...btnPrimary,
-                background: '#64748b',
-              }}
-            >
-              Recharger
-            </button>
-          </div>
-
-          {bySection.map(([section, items]) => (
-            <div key={section} style={{ marginBottom: 28 }}>
-              <h3
-                style={{
-                  fontSize: 16,
-                  fontWeight: 700,
-                  margin: '0 0 12px',
-                  paddingBottom: 6,
-                  borderBottom: '2px solid #e2e8f0',
-                  color: '#0f172a',
-                }}
-              >
-                {section}
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {items.map((c) => (
-                  <section
-                    key={c.code}
-                    data-code={c.code}
-                    style={{
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 10,
-                      padding: 14,
-                      background: c.lectureSeule ? '#f1f5f9' : '#f8fafc',
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        gap: 8,
-                        alignItems: 'baseline',
-                        marginBottom: 10,
-                      }}
-                    >
-                      <span style={{ fontWeight: 700, fontSize: 14 }}>{c.code}</span>
-                      <span style={{ fontSize: 13, color: '#334155' }}>{c.libelle}</span>
-                      {c.nature ? (
-                        <span style={{ fontSize: 11, color: '#64748b' }}>{c.nature}</span>
-                      ) : null}
-                      {c.lectureSeule ? (
-                        <span style={{ fontSize: 11, color: '#94a3b8' }}>lecture seule</span>
-                      ) : null}
-                    </div>
-                    <WidgetRenderer
-                      descriptionCible={c.descriptionCible}
-                      valeur={config[c.code]}
-                      onChange={(v) => {
-                        if (c.lectureSeule) return;
-                        setControlValue(c.code, v);
-                      }}
-                    />
-                  </section>
-                ))}
+            <div>
+              <label style={label}>Hub</label>
+              {loadingHubs ? (
+                <p style={muted}>Chargement des hubs…</p>
+              ) : (
+                <select
+                  value={selectedHub}
+                  onChange={(e) => setSelectedHub(e.target.value)}
+                  style={{ ...input, cursor: 'pointer' }}
+                >
+                  {hubs.map((h) => (
+                    <option key={idOf(h)} value={idOf(h)}>
+                      {nameOf(h, idOf(h))}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <label style={label}>Projet</label>
+              <input
+                type="search"
+                placeholder="Rechercher un projet…"
+                value={projectSearch}
+                onChange={(e) => setProjectSearch(e.target.value)}
+                disabled={!selectedHub || loadingProjects}
+                style={{ ...input, marginBottom: 8 }}
+              />
+              <div style={projectListBox}>
+                {loadingProjects ? (
+                  <p style={{ padding: 12, ...muted }}>Chargement…</p>
+                ) : filteredProjects.length === 0 ? (
+                  <p style={{ padding: 12, fontSize: 13, color: '#94a3b8' }}>Aucun projet</p>
+                ) : (
+                  filteredProjects.map((p) => {
+                    const pid = idOf(p);
+                    const selected = pid === selectedProject;
+                    return (
+                      <button
+                        key={pid}
+                        type="button"
+                        onClick={() => setSelectedProject(pid)}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '10px 14px',
+                          border: 'none',
+                          borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
+                          background: selected ? 'rgba(37, 99, 235, 0.12)' : 'transparent',
+                          color: selected ? '#1d4ed8' : '#1e293b',
+                          fontWeight: selected ? 600 : 400,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {nameOf(p, pid)}
+                        <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{pid}</div>
+                      </button>
+                    );
+                  })
+                )}
               </div>
             </div>
-          ))}
-        </>
-      )}
+          </div>
+
+          {loadedProjectId ? (
+            <p style={{ ...muted, marginTop: 16, marginBottom: 0 }}>
+              Config chargée pour <strong style={{ color: '#0f172a' }}>{loadedProjectId}</strong>
+              {existsInDb ? ' (existante en base)' : ' (aucune config encore — défauts widgets)'}
+            </p>
+          ) : null}
+        </div>
+
+        {error ? (
+          <div style={errorBanner}>
+            {error}
+            {validationErrors.length > 0 ? (
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                {validationErrors.map((msg, i) => (
+                  <li key={i}>{msg}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
+        {successMsg ? <div style={successBanner}>{successMsg}</div> : null}
+
+        {!selectedProject ? (
+          <div style={card}>
+            <p style={{ ...muted, margin: 0 }}>
+              Sélectionnez un projet pour charger et modifier sa configuration QC.
+            </p>
+          </div>
+        ) : loadingConfig ? (
+          <div style={card}>
+            <p style={{ ...muted, margin: 0 }}>Chargement de la configuration…</p>
+          </div>
+        ) : (
+          <>
+            <div
+              style={{
+                ...card,
+                display: 'flex',
+                gap: 12,
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                padding: '16px 24px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!canSave}
+                style={{
+                  ...btnPrimary,
+                  opacity: canSave ? 1 : 0.5,
+                  cursor: canSave ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {saving ? 'Enregistrement…' : 'Enregistrer la configuration'}
+              </button>
+              <button
+                type="button"
+                onClick={() => loadProjectConfig(selectedProject)}
+                disabled={loadingConfig || saving}
+                style={{
+                  ...btnSecondary,
+                  opacity: loadingConfig || saving ? 0.5 : 1,
+                  cursor: loadingConfig || saving ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Recharger
+              </button>
+            </div>
+
+            {bySection.map(([section, items]) => (
+              <div key={section} style={card}>
+                <h3 style={sectionTitle}>{section}</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {items.map((c) => (
+                    <section
+                      key={c.code}
+                      data-code={c.code}
+                      style={c.lectureSeule ? controlCardReadonly : controlCard}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: 8,
+                          alignItems: 'center',
+                          marginBottom: 12,
+                        }}
+                      >
+                        <span style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
+                          {c.code}
+                        </span>
+                        <span style={{ fontSize: 13, color: '#334155' }}>{c.libelle}</span>
+                        {c.nature ? <span style={badge}>{c.nature}</span> : null}
+                        {c.lectureSeule ? <span style={badgeMuted}>lecture seule</span> : null}
+                      </div>
+                      <WidgetRenderer
+                        descriptionCible={c.descriptionCible}
+                        valeur={config[c.code]}
+                        onChange={(v) => {
+                          if (c.lectureSeule) return;
+                          setControlValue(c.code, v);
+                        }}
+                      />
+                    </section>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
     </div>
   );
 }
