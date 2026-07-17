@@ -385,4 +385,63 @@ export async function saveQcProjectConfig(projectKey, payload) {
   return data;
 }
 
+// ----- QC Jobs (tâches planifiées — B1/B2) -----
+/** POST /api/qc/jobs — crée une tâche QC (1 modelUrn). */
+export async function createQcJob(payload) {
+  const { data } = await api.post('/api/qc/jobs', payload);
+  if (!data?.success) {
+    throw new Error(data?.message || 'Échec création de la tâche QC');
+  }
+  return data?.data;
+}
+
+/** GET /api/qc/jobs?projectId=&active= */
+export async function fetchQcJobs(params = {}) {
+  const { data } = await api.get('/api/qc/jobs', { params });
+  if (!data?.success) {
+    throw new Error(data?.message || 'Échec chargement des tâches QC');
+  }
+  return data?.data || [];
+}
+
+/** GET /api/qc/jobs/:id */
+export async function fetchQcJob(id) {
+  const { data } = await api.get(`/api/qc/jobs/${encodeURIComponent(id)}`);
+  if (!data?.success) {
+    throw new Error(data?.message || 'Échec chargement de la tâche QC');
+  }
+  return data?.data;
+}
+
+/** PATCH /api/qc/jobs/:id */
+export async function patchQcJob(id, patch) {
+  const { data } = await api.patch(`/api/qc/jobs/${encodeURIComponent(id)}`, patch);
+  if (!data?.success) {
+    throw new Error(data?.message || 'Échec mise à jour de la tâche QC');
+  }
+  return data?.data;
+}
+
+/** DELETE /api/qc/jobs/:id */
+export async function deleteQcJob(id) {
+  const { data } = await api.delete(`/api/qc/jobs/${encodeURIComponent(id)}`);
+  return data?.success === true;
+}
+
+/** POST /api/qc/jobs/:id/run — Run Now (async DA). */
+export async function runQcJobNow(id) {
+  try {
+    const { data } = await api.post(`/api/qc/jobs/${encodeURIComponent(id)}/run`);
+    if (!data?.success) {
+      throw new Error(data?.message || 'Échec lancement de la tâche QC');
+    }
+    return data?.data || null;
+  } catch (err) {
+    const message = err?.response?.data?.message || err?.message || 'Erreur lancement du job QC';
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
+}
+
 export default api;

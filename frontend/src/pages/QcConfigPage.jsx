@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   fetchHubs,
   fetchProjects,
@@ -107,8 +108,15 @@ export function toControlCfg(valeur, descriptionCible) {
 /**
  * Page isolée F2 — formulaire de configuration QC sur données réelles (grain projet).
  * Sélection légère hub → projet ; charge/sauve via API config (clé b.<guid>).
+ * Accepte location.state { preSelectHub, preSelectProject } (ex. depuis Planning).
  */
 export default function QcConfigPage() {
+  const location = useLocation();
+  const preSelectHub = location.state?.preSelectHub || '';
+  const preSelectProject = location.state?.preSelectProject || '';
+  const preselectHubApplied = useRef(false);
+  const preselectProjectApplied = useRef(false);
+
   const [hubs, setHubs] = useState([]);
   const [projects, setProjects] = useState([]);
   const [selectedHub, setSelectedHub] = useState('');
@@ -129,6 +137,14 @@ export default function QcConfigPage() {
   const [error, setError] = useState('');
   const [validationErrors, setValidationErrors] = useState([]);
   const [successMsg, setSuccessMsg] = useState('');
+  const [preselectInfo, setPreselectInfo] = useState('');
+
+  // Nouvelle navigation → réappliquer la préselection une fois
+  useEffect(() => {
+    preselectHubApplied.current = false;
+    preselectProjectApplied.current = false;
+    setPreselectInfo('');
+  }, [location.key]);
 
   // Descriptions une fois
   useEffect(() => {
@@ -150,7 +166,7 @@ export default function QcConfigPage() {
     };
   }, []);
 
-  // Hubs
+  // Hubs (+ préselection hub / recherche hub du projet)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -159,9 +175,48 @@ export default function QcConfigPage() {
         const list = await fetchHubs();
         if (cancelled) return;
         setHubs(list || []);
-        if (list?.length) {
-          setSelectedHub((prev) => prev || idOf(list[0]));
+        if (!list?.length) return;
+
+        if (!preselectHubApplied.current && preSelectHub) {
+          preselectHubApplied.current = true;
+          if (list.some((h) => idOf(h) === preSelectHub)) {
+            setSelectedHub(preSelectHub);
+            return;
+          }
+          setPreselectInfo(
+            'Le hub pré-sélectionné est inaccessible — choisissez un hub et un projet manuellement.'
+          );
+          setSelectedHub(idOf(list[0]));
+          return;
         }
+
+        if (!preselectHubApplied.current && preSelectProject && !preSelectHub) {
+          preselectHubApplied.current = true;
+          let foundHub = '';
+          for (const hub of list) {
+            if (cancelled) return;
+            try {
+              const hubProjects = await fetchProjects(idOf(hub));
+              if (hubProjects.some((p) => idOf(p) === preSelectProject)) {
+                foundHub = idOf(hub);
+                break;
+              }
+            } catch (_) {
+              /* hub suivant */
+            }
+          }
+          if (foundHub) {
+            setSelectedHub(foundHub);
+          } else {
+            setPreselectInfo(
+              'Le projet pré-sélectionné est inaccessible — choisissez un projet manuellement.'
+            );
+            setSelectedHub(idOf(list[0]));
+          }
+          return;
+        }
+
+        setSelectedHub((prev) => prev || idOf(list[0]));
       } catch (e) {
         if (!cancelled) {
           setError(e?.response?.data?.message || e?.message || 'Erreur chargement hubs');
@@ -173,9 +228,9 @@ export default function QcConfigPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [preSelectHub, preSelectProject, location.key]);
 
-  // Projets du hub
+  // Projets du hub (+ préselection projet)
   useEffect(() => {
     if (!selectedHub) {
       setProjects([]);
@@ -192,7 +247,20 @@ export default function QcConfigPage() {
       setValidationErrors([]);
       try {
         const list = await fetchProjects(selectedHub);
-        if (!cancelled) setProjects(list || []);
+        if (cancelled) return;
+        setProjects(list || []);
+
+        if (!preselectProjectApplied.current && preSelectProject) {
+          preselectProjectApplied.current = true;
+          if (list.some((p) => idOf(p) === preSelectProject)) {
+            setSelectedProject(preSelectProject);
+            setPreselectInfo('');
+          } else {
+            setPreselectInfo(
+              'Le projet pré-sélectionné est inaccessible dans ce hub — choisissez un projet manuellement.'
+            );
+          }
+        }
       } catch (e) {
         if (!cancelled) {
           setError(e?.response?.data?.message || e?.message || 'Erreur chargement projets');
@@ -205,7 +273,7 @@ export default function QcConfigPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedHub]);
+  }, [selectedHub, preSelectProject]);
 
   const loadProjectConfig = useCallback(
     async (projectId) => {
@@ -348,6 +416,12 @@ export default function QcConfigPage() {
           serviront à évaluer les maquettes de ce projet. Le choix des maquettes à auditer
           se fait au moment de planifier une tâche QC.
         </p>
+
+        {preselectInfo ? (
+          <div style={{ ...errorBanner, background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.35)', color: '#92400e' }}>
+            {preselectInfo}
+          </div>
+        ) : null}
 
         {/* Sélection hub / projet — carte type Planning */}
         <div style={card}>
