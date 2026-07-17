@@ -385,6 +385,16 @@ export async function saveQcProjectConfig(projectKey, payload) {
   return data;
 }
 
+// ----- QC Runs (historique — F1f) -----
+/** GET /api/qc/runs?projectId=&limit= — runs QC du projet (statut technique). */
+export async function fetchQcRuns(params = {}) {
+  const { data } = await api.get('/api/qc/runs', { params });
+  if (!data?.success) {
+    throw new Error(data?.message || 'Échec chargement des runs QC');
+  }
+  return Array.isArray(data?.runs) ? data.runs : [];
+}
+
 // ----- QC Jobs (tâches planifiées — B1/B2) -----
 /** POST /api/qc/jobs — crée une tâche QC (1 modelUrn). */
 export async function createQcJob(payload) {

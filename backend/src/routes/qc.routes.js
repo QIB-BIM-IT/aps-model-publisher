@@ -93,14 +93,41 @@ router.post('/resolve', authenticateToken, async (req, res) => {
 });
 
 /**
- * GET /api/qc/runs?limit=20
+ * GET /api/qc/runs?limit=20&projectId=b.<guid>
+ * Filtre optionnel projectId (b.<guid> ou accProjectGuid nu) → accProjectGuid.
  */
 router.get('/runs', authenticateToken, async (req, res) => {
   if (!qcRunService.isReady()) return notReady(res);
   try {
-    const { QCRun } = qcRunService.getModels();
+    const { QCRun, QCJob } = qcRunService.getModels();
     const limit = Math.min(parseInt(req.query.limit || '20', 10) || 20, 100);
-    const runs = await QCRun.findAll({ order: [['createdAt', 'DESC']], limit });
+    const where = {};
+    if (req.query.projectId) {
+      const pid = String(req.query.projectId).trim();
+      if (/^b\./i.test(pid) && pid.length > 2) {
+        where.accProjectGuid = pid.slice(2).toLowerCase();
+      } else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pid)) {
+        where.accProjectGuid = pid.toLowerCase();
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'projectId invalide : attendu b.<guid> ou UUID',
+        });
+      }
+    }
+    const runs = await QCRun.findAll({
+      where,
+      include: [
+        {
+          model: QCJob,
+          as: 'job',
+          attributes: ['id', 'name', 'modelName'],
+          required: false,
+        },
+      ],
+      order: [['createdAt', 'DESC']],
+      limit,
+    });
     return res.json({ success: true, runs });
   } catch (err) {
     logger.error(`[QC] GET /runs: ${err.message}`);
