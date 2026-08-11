@@ -7,7 +7,9 @@
 // ⚠️ Modèles qc chargés PARESSEUSEMENT (jamais avant sequelize.sync()) — voir getModels().
 //
 // Clé projectId : toujours le format PRÉFIXÉ "b.<guid>" (même convention que
-// qc.project_config / PublishJob). accProjectGuid nu peut être stocké EN PLUS.
+// qc.project_config / PublishJob). accProjectGuid (GUID C4R) est optionnel :
+// renseigné seulement depuis qc.projects ou un body explicite — JAMAIS via
+// projectId.slice(2) (le GUID ACC n'est pas le DM sans préfixe).
 
 const cron = require('node-cron');
 const logger = require('../config/logger');
@@ -117,16 +119,21 @@ class QcJobService {
       out.timezone = String(body.timezone || 'UTC').trim() || 'UTC';
     }
 
-    // Si projectId préfixé fourni et pas d'accProjectGuid, dériver le guid nu EN PLUS
-    if (out.projectId && PROJECT_ID_PREFIXED_RE.test(out.projectId)) {
-      if (!partial || has('projectId')) {
-        if (out.accProjectGuid == null && (!partial || !has('accProjectGuid'))) {
-          out.accProjectGuid = out.projectId.slice(2).toLowerCase();
-        }
-      }
-    }
+    // Ne PAS dériver accProjectGuid depuis projectId.slice(2) — faux pour les
+    // projets workshared (DM ≠ C4R). Voir _resolveAccProjectGuidFromMapping.
 
     return out;
+  }
+
+  /**
+   * Source fiable pour qc.jobs.accProjectGuid : ligne qc.projects uniquement.
+   * @returns {Promise<string|null>} UUID C4R ou null si pas de mapping
+   */
+  async _resolveAccProjectGuidFromMapping(projectId) {
+    if (!projectId || !PROJECT_ID_PREFIXED_RE.test(projectId)) return null;
+    const { QCProject } = this.getModels();
+    const row = await QCProject.findOne({ where: { projectId } });
+    return row?.accProjectGuid || null;
   }
 
   /**
@@ -209,6 +216,11 @@ class QcJobService {
     // Défauts création
     if (body.scheduleEnabled === undefined) payload.scheduleEnabled = false;
     if (!payload.timezone) payload.timezone = 'UTC';
+
+    // accProjectGuid : body explicite, sinon mapping qc.projects, sinon NULL
+    if (!Object.prototype.hasOwnProperty.call(body || {}, 'accProjectGuid')) {
+      payload.accProjectGuid = await this._resolveAccProjectGuidFromMapping(payload.projectId);
+    }
 
     const err = this.validatePayload(payload, { partial: false });
     if (err) throw httpError(400, err);
@@ -311,9 +323,13 @@ class QcJobService {
       if (patch[f] !== undefined) job[f] = patch[f];
     }
 
-    // Si projectId mis à jour sans accProjectGuid explicite, dériver
-    if (patch.projectId && PROJECT_ID_PREFIXED_RE.test(patch.projectId) && patch.accProjectGuid === undefined) {
-      job.accProjectGuid = patch.projectId.slice(2).toLowerCase();
+    // projectId changé sans accProjectGuid explicite → mapping ou NULL (pas de slice)
+    if (
+      patch.projectId &&
+      PROJECT_ID_PREFIXED_RE.test(patch.projectId) &&
+      patch.accProjectGuid === undefined
+    ) {
+      job.accProjectGuid = await this._resolveAccProjectGuidFromMapping(patch.projectId);
     }
 
     await job.save();
