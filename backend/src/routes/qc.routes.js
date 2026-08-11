@@ -93,8 +93,10 @@ router.post('/resolve', authenticateToken, async (req, res) => {
 });
 
 /**
- * GET /api/qc/runs?limit=20&projectId=b.<guid>
- * Filtre optionnel projectId (b.<guid> ou accProjectGuid nu) → accProjectGuid.
+ * GET /api/qc/runs?limit=20&projectId=b.<guid>|accProjectGuid
+ * Filtre optionnel : id DM `b.<guid>` OU GUID ACC nu (ou `b.<accGuid>`).
+ * Résolution via qc.projects (même mapping que resolvePrefixedProjectId / scoring) —
+ * le strip naïf de `b.` ne matche PAS accProjectGuid C4R (souvent un autre UUID).
  */
 router.get('/runs', authenticateToken, async (req, res) => {
   if (!qcRunService.isReady()) return notReady(res);
@@ -104,15 +106,33 @@ router.get('/runs', authenticateToken, async (req, res) => {
     const where = {};
     if (req.query.projectId) {
       const pid = String(req.query.projectId).trim();
-      if (/^b\./i.test(pid) && pid.length > 2) {
-        where.accProjectGuid = pid.slice(2).toLowerCase();
-      } else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pid)) {
-        where.accProjectGuid = pid.toLowerCase();
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: 'projectId invalide : attendu b.<guid> ou UUID',
-        });
+      try {
+        // Log explicite si pas de ligne qc.projects pour un id DM (fallback strip dans resolve).
+        if (/^b\./i.test(pid)) {
+          const { QCProject } = qcRunService.getModels();
+          const mapped = await QCProject.findOne({ where: { projectId: pid } });
+          if (!mapped?.accProjectGuid) {
+            logger.warn(
+              `[QC] GET /runs: aucun mapping qc.projects pour projectId=${pid} — fallback strip b. (peut rester vide)`
+            );
+          }
+        }
+        const resolved = await qcProjectConfigService.resolvePrefixedProjectId(pid);
+        if (!resolved.accProjectGuid) {
+          logger.warn(`[QC] GET /runs: accProjectGuid non résolu pour projectId=${pid} — liste vide`);
+          return res.json({ success: true, runs: [] });
+        }
+        where.accProjectGuid = String(resolved.accProjectGuid).toLowerCase();
+      } catch (resolveErr) {
+        // Guid nu sans ligne qc.projects → 404 côté resolve : liste vide, pas 500.
+        if (resolveErr.statusCode === 404) {
+          logger.warn(`[QC] GET /runs: ${resolveErr.message}`);
+          return res.json({ success: true, runs: [] });
+        }
+        if (resolveErr.statusCode === 400) {
+          return res.status(400).json({ success: false, message: resolveErr.message });
+        }
+        throw resolveErr;
       }
     }
     const runs = await QCRun.findAll({
