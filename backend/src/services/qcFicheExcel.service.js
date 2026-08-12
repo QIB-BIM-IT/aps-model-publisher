@@ -5,8 +5,34 @@
 
 const path = require('path');
 const ExcelJS = require('exceljs');
+const AdmZip = require('adm-zip');
 const logger = require('../config/logger');
 const qcRunDetailService = require('./qcRunDetail.service');
+
+/**
+ * exceljs écrit pageSetup.horizontalDpi/verticalDpi = 4294967295 (uint32 -1)
+ * sur chaque feuille. Excel refuse cet attribut (erreur XML ligne 2) et
+ * supprime les feuilles en récupération. Le gabarit n'a pas ces attributs.
+ * On les retire du zip produit — sans relire le classeur via exceljs.
+ */
+const EXCELJS_INVALID_DPI = '4294967295';
+
+function stripInvalidPageSetupDpi(buffer) {
+  const zip = new AdmZip(Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer));
+  let patched = 0;
+  for (const entry of zip.getEntries()) {
+    if (!/^xl\/worksheets\/sheet\d+\.xml$/i.test(entry.entryName)) continue;
+    const xml = entry.getData().toString('utf8');
+    if (!xml.includes(EXCELJS_INVALID_DPI)) continue;
+    const dpiAttr = new RegExp(`\\s+(horizontalDpi|verticalDpi)="${EXCELJS_INVALID_DPI}"`, 'g');
+    const next = xml.replace(dpiAttr, '');
+    if (next !== xml) {
+      zip.updateFile(entry.entryName, Buffer.from(next, 'utf8'));
+      patched += 1;
+    }
+  }
+  return patched ? zip.toBuffer() : Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+}
 
 const TEMPLATE_PATH = path.join(
   __dirname,
@@ -255,7 +281,8 @@ class QcFicheExcelService {
       );
     }
 
-    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    const raw = Buffer.from(await workbook.xlsx.writeBuffer());
+    const buffer = stripInvalidPageSetupDpi(raw);
     const fileName = buildDownloadFileName(run.modelName);
 
     return {
@@ -279,3 +306,4 @@ module.exports.TEMPLATE_PATH = TEMPLATE_PATH;
 module.exports.formatValeurRelevee = formatValeurRelevee;
 module.exports.formatStatutFiche = formatStatutFiche;
 module.exports.buildDownloadFileName = buildDownloadFileName;
+module.exports.stripInvalidPageSetupDpi = stripInvalidPageSetupDpi;
