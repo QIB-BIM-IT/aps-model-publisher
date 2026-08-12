@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   fetchHubs,
   fetchProjects,
@@ -112,6 +112,7 @@ export function toControlCfg(valeur, descriptionCible) {
  */
 export default function QcConfigPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const preSelectHub = location.state?.preSelectHub || '';
   const preSelectProject = location.state?.preSelectProject || '';
   const preselectHubApplied = useRef(false);
@@ -133,6 +134,8 @@ export default function QcConfigPage() {
   const [config, setConfig] = useState({});
   const [loadedProjectId, setLoadedProjectId] = useState('');
   const [existsInDb, setExistsInDb] = useState(false);
+  /** Snapshot JSON de la config telle que chargée / réenregistrée — sert à détecter une saisie non enregistrée. */
+  const [savedSnapshot, setSavedSnapshot] = useState(null);
 
   const [error, setError] = useState('');
   const [validationErrors, setValidationErrors] = useState([]);
@@ -243,6 +246,7 @@ export default function QcConfigPage() {
       setSelectedProject('');
       setConfig({});
       setLoadedProjectId('');
+      setSavedSnapshot(null);
       setSuccessMsg('');
       setValidationErrors([]);
       try {
@@ -298,10 +302,12 @@ export default function QcConfigPage() {
         setConfig(next);
         setLoadedProjectId(data.projectId || projectId);
         setExistsInDb(!!data.exists);
+        setSavedSnapshot(JSON.stringify(next));
       } catch (e) {
         setError(e?.response?.data?.message || e?.message || 'Erreur chargement config');
         setConfig({});
         setLoadedProjectId('');
+        setSavedSnapshot(null);
       } finally {
         setLoadingConfig(false);
       }
@@ -406,6 +412,32 @@ export default function QcConfigPage() {
     !loadingConfig &&
     !saving &&
     editableControles.length > 0;
+
+  /** Saisie divergente du dernier chargement / enregistrement (snapshot JSON). */
+  const isDirty =
+    !!loadedProjectId &&
+    savedSnapshot != null &&
+    JSON.stringify(config) !== savedSnapshot;
+
+  /** Même contrat que QcRunResultsPage / Dashboard → Planning (IDs string). */
+  function goBackToPlanning() {
+    if (isDirty) {
+      const ok = window.confirm(
+        "Des modifications de cibles n'ont pas été enregistrées. Quitter sans enregistrer ?"
+      );
+      if (!ok) return;
+    }
+    if (!selectedProject) {
+      navigate('/planning');
+      return;
+    }
+    navigate('/planning', {
+      state: {
+        preSelectHub: selectedHub || null,
+        preSelectProject: selectedProject,
+      },
+    });
+  }
 
   return (
     <div style={pageShell}>
@@ -529,28 +561,21 @@ export default function QcConfigPage() {
 
         {successMsg ? <div style={successBanner}>{successMsg}</div> : null}
 
-        {!selectedProject ? (
-          <div style={card}>
-            <p style={{ ...muted, margin: 0 }}>
-              Sélectionnez un projet pour charger et modifier sa configuration QC.
-            </p>
-          </div>
-        ) : loadingConfig ? (
-          <div style={card}>
-            <p style={{ ...muted, margin: 0 }}>Chargement de la configuration…</p>
-          </div>
-        ) : (
-          <>
-            <div
-              style={{
-                ...card,
-                display: 'flex',
-                gap: 12,
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                padding: '16px 24px',
-              }}
-            >
+        <div
+          style={{
+            ...card,
+            display: 'flex',
+            gap: 12,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            padding: '16px 24px',
+          }}
+        >
+          <button type="button" onClick={goBackToPlanning} style={{ ...btnSecondary }}>
+            ← Retour à la planification
+          </button>
+          {selectedProject && !loadingConfig ? (
+            <>
               <button
                 type="button"
                 onClick={handleSave}
@@ -575,8 +600,22 @@ export default function QcConfigPage() {
               >
                 Recharger
               </button>
-            </div>
+            </>
+          ) : null}
+        </div>
 
+        {!selectedProject ? (
+          <div style={card}>
+            <p style={{ ...muted, margin: 0 }}>
+              Sélectionnez un projet pour charger et modifier sa configuration QC.
+            </p>
+          </div>
+        ) : loadingConfig ? (
+          <div style={card}>
+            <p style={{ ...muted, margin: 0 }}>Chargement de la configuration…</p>
+          </div>
+        ) : (
+          <>
             {bySection.map(([section, items]) => (
               <div key={section} style={card}>
                 <h3 style={sectionTitle}>{section}</h3>
