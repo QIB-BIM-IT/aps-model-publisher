@@ -50,7 +50,7 @@ function extractDesignation(body) {
  * POST /api/qc/runs
  * Body: désignation (voir extractDesignation) + { runType?: 'quotidien'|'jalon', jobId? }
  * La version Revit et la garde workshared sont résolues par métadonnée DM (un seul GET,
- * sans ouverture) ; routage vers l'activity 2024 ou 2025 selon la version résolue.
+ * sans ouverture) ; routage vers l'activity 2024 / 2025 / 2026 selon la version résolue.
  */
 router.post('/runs', authenticateToken, async (req, res) => {
   if (!qcRunService.isReady()) return notReady(res);

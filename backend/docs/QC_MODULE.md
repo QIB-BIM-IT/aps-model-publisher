@@ -113,7 +113,7 @@ POST /api/qc/runs (JWT)                       [qc.routes.js]
 
 | Variable | Obligatoire | Description |
 |---|---|---|
-| `QC_DA_ACTIVITY_ID_2024` / `QC_DA_ACTIVITY_ID_2025` | **au moins une** (active le module DA) | Ids qualifiés des activities par version Revit, ex. `<nickname>.qc_extractor_activity_2025+prod`. Affichés par `setup-da.js --engine-version <v>`. Le routage choisit l'activity selon la version résolue du modèle ; version sans activity configurée ⇒ run `failed` explicite, aucun workitem. L'ancien `QC_DA_ACTIVITY_ID` reste lu comme alias 2024 (compat). |
+| `QC_DA_ACTIVITY_ID_2024` / `QC_DA_ACTIVITY_ID_2025` / `QC_DA_ACTIVITY_ID_2026` | **au moins une** (active le module DA) | Ids qualifiés des activities par version Revit, ex. `<nickname>.qc_extractor_activity_2026+prod`. Affichés par `setup-da.js --engine-version <v>`. Le routage choisit l'activity selon la version résolue du modèle ; version sans activity configurée ⇒ run `failed` explicite, aucun workitem. L'ancien `QC_DA_ACTIVITY_ID` reste lu comme alias 2024 (compat). L'activity 2026 peut réutiliser l'appbundle 2025 (engine `Autodesk.Revit+2026`) — validé sur maquette workshared. |
 | `QC_OSS_BUCKET` | non | Bucket OSS transient des résultats (défaut dérivé du client id). |
 | `QC_CALLBACK_BASE_URL` | non | Base publique pour le callback `onComplete` (ex. `https://<app>.azurewebsites.net`). Absent ⇒ polling seul. |
 | `QC_CALLBACK_SECRET` | non | Secret HMAC du callback (défaut : `WEBHOOK_SECRET` puis `JWT_SECRET`). |
@@ -125,13 +125,15 @@ demandé automatiquement par le token 2 legs privé du module QC. Montée progre
 session existante n'est cassée ; un utilisateur QC dont le token ne porte pas `code:all`
 reçoit une erreur explicite l'invitant à se reconnecter.
 
-## Mise en route (multimoteur 2024/2025)
+## Mise en route (multimoteur 2024/2025/2026)
 
 1. **Build de l'addin** (Revit 2024 → net48, Revit 2025 → **net8.0-windows** ; dotnet SDK 8 requis) :
    `pwsh da-appbundle/QcExtractor/build-bundle.ps1 -EngineVersion 2024` puis `-EngineVersion 2025`
+   (2026 : réutiliser le zip 2025 côté activity, pas de bundle dédié pour l'instant.)
 2. **Provisioning DA** (AppBundle + Activity par version, alias, bucket — idempotent, nickname jamais modifié) :
    `node backend/scripts/setup-da.js --engine-version 2024` puis `--engine-version 2025`
-   puis poser `QC_DA_ACTIVITY_ID_2024` / `QC_DA_ACTIVITY_ID_2025` (valeurs affichées).
+   puis poser `QC_DA_ACTIVITY_ID_2024` / `QC_DA_ACTIVITY_ID_2025` / `QC_DA_ACTIVITY_ID_2026` (valeurs affichées).
+   Pour 2026 sans nouveau zip : créer une activity `qc_extractor_activity_2026` (engine `Autodesk.Revit+2026`) pointant vers `qc_extractor_appbundle_2025+prod`.
 3. **Migrations** : appliquées automatiquement au boot (après `connectDB()`/sync), ou à la main :
    `node backend/scripts/qc-migrate.js up | down | down-all | status`
    (`down-all` = rollback complet : tables + types + schéma qc supprimés).
