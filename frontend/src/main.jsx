@@ -8,6 +8,7 @@ import GlobalDashboard from './pages/GlobalDashboard.jsx';
 import PlanningPage from './pages/PlanningPage.jsx';
 import QcConfigTestPage from './pages/QcConfigTestPage.jsx';
 import QcConfigPage from './pages/QcConfigPage.jsx';
+import QcRunResultsPage from './pages/QcRunResultsPage.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 function Root() {
@@ -54,6 +55,16 @@ function Root() {
             element={
               <ProtectedRoute>
                 <QcConfigPage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* QC — résultats d'un run (depuis historique Planning) */}
+          <Route
+            path="qc-run/:runId"
+            element={
+              <ProtectedRoute>
+                <QcRunResultsPage />
               </ProtectedRoute>
             }
           />

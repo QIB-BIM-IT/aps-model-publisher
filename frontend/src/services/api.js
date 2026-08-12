@@ -395,6 +395,23 @@ export async function fetchQcRuns(params = {}) {
   return Array.isArray(data?.runs) ? data.runs : [];
 }
 
+/** GET /api/qc/runs/:runId — détail + résultats enrichis (fiche / UI). */
+export async function fetchQcRunDetail(runId) {
+  try {
+    const { data } = await api.get(`/api/qc/runs/${encodeURIComponent(runId)}`);
+    if (!data?.success) {
+      throw new Error(data?.message || 'Échec chargement du détail du run QC');
+    }
+    return data.data;
+  } catch (err) {
+    const message =
+      err?.response?.data?.message || err?.message || 'Erreur chargement du détail du run QC';
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
+}
+
 // ----- QC Jobs (tâches planifiées — B1/B2) -----
 /** POST /api/qc/jobs — crée une tâche QC (1 modelUrn). */
 export async function createQcJob(payload) {
