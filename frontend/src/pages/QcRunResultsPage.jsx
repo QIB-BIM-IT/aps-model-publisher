@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { fetchQcRunDetail } from '../services/api';
+import { fetchQcRunDetail, downloadQcRunFiche } from '../services/api';
 import { labelBuiltinCategoryFr } from '../components/qc-config/builtinCategoryLabelsFr';
 import {
   pageShell,
@@ -615,6 +615,8 @@ export default function QcRunResultsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
+  const [ficheLoading, setFicheLoading] = useState(false);
+  const [ficheError, setFicheError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -667,16 +669,62 @@ export default function QcRunResultsPage() {
     });
   }
 
+  async function handleDownloadFiche() {
+    if (!runId || ficheLoading) return;
+    setFicheLoading(true);
+    setFicheError(null);
+    try {
+      const { blob, fileName } = await downloadQcRunFiche(runId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setFicheError(e?.message || 'Impossible de télécharger la fiche de contrôle');
+    } finally {
+      setFicheLoading(false);
+    }
+  }
+
   return (
     <div style={pageShell}>
       <div style={{ ...pageInner, maxWidth: 960 }}>
-        <button
-          type="button"
-          onClick={goBackToPlanning}
-          style={{ ...btnSecondary, marginBottom: 16 }}
-        >
-          ← Retour à la planification
-        </button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
+          <button
+            type="button"
+            onClick={goBackToPlanning}
+            style={{ ...btnSecondary }}
+          >
+            ← Retour à la planification
+          </button>
+          {!loading && !error && run && (
+            <button
+              type="button"
+              onClick={handleDownloadFiche}
+              disabled={ficheLoading}
+              style={{
+                padding: '10px 18px',
+                borderRadius: 10,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: ficheLoading ? 'wait' : 'pointer',
+                border: 'none',
+                color: '#fff',
+                background: ficheLoading
+                  ? 'rgba(124, 58, 237, 0.45)'
+                  : `linear-gradient(135deg, ${VIOLET} 0%, ${VIOLET_DARK} 100%)`,
+                boxShadow: '0 4px 14px rgba(124, 58, 237, 0.25)',
+              }}
+            >
+              {ficheLoading ? 'Génération de la fiche…' : 'Télécharger la fiche de contrôle'}
+            </button>
+          )}
+        </div>
+        {ficheError && <div style={{ ...errorBanner, marginBottom: 16 }}>{ficheError}</div>}
 
         <h1
           style={{

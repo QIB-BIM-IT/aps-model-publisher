@@ -412,6 +412,51 @@ export async function fetchQcRunDetail(runId) {
   }
 }
 
+/**
+ * GET /api/qc/runs/:runId/fiche — télécharge la fiche de contrôle Excel.
+ * @returns {Promise<{ blob: Blob, fileName: string }>}
+ */
+export async function downloadQcRunFiche(runId) {
+  try {
+    const response = await api.get(`/api/qc/runs/${encodeURIComponent(runId)}/fiche`, {
+      responseType: 'blob',
+    });
+    const disposition = response.headers?.['content-disposition'] || '';
+    let fileName = `QC_fiche_${runId}.xlsx`;
+    const utfMatch = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+    const plainMatch = /filename="?([^";]+)"?/i.exec(disposition);
+    if (utfMatch?.[1]) {
+      try {
+        fileName = decodeURIComponent(utfMatch[1]);
+      } catch {
+        fileName = utfMatch[1];
+      }
+    } else if (plainMatch?.[1]) {
+      fileName = plainMatch[1];
+    }
+    return { blob: response.data, fileName };
+  } catch (err) {
+    let message = 'Échec du téléchargement de la fiche de contrôle';
+    const data = err?.response?.data;
+    if (data instanceof Blob) {
+      try {
+        const text = await data.text();
+        const parsed = JSON.parse(text);
+        if (parsed?.message) message = parsed.message;
+      } catch {
+        /* ignore */
+      }
+    } else if (err?.response?.data?.message) {
+      message = err.response.data.message;
+    } else if (err?.message) {
+      message = err.message;
+    }
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
+}
+
 // ----- QC Jobs (tâches planifiées — B1/B2) -----
 /** POST /api/qc/jobs — crée une tâche QC (1 modelUrn). */
 export async function createQcJob(payload) {

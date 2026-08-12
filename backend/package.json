@@ -30,6 +30,7 @@
   "cors": "^2.8.5",
   "cron-parser": "^5.4.0",
   "dotenv": "^17.2.2",
+  "exceljs": "^4.4.0",
   "express": "^4.21.2",
   "forge-apis": "^0.9.11",
   "helmet": "^8.1.0",

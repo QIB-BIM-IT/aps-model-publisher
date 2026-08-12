@@ -174,6 +174,37 @@ router.get('/runs/:id', authenticateToken, async (req, res) => {
 });
 
 /**
+ * GET /api/qc/runs/:id/fiche — téléchargement fiche de contrôle Excel (gabarit rempli).
+ * Réutilise qcRunDetail.service ; gabarit en lecture seule.
+ */
+router.get('/runs/:id/fiche', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const qcFicheExcelService = require('../services/qcFicheExcel.service');
+    const { buffer, fileName, meta } = await qcFicheExcelService.buildFiche(req.params.id);
+    logger.info(
+      `[QC] Fiche Excel run=${meta.runId} file=${fileName} OK=${meta.okCount} àRéviser=${meta.aReviserCount}` +
+        (meta.missingInTemplate?.length ? ` missing=${meta.missingInTemplate.join(',')}` : '')
+    );
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileName.replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+    );
+    res.setHeader('Content-Length', buffer.length);
+    return res.send(buffer);
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) logger.error(`[QC] GET /runs/:id/fiche: ${err.message}`);
+    else logger.warn(`[QC] GET /runs/:id/fiche: ${err.message}`);
+    return res.status(status).json({ success: false, message: err.message });
+  }
+});
+
+/**
  * POST /api/qc/da-callback?runId=...&sig=...
  * Callback onComplete de Design Automation. DA ne signe pas ses callbacks : l'URL porte
  * un jeton HMAC lié au runId. On répond 200 immédiatement puis on finalise en asynchrone ;
