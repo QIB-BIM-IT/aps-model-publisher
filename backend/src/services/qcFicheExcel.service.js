@@ -10,24 +10,47 @@ const logger = require('../config/logger');
 const qcRunDetailService = require('./qcRunDetail.service');
 
 /**
- * exceljs écrit pageSetup.horizontalDpi/verticalDpi = 4294967295 (uint32 -1)
- * sur chaque feuille. Excel refuse cet attribut (erreur XML ligne 2) et
- * supprime les feuilles en récupération. Le gabarit n'a pas ces attributs.
- * On les retire du zip produit — sans relire le classeur via exceljs.
+ * Compense deux écarts de schéma OOXML d'exceljs (4.4.x) que les parseurs XML
+ * génériques ne voient pas. Excel valide la séquence CT_* et refuse la partie.
+ * Réévaluer à toute mise à jour d'exceljs en rouvrant une fiche dans Excel.
+ *
+ * 1) pageSetup.horizontalDpi/verticalDpi = 4294967295 (uint32 -1) — absent du
+ *    gabarit ; Excel échoue au chargement XML de la feuille.
+ * 2) Dans sheetPr, exceljs inverse outlinePr et pageSetUpPr. Le schéma
+ *    (CT_SheetPr) exige tabColor?, outlinePr?, pageSetUpPr?.
  */
 const EXCELJS_INVALID_DPI = '4294967295';
 
-function stripInvalidPageSetupDpi(buffer) {
+function reorderSheetPrChildren(xml) {
+  return xml.replace(/<sheetPr([^>]*)>([\s\S]*?)<\/sheetPr>/g, (full, attrs, inner) => {
+    const tabColor = inner.match(/<tabColor\b[^>]*\/>/);
+    const outlinePr = inner.match(/<outlinePr\b[^>]*\/>/);
+    const pageSetUpPr = inner.match(/<pageSetUpPr\b[^>]*\/>/);
+    if (!outlinePr || !pageSetUpPr) return full;
+    const outlineIdx = inner.indexOf(outlinePr[0]);
+    const pageIdx = inner.indexOf(pageSetUpPr[0]);
+    if (pageIdx >= outlineIdx) return full;
+    let rest = inner.replace(outlinePr[0], '').replace(pageSetUpPr[0], '');
+    if (tabColor) rest = rest.replace(tabColor[0], '');
+    const ordered = `${tabColor ? tabColor[0] : ''}${outlinePr[0]}${pageSetUpPr[0]}${rest}`;
+    return `<sheetPr${attrs}>${ordered}</sheetPr>`;
+  });
+}
+
+function sanitizeExceljsWorksheetXml(buffer) {
   const zip = new AdmZip(Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer));
   let patched = 0;
   for (const entry of zip.getEntries()) {
     if (!/^xl\/worksheets\/sheet\d+\.xml$/i.test(entry.entryName)) continue;
-    const xml = entry.getData().toString('utf8');
-    if (!xml.includes(EXCELJS_INVALID_DPI)) continue;
-    const dpiAttr = new RegExp(`\\s+(horizontalDpi|verticalDpi)="${EXCELJS_INVALID_DPI}"`, 'g');
-    const next = xml.replace(dpiAttr, '');
-    if (next !== xml) {
-      zip.updateFile(entry.entryName, Buffer.from(next, 'utf8'));
+    let xml = entry.getData().toString('utf8');
+    const before = xml;
+    if (xml.includes(EXCELJS_INVALID_DPI)) {
+      const dpiAttr = new RegExp(`\\s+(horizontalDpi|verticalDpi)="${EXCELJS_INVALID_DPI}"`, 'g');
+      xml = xml.replace(dpiAttr, '');
+    }
+    xml = reorderSheetPrChildren(xml);
+    if (xml !== before) {
+      zip.updateFile(entry.entryName, Buffer.from(xml, 'utf8'));
       patched += 1;
     }
   }
@@ -282,7 +305,7 @@ class QcFicheExcelService {
     }
 
     const raw = Buffer.from(await workbook.xlsx.writeBuffer());
-    const buffer = stripInvalidPageSetupDpi(raw);
+    const buffer = sanitizeExceljsWorksheetXml(raw);
     const fileName = buildDownloadFileName(run.modelName);
 
     return {
@@ -306,4 +329,4 @@ module.exports.TEMPLATE_PATH = TEMPLATE_PATH;
 module.exports.formatValeurRelevee = formatValeurRelevee;
 module.exports.formatStatutFiche = formatStatutFiche;
 module.exports.buildDownloadFileName = buildDownloadFileName;
-module.exports.stripInvalidPageSetupDpi = stripInvalidPageSetupDpi;
+module.exports.sanitizeExceljsWorksheetXml = sanitizeExceljsWorksheetXml;
