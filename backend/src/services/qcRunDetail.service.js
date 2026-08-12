@@ -84,7 +84,7 @@ class QcRunDetailService {
         {
           model: QCJob,
           as: 'job',
-          attributes: ['id', 'name', 'modelName', 'projectId'],
+          attributes: ['id', 'name', 'modelName', 'projectId', 'hubId'],
           required: false,
         },
       ],
@@ -96,6 +96,7 @@ class QcRunDetailService {
     const stats = plain.stats && typeof plain.stats === 'object' ? plain.stats : {};
 
     let projectId = plain.job?.projectId || null;
+    let hubId = plain.job?.hubId || null;
     let projectName = null;
     try {
       const proj = await QCProject.findOne({
@@ -187,6 +188,7 @@ class QcRunDetailService {
         durationMs: durationMs(startedAtUtc, endedAtUtc),
         projectId,
         projectName,
+        hubId,
         accProjectGuid: plain.accProjectGuid,
         modelName: plain.job?.modelName || stats.fileName || null,
         accModelGuid: plain.accModelGuid,

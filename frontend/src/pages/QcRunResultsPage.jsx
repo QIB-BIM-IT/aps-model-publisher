@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { fetchQcRunDetail } from '../services/api';
 import { labelBuiltinCategoryFr } from '../components/qc-config/builtinCategoryLabelsFr';
 import {
@@ -652,12 +652,27 @@ export default function QcRunResultsPage() {
   const run = data?.run;
   const summary = data?.summary;
 
+  /** Même contrat que Dashboard → Planning (preSelectHub / preSelectProject = IDs string). */
+  function goBackToPlanning() {
+    const projectId = run?.projectId || null;
+    if (!projectId) {
+      navigate('/planning');
+      return;
+    }
+    navigate('/planning', {
+      state: {
+        preSelectHub: run?.hubId || null,
+        preSelectProject: projectId,
+      },
+    });
+  }
+
   return (
     <div style={pageShell}>
       <div style={{ ...pageInner, maxWidth: 960 }}>
         <button
           type="button"
-          onClick={() => navigate('/planning')}
+          onClick={goBackToPlanning}
           style={{ ...btnSecondary, marginBottom: 16 }}
         >
           ← Retour à la planification
@@ -801,9 +816,21 @@ export default function QcRunResultsPage() {
             ))}
 
             <div style={{ textAlign: 'center', marginTop: 8 }}>
-              <Link to="/planning" style={{ color: '#94a3b8', fontSize: 13 }}>
+              <button
+                type="button"
+                onClick={goBackToPlanning}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  color: '#94a3b8',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
                 Retour à la planification
-              </Link>
+              </button>
             </div>
           </>
         )}
