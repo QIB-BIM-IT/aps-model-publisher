@@ -52,9 +52,49 @@ export const BUILTIN_CATEGORY_LABELS_FR = {
   OST_SpecialityEquipment: 'Équipements spécialisés',
 };
 
-/** Libellé FR pour affichage ; retombe sur le bic si inconnu. */
+/** Noms EN observés côté extracteur DA → libellé FR (G504 typesFautifs.categorie). */
+const EN_CATEGORY_LABELS_FR = {
+  'Mechanical Equipment': 'Équipements mécaniques',
+  Ducts: 'Gaines',
+  'Duct Fittings': 'Raccords de gaine',
+  'Duct Accessories': 'Accessoires de gaine',
+  'Air Terminals': "Bouches d'aération",
+  'Flex Ducts': 'Gaines flexibles',
+  'Plumbing Fixtures': 'Appareils sanitaires',
+  Pipes: 'Canalisations',
+  'Pipe Fittings': 'Raccords de canalisation',
+  'Pipe Accessories': 'Accessoires de canalisation',
+  'Flex Pipes': 'Canalisations flexibles',
+  Sprinklers: 'Sprinklers',
+  'Electrical Equipment': 'Équipements électriques',
+  'Electrical Fixtures': 'Dispositifs électriques',
+  Lighting: 'Luminaires',
+  'Lighting Fixtures': 'Luminaires',
+  'Lighting Devices': "Dispositifs d'éclairage",
+  'Communication Devices': 'Dispositifs de communication',
+  'Data Devices': 'Dispositifs de données',
+  'Fire Alarm Devices': "Dispositifs d'alarme incendie",
+  'Security Devices': 'Dispositifs de sécurité',
+  'Nurse Call Devices': "Dispositifs d'appel infirmier",
+  'Telephone Devices': 'Dispositifs téléphoniques',
+  'Audio Visual Devices': 'Dispositifs audiovisuels',
+  Conduits: 'Conduits',
+  'Conduit Fittings': 'Raccords de conduit',
+  'Cable Trays': 'Chemins de câbles',
+  'Cable Tray Fittings': 'Raccords de chemin de câbles',
+  'Structural Columns': 'Poteaux porteurs',
+  'Structural Framing': 'Ossature',
+  'Structural Foundations': 'Fondations',
+  'Structural Connections': 'Connexions structurelles',
+  'Generic Models': 'Modèles génériques',
+  'Specialty Equipment': 'Équipements spécialisés',
+};
+
+/** Libellé FR pour affichage ; retombe sur le bic / nom EN si inconnu. */
 export function labelBuiltinCategoryFr(bic) {
   const key = String(bic || '').trim();
   if (!key) return '';
-  return BUILTIN_CATEGORY_LABELS_FR[key] || key;
+  if (BUILTIN_CATEGORY_LABELS_FR[key]) return BUILTIN_CATEGORY_LABELS_FR[key];
+  if (EN_CATEGORY_LABELS_FR[key]) return EN_CATEGORY_LABELS_FR[key];
+  return key;
 }

@@ -3920,6 +3920,12 @@ export default function PlanningPage() {
                     return (
                       <tr
                         key={r.id}
+                        onClick={
+                          isQc
+                            ? () => navigate(`/qc-run/${encodeURIComponent(r.id)}`)
+                            : undefined
+                        }
+                        title={isQc ? 'Voir les résultats du contrôle QC' : undefined}
                         style={{
                           background:
                             r.status === 'running'
@@ -3928,7 +3934,28 @@ export default function PlanningPage() {
                               ? 'rgba(248, 250, 252, 0.3)'
                               : 'transparent',
                           borderBottom: '1px solid rgba(148, 163, 184, 0.1)',
+                          cursor: isQc ? 'pointer' : 'default',
+                          transition: isQc ? 'background 0.15s ease' : undefined,
                         }}
+                        onMouseEnter={
+                          isQc
+                            ? (e) => {
+                                e.currentTarget.style.background = 'rgba(124, 58, 237, 0.08)';
+                              }
+                            : undefined
+                        }
+                        onMouseLeave={
+                          isQc
+                            ? (e) => {
+                                e.currentTarget.style.background =
+                                  r.status === 'running'
+                                    ? 'rgba(254, 243, 199, 0.3)'
+                                    : index % 2 === 0
+                                      ? 'rgba(248, 250, 252, 0.3)'
+                                      : 'transparent';
+                              }
+                            : undefined
+                        }
                       >
                         <td
                           style={{

@@ -156,26 +156,20 @@ router.get('/runs', authenticateToken, async (req, res) => {
 });
 
 /**
- * GET /api/qc/runs/:id — run + control_results + warnings
+ * GET /api/qc/runs/:id — détail run + résultats enrichis (catalogue) + warnings G408.
+ * Lecture seule ; même forme pour UI et fiche Excel (lot 2).
  */
 router.get('/runs/:id', authenticateToken, async (req, res) => {
   if (!qcRunService.isReady()) return notReady(res);
   try {
-    const { QCRun, QCControlResult, QCWarning } = qcRunService.getModels();
-    const run = await QCRun.findByPk(req.params.id, {
-      include: [
-        {
-          model: QCControlResult,
-          as: 'controlResults',
-          include: [{ model: QCWarning, as: 'warnings' }],
-        },
-      ],
-    });
-    if (!run) return res.status(404).json({ success: false, message: 'Run introuvable' });
-    return res.json({ success: true, run });
+    const qcRunDetailService = require('../services/qcRunDetail.service');
+    const data = await qcRunDetailService.getRunDetail(req.params.id);
+    return res.json({ success: true, data });
   } catch (err) {
-    logger.error(`[QC] GET /runs/:id: ${err.message}`);
-    return res.status(500).json({ success: false, message: err.message });
+    const status = err.statusCode || 500;
+    if (status >= 500) logger.error(`[QC] GET /runs/:id: ${err.message}`);
+    else logger.warn(`[QC] GET /runs/:id: ${err.message}`);
+    return res.status(status).json({ success: false, message: err.message });
   }
 });
 
