@@ -58,7 +58,7 @@ class QcDesignAutomationService {
   }
 
   /**
-   * Id qualifié de l'activity pour une version Revit ('2024' | '2025').
+   * Id qualifié de l'activity pour une version Revit ('2024' | '2025' | '2026').
    * Map d'env QC_DA_ACTIVITY_ID_<version> ; l'ancien QC_DA_ACTIVITY_ID reste lu
    * comme alias 2024 (compat tranche 1, rien ne casse).
    */
@@ -72,7 +72,7 @@ class QcDesignAutomationService {
 
   /** Versions Revit dont l'activity est configurée (ordre croissant). */
   configuredVersions() {
-    return ['2024', '2025'].filter((v) => Boolean(this.activityIdFor(v)));
+    return ['2024', '2025', '2026'].filter((v) => Boolean(this.activityIdFor(v)));
   }
 
   /** Le module DA est-il prêt à soumettre au moins un type de workitem ? */
@@ -89,9 +89,9 @@ class QcDesignAutomationService {
   configurationHint() {
     return (
       'Design Automation non configuré pour le module QC. ' +
-      'Exécuter backend/scripts/setup-da.js --engine-version <2024|2025> puis définir ' +
-      'QC_DA_ACTIVITY_ID_2024 / QC_DA_ACTIVITY_ID_2025 ' +
-      '(ex: <nickname>.qc_extractor_activity_2025+prod). Voir backend/docs/QC_MODULE.md.'
+      'Exécuter backend/scripts/setup-da.js --engine-version <2024|2025|2026> puis définir ' +
+      'QC_DA_ACTIVITY_ID_2024 / QC_DA_ACTIVITY_ID_2025 / QC_DA_ACTIVITY_ID_2026 ' +
+      '(ex: <nickname>.qc_extractor_activity_2026+prod). Voir backend/docs/QC_MODULE.md.'
     );
   }
 

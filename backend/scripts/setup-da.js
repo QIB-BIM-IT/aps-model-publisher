@@ -98,8 +98,8 @@ async function uploadBundleZip(uploadParameters, zipPath) {
 
 async function main() {
   const engineVersion = arg('--engine-version') || '2024';
-  if (!['2024', '2025'].includes(engineVersion)) {
-    throw new Error(`--engine-version invalide: ${engineVersion} (attendu: 2024 | 2025)`);
+  if (!['2024', '2025', '2026'].includes(engineVersion)) {
+    throw new Error(`--engine-version invalide: ${engineVersion} (attendu: 2024 | 2025 | 2026)`);
   }
   const cfg = { ...qcDa.config, ...qcDa.namesFor(engineVersion) };
   const zipPath =
