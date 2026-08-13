@@ -9,6 +9,7 @@ import PlanningPage from './pages/PlanningPage.jsx';
 import QcConfigTestPage from './pages/QcConfigTestPage.jsx';
 import QcConfigPage from './pages/QcConfigPage.jsx';
 import QcRunResultsPage from './pages/QcRunResultsPage.jsx';
+import QcRunElementsPage from './pages/QcRunElementsPage.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 function Root() {
@@ -65,6 +66,14 @@ function Root() {
             element={
               <ProtectedRoute>
                 <QcRunResultsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="qc-run/:runId/elements"
+            element={
+              <ProtectedRoute>
+                <QcRunElementsPage />
               </ProtectedRoute>
             }
           />

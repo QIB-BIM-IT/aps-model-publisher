@@ -2,6 +2,7 @@
 // Détail d'un run QC pour consultation UI (lot 1) et fiche Excel (lot 2).
 // Lecture seule : pas de recalcul de statut, pas d'écriture.
 
+const { sequelize } = require('../config/database');
 const logger = require('../config/logger');
 const qcProjectConfigService = require('./qcProjectConfig.service');
 
@@ -59,7 +60,8 @@ class QcRunDetailService {
     const id = String(runId || '').trim();
     if (!id) throw httpError(400, 'Identifiant de run requis');
 
-    const { QCRun, QCControlResult, QCWarning, QCJob, QCProject } = this.getModels();
+    const { QCRun, QCControlResult, QCWarning, QCJob, QCProject, QCDesignatedElement } =
+      this.getModels();
 
     const run = await QCRun.findByPk(id, {
       include: [
@@ -114,6 +116,16 @@ class QcRunDetailService {
     const byCode = new Map((catalogMeta.controles || []).map((c) => [c.code, c]));
     const catalogFull = qcProjectConfigService.loadCatalog()?.controles || {};
 
+    const countRows = await QCDesignatedElement.findAll({
+      where: { runId: id },
+      attributes: ['controlCode', [sequelize.literal('COUNT(*)'), 'count']],
+      group: ['controlCode'],
+      raw: true,
+    });
+    const elementsByCode = new Map(
+      (countRows || []).map((r) => [r.controlCode, Number(r.count) || 0])
+    );
+
     const resultsRaw = Array.isArray(plain.controlResults) ? plain.controlResults : [];
     const results = resultsRaw
       .map((cr) => {
@@ -153,6 +165,7 @@ class QcRunDetailService {
           etat_extraction: cr.etat_extraction,
           erreur_extraction: cr.erreur_extraction ?? null,
           statut: cr.statut ?? null,
+          elementsCount: elementsByCode.get(cr.controlCode) || 0,
           warnings,
         };
       })
