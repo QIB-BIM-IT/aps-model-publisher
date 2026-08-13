@@ -21,7 +21,7 @@ namespace QcExtractor.Extractors
     public class G412ModelHygieneExtractor : IControlExtractor
     {
         public string ControlCode => "G412";
-        private const int MaxListe = 100;
+        private const int MaxListe = DesignatedElementLimits.SafetyCapPerControl;
 
         public ControlOutcome Extract(Document doc)
         {

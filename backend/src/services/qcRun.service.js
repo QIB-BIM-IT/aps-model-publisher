@@ -461,14 +461,16 @@ class QcRunService {
 
   async _finalizeSuccess(run, workitem) {
     const { sequelize } = require('../config/database');
-    const { QCRun, QCControlResult, QCWarning } = this.getModels();
+    const { QCRun, QCControlResult, QCWarning, QCDesignatedElement } = this.getModels();
     const qcScoring = require('./qcScoring.service');
     const qcMetaControls = require('./qcMetaControls.service');
+    const qcDesignatedElements = require('./qcDesignatedElements.service');
 
     const resultUrl = run.stats?.resultUrl;
     if (!resultUrl) throw new Error('URL du résultat absente des stats du run');
 
-    const result = await qcDa.downloadResult(resultUrl);
+    const { payload: result, bytes: resultBytes } = await qcDa.downloadResult(resultUrl);
+    logger.info(`[QC] Run ${run.id}: result.json ${resultBytes} octets`);
 
     // Fusion MÉTA + MODÈLE sous le même runId. AMENDEMENT chantier 3 : TOUT est
     // persisté ici, dans UNE transaction — un run échoué n'a aucune ligne.
@@ -600,7 +602,12 @@ class QcRunService {
           valeurJson = { ...(outcome.valeurJson || {}), coordonnees: { axes, axesHorsTolerance } };
         }
 
-        await QCControlResult.create(
+        // Listes détaillées → table longue (même transaction). valeur_json garde
+        // compteurs + extrait court pour la page de détail / la fiche Excel.
+        const designated = qcDesignatedElements.extractRows(code, valeurJson);
+        valeurJson = qcDesignatedElements.slimValeurJson(code, valeurJson, designated);
+
+        const controlResult = await QCControlResult.create(
           {
             runId: run.id,
             controlCode: code,
@@ -612,6 +619,18 @@ class QcRunService {
           },
           { transaction: t }
         );
+        if (designated.rows.length) {
+          await qcDesignatedElements.bulkInsert(
+            QCDesignatedElement,
+            designated.rows.map((r) => ({
+              ...r,
+              runId: run.id,
+              controlResultId: controlResult.id,
+              controlCode: code,
+            })),
+            t
+          );
+        }
         statsControls[code] = { etat: 'extrait', statut, valeurNum: outcome.valeurNum ?? null };
       }
 
@@ -630,6 +649,7 @@ class QcRunService {
             warningsCount: g408 ? (g408.outcome.warnings || []).length : undefined,
             controls: statsControls,
             reportUrl: workitem.reportUrl || null,
+            resultBytes: resultBytes ?? null,
           },
         },
         { where: { id: run.id }, transaction: t }

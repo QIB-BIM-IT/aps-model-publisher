@@ -25,7 +25,7 @@ namespace QcExtractor.Extractors
     public class G314LevelAttachmentExtractor : IControlExtractor
     {
         public string ControlCode => "G314";
-        private const int MaxFautifs = 100;
+        private const int MaxFautifs = DesignatedElementLimits.SafetyCapPerControl;
 
         // Niveau déclaré (Familles A/B) — contraintes d'hôte / référence d'abord.
         // INSTANCE_SCHEDULE_ONLY_LEVEL_PARAM en dernier : peut différer du niveau de contrainte.

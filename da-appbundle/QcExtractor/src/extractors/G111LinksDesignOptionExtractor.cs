@@ -15,7 +15,7 @@ namespace QcExtractor.Extractors
     public class G111LinksDesignOptionExtractor : IControlExtractor
     {
         public string ControlCode => "G111";
-        private const int MaxFautifs = 100;
+        private const int MaxFautifs = DesignatedElementLimits.SafetyCapPerControl;
         public const string DesignOptionNomDefaut = "Liens";
 
         private readonly string _designOptionNom;

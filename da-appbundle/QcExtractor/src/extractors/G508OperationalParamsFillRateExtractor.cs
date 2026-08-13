@@ -19,14 +19,14 @@ namespace QcExtractor.Extractors
     ///
     /// Pour CHAQUE paramètre de la liste : taux de remplissage (entités avec valeur non vide
     /// / total entités du périmètre), nature type/instance détectée à l'exécution, 3 cas
-    /// absent/vide/rempli, et — si non conforme — la liste des entités fautives plafonnée à
-    /// 100 IDs par paramètre (compte total conservé). Rapport PAR PARAMÈTRE (le gestionnaire
+    /// absent/vide/rempli, et — si non conforme — la liste des entités fautives bornée par
+    /// le plafond de sécurité (50 000 IDs par contrôle). Rapport PAR PARAMÈTRE (le gestionnaire
     /// 7D veut savoir QUEL paramètre traîne), plus un taux global agrégé pour Power BI.
     /// </summary>
     public class G508OperationalParamsFillRateExtractor : IControlExtractor
     {
         public string ControlCode => "G508";
-        private const int MaxIdsParParametre = 100;
+        private const int MaxIdsParParametre = DesignatedElementLimits.SafetyCapPerControl;
 
         private readonly G508Config _cfg;
 
@@ -58,6 +58,7 @@ namespace QcExtractor.Extractors
 
             var rapport = new List<object>();
             long sumRempli = 0, sumTotal = 0;
+            int idsEmisGlobal = 0;
 
             foreach (G508ParamEntry entry in entries)
             {
@@ -160,14 +161,14 @@ namespace QcExtractor.Extractors
                         Parameter p = ReadParam(inst, builtin, bip, nom);
                         if (NonEmpty(p)) { rempli++; continue; }
                         nbFautifs++;
-                        if (idsEch.Count < MaxIdsParParametre) idsEch.Add(inst.Id.Value);
+                        if (idsEmisGlobal < MaxIdsParParametre) { idsEch.Add(inst.Id.Value); idsEmisGlobal++; }
                         else tronque = true;
                     }
                 }
                 else
                 {
                     // TYPE (couvre aussi ABSENT) : un type sans valeur = 1 fautif ; on liste
-                    // les instances des types fautifs (pour repérer dans Revit), plafond 100.
+                    // les instances des types fautifs (pour repérer dans Revit).
                     foreach (IGrouping<long, Element> g in instances.GroupBy(e => e.GetTypeId().Value))
                     {
                         total++;
@@ -178,7 +179,7 @@ namespace QcExtractor.Extractors
                         nbFautifs++;
                         foreach (Element e in listeInst)
                         {
-                            if (idsEch.Count < MaxIdsParParametre) idsEch.Add(e.Id.Value);
+                            if (idsEmisGlobal < MaxIdsParParametre) { idsEch.Add(e.Id.Value); idsEmisGlobal++; }
                             else { tronque = true; break; }
                         }
                     }

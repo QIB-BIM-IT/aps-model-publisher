@@ -157,8 +157,16 @@ class QcDesignAutomationService {
   }
 
   async downloadResult(signedUrl) {
-    const { data } = await axios.get(signedUrl, { responseType: 'json', timeout: 60_000 });
-    return data;
+    const { data } = await axios.get(signedUrl, {
+      responseType: 'arraybuffer',
+      timeout: 180_000,
+      maxContentLength: 80 * 1024 * 1024,
+      maxBodyLength: 80 * 1024 * 1024,
+    });
+    const bytes = data.byteLength;
+    logger.info(`[QC][DA] result.json ${bytes} octets`);
+    const payload = JSON.parse(Buffer.from(data).toString('utf8'));
+    return { payload, bytes };
   }
 
   // ======== Workitems ========

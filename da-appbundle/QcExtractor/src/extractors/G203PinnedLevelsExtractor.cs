@@ -15,7 +15,7 @@ namespace QcExtractor.Extractors
     public class G203PinnedLevelsExtractor : IControlExtractor
     {
         public string ControlCode => "G203";
-        private const int MaxFautifs = 100;
+        private const int MaxFautifs = DesignatedElementLimits.SafetyCapPerControl;
 
         public ControlOutcome Extract(Document doc)
         {

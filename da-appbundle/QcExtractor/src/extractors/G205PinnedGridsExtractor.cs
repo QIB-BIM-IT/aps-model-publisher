@@ -17,7 +17,7 @@ namespace QcExtractor.Extractors
     public class G205PinnedGridsExtractor : IControlExtractor
     {
         public string ControlCode => "G205";
-        private const int MaxFautifs = 100;
+        private const int MaxFautifs = DesignatedElementLimits.SafetyCapPerControl;
         public const string DesignOptionNomDefaut = "Quadrillages";
 
         private readonly string _designOptionNom;

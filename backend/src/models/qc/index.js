@@ -13,6 +13,7 @@ const QCJob = require('./QCJob');
 const QCRun = require('./QCRun');
 const QCControlResult = require('./QCControlResult');
 const QCWarning = require('./QCWarning');
+const QCDesignatedElement = require('./QCDesignatedElement');
 const QCProjectConfig = require('./QCProjectConfig');
 const QCProject = require('./QCProject'); // pas d'association contraignante — jointure sur accProjectGuid
 
@@ -35,11 +36,17 @@ QCControlResult.hasMany(QCWarning, { foreignKey: 'controlResultId', as: 'warning
 QCWarning.belongsTo(QCRun, { foreignKey: 'runId', as: 'run', constraints: false });
 QCRun.hasMany(QCWarning, { foreignKey: 'runId', as: 'warnings', constraints: false });
 
+QCDesignatedElement.belongsTo(QCControlResult, { foreignKey: 'controlResultId', as: 'controlResult', constraints: false });
+QCControlResult.hasMany(QCDesignatedElement, { foreignKey: 'controlResultId', as: 'designatedElements', constraints: false });
+QCDesignatedElement.belongsTo(QCRun, { foreignKey: 'runId', as: 'run', constraints: false });
+QCRun.hasMany(QCDesignatedElement, { foreignKey: 'runId', as: 'designatedElements', constraints: false });
+
 module.exports = {
   QCJob,
   QCRun,
   QCControlResult,
   QCWarning,
+  QCDesignatedElement,
   QCProjectConfig,
   QCProject,
 };
