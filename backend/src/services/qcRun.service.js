@@ -469,7 +469,8 @@ class QcRunService {
     const resultUrl = run.stats?.resultUrl;
     if (!resultUrl) throw new Error('URL du résultat absente des stats du run');
 
-    const result = await qcDa.downloadResult(resultUrl);
+    const { payload: result, bytes: resultBytes } = await qcDa.downloadResult(resultUrl);
+    logger.info(`[QC] Run ${run.id}: result.json ${resultBytes} octets`);
 
     // Fusion MÉTA + MODÈLE sous le même runId. AMENDEMENT chantier 3 : TOUT est
     // persisté ici, dans UNE transaction — un run échoué n'a aucune ligne.
@@ -648,6 +649,7 @@ class QcRunService {
             warningsCount: g408 ? (g408.outcome.warnings || []).length : undefined,
             controls: statsControls,
             reportUrl: workitem.reportUrl || null,
+            resultBytes: resultBytes ?? null,
           },
         },
         { where: { id: run.id }, transaction: t }
