@@ -28,7 +28,7 @@ namespace QcExtractor.Extractors
     public class G210CopyMonitorExtractor : IControlExtractor
     {
         public string ControlCode => "G210";
-        private const int MaxNomsListes = 100;
+        private const int MaxNomsListes = DesignatedElementLimits.SafetyCapPerControl;
 
         private readonly G210Config _cfg;
 
@@ -126,6 +126,7 @@ namespace QcExtractor.Extractors
                 {
                     report.NonMonitores++;
                     report.FautifsNoms.Add(nom);
+                    report.FautifsIds.Add(el.Id.Value);
                 }
             }
 
@@ -171,6 +172,7 @@ namespace QcExtractor.Extractors
             public int Monitores;
             public int NonMonitores;
             public readonly List<string> FautifsNoms = new List<string>();
+            public readonly List<long> FautifsIds = new List<long>();
             public readonly List<string> ExclusNoms = new List<string>();
             public List<object> RepartitionParLien = new List<object>();
 
@@ -186,6 +188,7 @@ namespace QcExtractor.Extractors
                     {
                         total = NonMonitores,
                         noms = FautifsNoms.Take(MaxNomsListes).ToList(),
+                        ids = FautifsIds.Take(MaxNomsListes).ToList(),
                         listeTronquee = tronque,
                     },
                     ["repartitionParLien"] = RepartitionParLien,

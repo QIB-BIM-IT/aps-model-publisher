@@ -29,13 +29,13 @@ namespace QcExtractor.Extractors
     ///
     /// TROIS CAS distingués : (a) paramètre ABSENT du modèle (drapeau parametreAbsent) ;
     /// (b) présent mais VIDE (raison "vide") ; (c) rempli (conforme). Liste des fautifs
-    /// plafonnée à 100 IDs par groupe (comme G410), le compte total restant exact.
+    /// bornée par le plafond de sécurité (50 000 IDs par contrôle), le compte total restant exact.
     /// ID stocké = ElementId.Value (Int64, cohérent 2024/2025).
     /// </summary>
     public class G504UniformatCoverageExtractor : IControlExtractor
     {
         public string ControlCode => "G504";
-        private const int MaxIdsParGroupe = 100;
+        private const int MaxIdsParGroupe = DesignatedElementLimits.SafetyCapPerControl;
 
         private readonly UniformatConfig _cfg;
 
@@ -202,6 +202,7 @@ namespace QcExtractor.Extractors
             int denom = 0, num = 0, nbInstancesConcernees = 0;
             bool tronque = false;
             var typesFautifs = new List<object>();
+            int idsRestants = MaxIdsParGroupe;
 
             foreach (IGrouping<long, Element> g in instances.GroupBy(e => e.GetTypeId().Value))
             {
@@ -214,9 +215,11 @@ namespace QcExtractor.Extractors
                 if (NonEmpty(tp)) { num++; continue; }
 
                 nbInstancesConcernees += listeInst.Count;
-                bool coupe = listeInst.Count > MaxIdsParGroupe;
+                int take = idsRestants > 0 ? Math.Min(listeInst.Count, idsRestants) : 0;
+                bool coupe = listeInst.Count > take;
                 if (coupe) tronque = true;
-                var ids = listeInst.Take(MaxIdsParGroupe).Select(e => e.Id.Value).ToList();
+                var ids = listeInst.Take(take).Select(e => e.Id.Value).ToList();
+                idsRestants -= ids.Count;
                 ElementType et = typeEl as ElementType;
 
                 typesFautifs.Add(new
@@ -272,10 +275,11 @@ namespace QcExtractor.Extractors
 
             double pct = Pct(num, denom);
 
-            // Liste par entrée {famille, nomType, categorie, id}, plafonnée à 100 par TYPE
-            // (comme G410 plafonne sa liste), avec le compte total réel à côté.
+            // Liste par entrée {famille, nomType, categorie, id}, bornée par le
+            // plafond de sécurité du contrôle ; le compte total reste exact.
             bool tronque = false;
             var instancesFautives = new List<object>();
+            int idsRestants = MaxIdsParGroupe;
             foreach (IGrouping<long, Element> g in fautives.GroupBy(e => e.GetTypeId().Value))
             {
                 var listeInst = g.ToList();
@@ -283,9 +287,9 @@ namespace QcExtractor.Extractors
                 ElementType et = typeEl as ElementType;
                 string famille = et != null ? et.FamilyName : null;
                 string nomType = typeEl != null ? typeEl.Name : null;
-                if (listeInst.Count > MaxIdsParGroupe) tronque = true;
-                foreach (Element e in listeInst.Take(MaxIdsParGroupe))
+                foreach (Element e in listeInst)
                 {
+                    if (idsRestants <= 0) { tronque = true; break; }
                     instancesFautives.Add(new
                     {
                         famille = famille,
@@ -293,7 +297,9 @@ namespace QcExtractor.Extractors
                         categorie = e.Category != null ? e.Category.Name : null,
                         id = e.Id.Value,
                     });
+                    idsRestants--;
                 }
+                if (idsRestants <= 0 && listeInst.Count > 0) tronque = true;
             }
 
             return new ControlOutcome

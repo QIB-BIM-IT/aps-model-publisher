@@ -157,7 +157,12 @@ class QcDesignAutomationService {
   }
 
   async downloadResult(signedUrl) {
-    const { data } = await axios.get(signedUrl, { responseType: 'json', timeout: 60_000 });
+    const { data } = await axios.get(signedUrl, {
+      responseType: 'json',
+      timeout: 180_000,
+      maxContentLength: 80 * 1024 * 1024,
+      maxBodyLength: 80 * 1024 * 1024,
+    });
     return data;
   }
 

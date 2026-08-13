@@ -461,9 +461,10 @@ class QcRunService {
 
   async _finalizeSuccess(run, workitem) {
     const { sequelize } = require('../config/database');
-    const { QCRun, QCControlResult, QCWarning } = this.getModels();
+    const { QCRun, QCControlResult, QCWarning, QCDesignatedElement } = this.getModels();
     const qcScoring = require('./qcScoring.service');
     const qcMetaControls = require('./qcMetaControls.service');
+    const qcDesignatedElements = require('./qcDesignatedElements.service');
 
     const resultUrl = run.stats?.resultUrl;
     if (!resultUrl) throw new Error('URL du résultat absente des stats du run');
@@ -600,7 +601,12 @@ class QcRunService {
           valeurJson = { ...(outcome.valeurJson || {}), coordonnees: { axes, axesHorsTolerance } };
         }
 
-        await QCControlResult.create(
+        // Listes détaillées → table longue (même transaction). valeur_json garde
+        // compteurs + extrait court pour la page de détail / la fiche Excel.
+        const designated = qcDesignatedElements.extractRows(code, valeurJson);
+        valeurJson = qcDesignatedElements.slimValeurJson(code, valeurJson, designated);
+
+        const controlResult = await QCControlResult.create(
           {
             runId: run.id,
             controlCode: code,
@@ -612,6 +618,18 @@ class QcRunService {
           },
           { transaction: t }
         );
+        if (designated.rows.length) {
+          await qcDesignatedElements.bulkInsert(
+            QCDesignatedElement,
+            designated.rows.map((r) => ({
+              ...r,
+              runId: run.id,
+              controlResultId: controlResult.id,
+              controlCode: code,
+            })),
+            t
+          );
+        }
         statsControls[code] = { etat: 'extrait', statut, valeurNum: outcome.valeurNum ?? null };
       }
 
