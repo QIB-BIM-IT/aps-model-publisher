@@ -395,6 +395,25 @@ export async function fetchQcRuns(params = {}) {
   return Array.isArray(data?.runs) ? data.runs : [];
 }
 
+/** GET /api/qc/runs/:runId/elements — éléments désignés paginés / filtrables. */
+export async function fetchQcRunDesignatedElements(runId, params = {}) {
+  try {
+    const { data } = await api.get(`/api/qc/runs/${encodeURIComponent(runId)}/elements`, {
+      params,
+    });
+    if (!data?.success) {
+      throw new Error(data?.message || 'Échec chargement des éléments désignés');
+    }
+    return data.data;
+  } catch (err) {
+    const message =
+      err?.response?.data?.message || err?.message || 'Erreur chargement des éléments désignés';
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
+}
+
 /** GET /api/qc/runs/:runId — détail + résultats enrichis (fiche / UI). */
 export async function fetchQcRunDetail(runId) {
   try {

@@ -101,8 +101,9 @@ function truncNote(j) {
   return null;
 }
 
-function SimpleTable({ columns, rows }) {
+function SimpleTable({ columns, rows, maxRows }) {
   if (!rows?.length) return <p style={{ ...muted, margin: '8px 0', color: '#64748b' }}>Aucune donnée.</p>;
+  const shown = maxRows ? rows.slice(0, maxRows) : rows;
   return (
     <div style={{ overflowX: 'auto', marginTop: 8 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -125,7 +126,7 @@ function SimpleTable({ columns, rows }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => (
+          {shown.map((row, i) => (
             <tr key={i} style={{ background: i % 2 ? 'rgba(248,250,252,0.8)' : 'transparent' }}>
               {columns.map((c) => (
                 <td
@@ -157,13 +158,10 @@ function NameList({ title, items, truncated }) {
         <div style={{ fontSize: 12, color: '#b45309', marginBottom: 4 }}>Liste partielle (plafond d’extraction).</div>
       )}
       <ul style={{ margin: 0, paddingLeft: 18, color: '#334155', fontSize: 13, lineHeight: 1.45 }}>
-        {items.slice(0, 80).map((x, i) => (
+        {items.slice(0, 10).map((x, i) => (
           <li key={i}>{typeof x === 'string' ? x : x?.nom || x?.name || JSON.stringify(x)}</li>
         ))}
       </ul>
-      {items.length > 80 && (
-        <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>… et {items.length - 80} autre(s)</div>
-      )}
     </div>
   );
 }
@@ -267,6 +265,7 @@ function StructuredDetail({ result }) {
           <div key={cat} style={{ marginTop: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: VIOLET_DARK }}>{cat}</div>
             <SimpleTable
+              maxRows={10}
               columns={[
                 { key: 'famille', label: 'Famille' },
                 { key: 'nomType', label: 'Type' },
@@ -361,6 +360,7 @@ function StructuredDetail({ result }) {
       <>
         {noteTrunc && <div style={{ fontSize: 12, color: '#b45309' }}>{noteTrunc}</div>}
         <SimpleTable
+          maxRows={10}
           columns={[
             { key: 'nom', label: 'Élément' },
             { key: 'detail', label: 'Détail' },
@@ -550,9 +550,11 @@ function SummaryPill({ label, value, tone }) {
   );
 }
 
-function ControlRow({ result }) {
+function ControlRow({ result, runId }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ligne = valeurReleveeLigne(result);
+  const elementsCount = Number(result.elementsCount) || 0;
 
   return (
     <div
@@ -602,6 +604,29 @@ function ControlRow({ result }) {
             <p style={{ fontSize: 13, color: '#b91c1c' }}>{result.erreur_extraction || 'Échec d’extraction'}</p>
           ) : (
             <StructuredDetail result={result} />
+          )}
+          {elementsCount > 0 && (
+            <button
+              type="button"
+              onClick={() =>
+                navigate(
+                  `/qc-run/${encodeURIComponent(runId)}/elements?controlCode=${encodeURIComponent(result.controlCode)}`
+                )
+              }
+              style={{
+                marginTop: 12,
+                padding: '8px 14px',
+                borderRadius: 10,
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: 700,
+                color: '#fff',
+                background: `linear-gradient(135deg, ${VIOLET} 0%, ${VIOLET_DARK} 100%)`,
+              }}
+            >
+              Voir les {elementsCount} élément{elementsCount > 1 ? 's' : ''}
+            </button>
           )}
         </div>
       )}
@@ -858,7 +883,7 @@ export default function QcRunResultsPage() {
                   {SECTION_TITLES[key] || items[0]?.section || `Section ${key}`}
                 </h2>
                 {items.map((r) => (
-                  <ControlRow key={r.id || r.controlCode} result={r} />
+                  <ControlRow key={r.id || r.controlCode} result={r} runId={runId} />
                 ))}
               </div>
             ))}
