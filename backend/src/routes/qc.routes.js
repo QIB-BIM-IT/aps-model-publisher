@@ -10,6 +10,7 @@
 //  - GET  /api/qc/runs           (auth JWT) liste les runs récents
 //  - GET  /api/qc/runs/:id       (auth JWT) détail d'un run + résultats + warnings
 //  - GET  /api/qc/runs/:id/elements (auth JWT) éléments désignés paginés / filtrables
+//  - GET  /api/qc/projects/:projectKey/elements (auth JWT) état actuel projet (derniers runs réussis)
 //  - POST /api/qc/da-callback    (jeton HMAC dans l'URL) complétion onComplete de DA
 //  - GET  /api/qc/controls/cible-descriptions  (auth JWT) catalogue formulaire (lot 1)
 //  - GET  /api/qc/projects/:projectKey/config  (auth JWT) lecture config projet
@@ -174,34 +175,62 @@ router.get('/runs/:id', authenticateToken, async (req, res) => {
   }
 });
 
+function elementsQueryFromReq(req, extra = {}) {
+  return {
+    controlCode: req.query.controlCode,
+    category: req.query.category,
+    level: req.query.level,
+    q: req.query.q,
+    page: req.query.page,
+    pageSize: req.query.pageSize,
+    sortBy: req.query.sortBy,
+    sortDir: req.query.sortDir,
+    accModelGuid: req.query.accModelGuid,
+    idsOnly: req.query.idsOnly === '1' || req.query.idsOnly === 'true',
+    ...extra,
+  };
+}
+
 /**
  * GET /api/qc/runs/:id/elements
  * Lecture paginée des éléments désignés d'un run.
  * Filtres : controlCode, category, level, q (libellé / type / famille).
  * idsOnly=1 : identifiants et libellés de tout le filtre (copie presse-papiers).
- * Service générique (projectId réservé à la vue par projet).
  */
 router.get('/runs/:id/elements', authenticateToken, async (req, res) => {
   if (!qcRunService.isReady()) return notReady(res);
   try {
     const qcDesignatedElementsQueryService = require('../services/qcDesignatedElementsQuery.service');
-    const data = await qcDesignatedElementsQueryService.list({
-      runId: req.params.id,
-      controlCode: req.query.controlCode,
-      category: req.query.category,
-      level: req.query.level,
-      q: req.query.q,
-      page: req.query.page,
-      pageSize: req.query.pageSize,
-      sortBy: req.query.sortBy,
-      sortDir: req.query.sortDir,
-      idsOnly: req.query.idsOnly === '1' || req.query.idsOnly === 'true',
-    });
+    const data = await qcDesignatedElementsQueryService.list(
+      elementsQueryFromReq(req, { runId: req.params.id })
+    );
     return res.json({ success: true, data });
   } catch (err) {
     const status = err.statusCode || 500;
     if (status >= 500) logger.error(`[QC] GET /runs/:id/elements: ${err.message}`);
     else logger.warn(`[QC] GET /runs/:id/elements: ${err.message}`);
+    return res.status(status).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * GET /api/qc/projects/:projectKey/elements
+ * État actuel du projet : derniers runs réussis par maquette.
+ * Même service et mêmes filtres que GET /runs/:id/elements, plus accModelGuid.
+ * Projet inconnu ou sans run réussi → liste vide (pas 404).
+ */
+router.get('/projects/:projectKey/elements', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const qcDesignatedElementsQueryService = require('../services/qcDesignatedElementsQuery.service');
+    const data = await qcDesignatedElementsQueryService.list(
+      elementsQueryFromReq(req, { projectId: req.params.projectKey })
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) logger.error(`[QC] GET /projects/:projectKey/elements: ${err.message}`);
+    else logger.warn(`[QC] GET /projects/:projectKey/elements: ${err.message}`);
     return res.status(status).json({ success: false, message: err.message });
   }
 });

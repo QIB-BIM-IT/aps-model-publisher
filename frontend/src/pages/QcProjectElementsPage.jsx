@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { fetchQcRunDesignatedElements } from '../services/api';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { fetchQcProjectDesignatedElements } from '../services/api';
 import { pageShell, pageInner, card, btnSecondary, errorBanner } from '../components/qc-config/qcTheme';
 
 const VIOLET = '#7c3aed';
@@ -176,18 +176,24 @@ const tdStyle = {
   verticalAlign: 'top',
 };
 
-export default function QcRunElementsPage() {
-  const { runId } = useParams();
+function modelLabel(m) {
+  return m?.modelName || 'Maquette';
+}
+
+export default function QcProjectElementsPage() {
+  const { projectId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const controlCode = searchParams.get('controlCode') || '';
+  const accModelGuid = searchParams.get('accModelGuid') || '';
 
   const [qInput, setQInput] = useState(searchParams.get('q') || '');
   const [q, setQ] = useState(searchParams.get('q') || '');
   const [category, setCategory] = useState(searchParams.get('category') || '');
   const [level, setLevel] = useState(searchParams.get('level') || '');
   const [page, setPage] = useState(Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1));
-  const [sortBy, setSortBy] = useState('label');
+  const [sortBy, setSortBy] = useState('controlCode');
   const [sortDir, setSortDir] = useState('asc');
 
   const [loading, setLoading] = useState(true);
@@ -210,20 +216,22 @@ export default function QcRunElementsPage() {
   useEffect(() => {
     const next = {};
     if (controlCode) next.controlCode = controlCode;
+    if (accModelGuid) next.accModelGuid = accModelGuid;
     if (q) next.q = q;
     if (category) next.category = category;
     if (level) next.level = level;
     if (page > 1) next.page = String(page);
     setSearchParams(next, { replace: true });
-  }, [controlCode, q, category, level, page, setSearchParams]);
+  }, [controlCode, accModelGuid, q, category, level, page, setSearchParams]);
 
   const load = useCallback(async () => {
-    if (!runId) return;
+    if (!projectId) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchQcRunDesignatedElements(runId, {
+      const data = await fetchQcProjectDesignatedElements(projectId, {
         controlCode: controlCode || undefined,
+        accModelGuid: accModelGuid || undefined,
         category: category || undefined,
         level: level || undefined,
         q: q || undefined,
@@ -239,28 +247,30 @@ export default function QcRunElementsPage() {
     } finally {
       setLoading(false);
     }
-  }, [runId, controlCode, category, level, q, page, sortBy, sortDir]);
+  }, [projectId, controlCode, accModelGuid, category, level, q, page, sortBy, sortDir]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const run = payload?.run;
+  const project = payload?.project;
   const items = payload?.items || [];
   const total = payload?.total ?? 0;
   const pageCount = payload?.pageCount ?? 0;
   const byControl = payload?.byControl || [];
+  const byModel = payload?.byModel || [];
   const facets = payload?.facets || { categories: [], levels: [] };
-  const totalAll = byControl.reduce((s, c) => s + (c.count || 0), 0);
+  const totalAll = byModel.reduce((s, m) => s + (m.count || 0), 0);
 
   const adaptiveKeys = useMemo(
     () => (controlCode ? collectDetailKeys(controlCode, items) : []),
     [controlCode, items]
   );
 
-  function setControl(code) {
+  function replaceFilters({ nextControl = controlCode, nextModel = accModelGuid }) {
     const next = {};
-    if (code) next.controlCode = code;
+    if (nextControl) next.controlCode = nextControl;
+    if (nextModel) next.accModelGuid = nextModel;
     if (q) next.q = q;
     setSearchParams(next, { replace: true });
     setCategory('');
@@ -276,6 +286,21 @@ export default function QcRunElementsPage() {
       setSortDir('asc');
     }
     setPage(1);
+  }
+
+  function goBackToPlanning() {
+    const hubId = project?.hubId || location.state?.preSelectHub || null;
+    const pid = project?.projectId || projectId;
+    if (!pid) {
+      navigate('/planning');
+      return;
+    }
+    navigate('/planning', {
+      state: {
+        preSelectHub: hubId,
+        preSelectProject: pid,
+      },
+    });
   }
 
   async function copyText(text, scopeLabel) {
@@ -315,11 +340,12 @@ export default function QcRunElementsPage() {
   }
 
   async function copyAll(kind) {
-    if (!runId || copying) return;
+    if (!projectId || copying) return;
     setCopying(true);
     try {
-      const data = await fetchQcRunDesignatedElements(runId, {
+      const data = await fetchQcProjectDesignatedElements(projectId, {
         controlCode: controlCode || undefined,
+        accModelGuid: accModelGuid || undefined,
         category: category || undefined,
         level: level || undefined,
         q: q || undefined,
@@ -353,30 +379,18 @@ export default function QcRunElementsPage() {
   }
 
   const selectedControl = byControl.find((c) => c.controlCode === controlCode);
+  const selectedModel = byModel.find(
+    (m) => String(m.accModelGuid).toLowerCase() === accModelGuid.toLowerCase()
+  );
+  const modelsToShow = selectedModel ? [selectedModel] : byModel;
 
   return (
     <div style={pageShell}>
       <div style={{ ...pageInner, maxWidth: 1280 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
-          <button type="button" onClick={() => navigate(`/qc-run/${runId}`)} style={btnSecondary}>
-            ← Retour au détail du run
+          <button type="button" onClick={goBackToPlanning} style={btnSecondary}>
+            ← Retour à la planification
           </button>
-          {run?.projectId && (
-            <button
-              type="button"
-              onClick={() =>
-                navigate(`/qc-project/${encodeURIComponent(run.projectId)}/elements`, {
-                  state: {
-                    preSelectHub: run.hubId || null,
-                    preSelectProject: run.projectId,
-                  },
-                })
-              }
-              style={btnSecondary}
-            >
-              État actuel du projet
-            </button>
-          )}
         </div>
 
         <h1
@@ -389,55 +403,55 @@ export default function QcRunElementsPage() {
             WebkitTextFillColor: 'transparent',
           }}
         >
-          Éléments désignés
+          Éléments désignés — état actuel
         </h1>
         <p style={{ margin: '0 0 24px', fontSize: 14, color: '#94a3b8' }}>
-          Liste filtrable des éléments relevés pour cette exécution. Les identifiants Revit
-          correspondent à la version ACC auditée — le modèle a pu évoluer depuis.
+          Dernier contrôle réussi de chaque maquette du projet. Ce n’est pas l’historique :
+          une maquette sans contrôle réussi n’apparaît pas.
         </p>
 
         {error && <div style={errorBanner}>{error}</div>}
 
-        {run && (
-          <div style={{ ...card, borderTop: `4px solid ${VIOLET}` }}>
-            <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>
-              {run.modelName || 'Maquette'}
-            </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                gap: 10,
-                fontSize: 13,
-                color: '#334155',
-              }}
-            >
-              <div>
-                <div style={{ color: '#94a3b8', fontWeight: 600, fontSize: 11 }}>PROJET</div>
-                {run.projectName || '—'}
-              </div>
-              <div>
-                <div style={{ color: '#94a3b8', fontWeight: 600, fontSize: 11 }}>DATE DU RUN</div>
-                {formatDateTime(run.startedAtUtc)}
-              </div>
-              <div>
-                <div style={{ color: '#94a3b8', fontWeight: 600, fontSize: 11 }}>VERSION ACC</div>
-                {run.modelVersion != null ? `v${run.modelVersion}` : '—'}
-              </div>
-              {run.revitVersion && (
-                <div>
-                  <div style={{ color: '#94a3b8', fontWeight: 600, fontSize: 11 }}>REVIT</div>
-                  {run.revitVersion}
-                </div>
-              )}
-            </div>
-            <p style={{ margin: '12px 0 0', fontSize: 12, color: '#64748b', lineHeight: 1.45 }}>
-              Les identifiants Revit ci-dessous sont valables pour la version ACC{' '}
-              {run.modelVersion != null ? `v${run.modelVersion}` : 'auditée'}. Si la maquette a
-              été publiée à nouveau depuis ce run, ces identifiants peuvent ne plus correspondre.
-            </p>
+        <div style={{ ...card, borderTop: `4px solid ${VIOLET}` }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+            {project?.projectName || 'Projet'}
           </div>
-        )}
+          <p style={{ margin: '0 0 12px', fontSize: 13, color: '#475569' }}>
+            Vue de l’état actuel : pour chaque maquette, seuls les éléments du dernier
+            contrôle réussi sont listés.
+          </p>
+          {modelsToShow.length > 0 && (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {modelsToShow.map((m) => (
+                <div
+                  key={m.accModelGuid}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    background: 'rgba(124,58,237,0.06)',
+                    border: '1px solid rgba(124,58,237,0.18)',
+                    fontSize: 13,
+                    color: '#334155',
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: '#0f172a' }}>{modelLabel(m)}</div>
+                  <div style={{ marginTop: 4 }}>
+                    Dernier contrôle : {formatDateTime(m.endedAtUtc || m.startedAtUtc)}
+                    {' · '}
+                    Version ACC {m.modelVersion != null ? `v${m.modelVersion}` : 'inconnue'}
+                    {' · '}
+                    {m.count} élément(s)
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <p style={{ margin: '12px 0 0', fontSize: 12, color: '#64748b', lineHeight: 1.45 }}>
+            Les identifiants Revit valent pour la version ACC auditée de chaque maquette.
+            Les maquettes ont pu être contrôlées à des dates différentes, et le modèle a
+            pu évoluer depuis.
+          </p>
+        </div>
 
         <div style={card}>
           <div
@@ -449,13 +463,30 @@ export default function QcRunElementsPage() {
             }}
           >
             <label style={{ display: 'block' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>Maquette</div>
+              <select
+                value={accModelGuid}
+                onChange={(e) => replaceFilters({ nextModel: e.target.value })}
+                style={selectStyle}
+              >
+                <option value="">Toutes les maquettes ({totalAll})</option>
+                {byModel.map((m) => (
+                  <option key={m.accModelGuid} value={m.accModelGuid}>
+                    {modelLabel(m)} ({m.count})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: 'block' }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>Contrôle</div>
               <select
                 value={controlCode}
-                onChange={(e) => setControl(e.target.value)}
+                onChange={(e) => replaceFilters({ nextControl: e.target.value })}
                 style={selectStyle}
               >
-                <option value="">Tous les contrôles ({totalAll})</option>
+                <option value="">
+                  Tous les contrôles ({byControl.reduce((s, c) => s + (c.count || 0), 0)})
+                </option>
                 {byControl.map((c) => (
                   <option key={c.controlCode} value={c.controlCode}>
                     {c.controlCode} — {c.libelle} ({c.count})
@@ -518,7 +549,7 @@ export default function QcRunElementsPage() {
               ? 'Chargement…'
               : selectedControl
                 ? `${total} élément(s) pour ${selectedControl.controlCode} — ${selectedControl.libelle}`
-                : `${total} élément(s) au total`}
+                : `${total} élément(s)`}
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
@@ -571,9 +602,10 @@ export default function QcRunElementsPage() {
           )}
 
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 860 }}>
               <thead>
                 <tr>
+                  <th style={thStyle}>Maquette</th>
                   {!controlCode && (
                     <th style={thStyle}>
                       <button
@@ -619,12 +651,14 @@ export default function QcRunElementsPage() {
                       {humanizeKey(k)}
                     </th>
                   ))}
+                  <th style={thStyle}>Run</th>
                 </tr>
               </thead>
               <tbody>
                 {!loading &&
                   items.map((row, i) => (
                     <tr key={row.id} style={{ background: i % 2 ? 'rgba(248,250,252,0.8)' : 'transparent' }}>
+                      <td style={tdStyle}>{row.modelName || 'Maquette'}</td>
                       {!controlCode && (
                         <td style={tdStyle}>
                           <div style={{ fontWeight: 700, color: VIOLET_DARK }}>{row.controlCode}</div>
@@ -644,6 +678,26 @@ export default function QcRunElementsPage() {
                           {formatDetailValue(row.details?.[k])}
                         </td>
                       ))}
+                      <td style={tdStyle}>
+                        {row.runId ? (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/qc-run/${encodeURIComponent(row.runId)}`)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              color: VIOLET_DARK,
+                              fontWeight: 600,
+                              fontSize: 12,
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                            }}
+                          >
+                            Voir le run
+                          </button>
+                        ) : null}
+                      </td>
                     </tr>
                   ))}
               </tbody>
@@ -652,7 +706,8 @@ export default function QcRunElementsPage() {
 
           {!loading && total === 0 && (
             <p style={{ fontSize: 13, color: '#64748b', marginTop: 12 }}>
-              Aucun élément ne correspond à ces filtres.
+              Aucun élément ne correspond à ces filtres. Un projet sans contrôle réussi
+              affiche aussi une liste vide.
             </p>
           )}
 

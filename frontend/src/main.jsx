@@ -10,6 +10,7 @@ import QcConfigTestPage from './pages/QcConfigTestPage.jsx';
 import QcConfigPage from './pages/QcConfigPage.jsx';
 import QcRunResultsPage from './pages/QcRunResultsPage.jsx';
 import QcRunElementsPage from './pages/QcRunElementsPage.jsx';
+import QcProjectElementsPage from './pages/QcProjectElementsPage.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 function Root() {
@@ -74,6 +75,14 @@ function Root() {
             element={
               <ProtectedRoute>
                 <QcRunElementsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="qc-project/:projectId/elements"
+            element={
+              <ProtectedRoute>
+                <QcProjectElementsPage />
               </ProtectedRoute>
             }
           />
