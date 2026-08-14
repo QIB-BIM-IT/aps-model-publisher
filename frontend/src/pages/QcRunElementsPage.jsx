@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { fetchQcRunDesignatedElements } from '../services/api';
 import { pageShell, pageInner, card, btnSecondary, errorBanner } from '../components/qc-config/qcTheme';
+import QcRunViewerPane from '../components/QcRunViewerPane';
 
 const VIOLET = '#7c3aed';
 const VIOLET_DARK = '#6d28d9';
@@ -62,7 +63,32 @@ const KNOWN_DETAIL_KEYS = {
   G507: ['guid', 'nom'],
 };
 
-const SKIP_DETAIL_KEYS = new Set(['id']);
+const SKIP_DETAIL_KEYS = new Set(['uniqueId', 'revitUniqueId']);
+
+function isolationUnavailableMessage(row) {
+  const kind = row?.kind;
+  if (kind === 'view') {
+    return 'Cette ligne désigne une vue : elle n’est pas un objet isolable dans la maquette 3D.';
+  }
+  if (kind === 'family' || kind === 'type') {
+    return 'Cette ligne désigne une famille ou un type, pas une occurrence 3D isolable.';
+  }
+  if (kind === 'option' || kind === 'workset' || kind === 'phase' || kind === 'parameter' || kind === 'name') {
+    return 'Cet objet n’a pas d’identité 3D dans la maquette (variante, sous-projet, phase ou paramètre). L’isolation n’est pas disponible.';
+  }
+  return 'Cet objet n’a pas d’identité 3D dans la maquette. L’isolation n’est pas disponible.';
+}
+
+function notFoundMessage(row) {
+  const kind = row?.kind;
+  if (kind === 'view') {
+    return 'Cette vue n’apparaît pas comme un objet dans la maquette 3D.';
+  }
+  if (kind === 'family' || kind === 'type') {
+    return 'Cette famille ou ce type n’apparaît pas comme un objet dans la maquette 3D.';
+  }
+  return 'Cet élément n’a pas été trouvé dans la maquette affichée (supprimé, ou vue 3D différente de l’extraction).';
+}
 
 const COMMON_SORT = [
   { key: 'revitElementId', label: 'Identifiant Revit' },
@@ -195,6 +221,10 @@ export default function QcRunElementsPage() {
   const [payload, setPayload] = useState(null);
   const [copyMsg, setCopyMsg] = useState(null);
   const [copying, setCopying] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [isolateRequest, setIsolateRequest] = useState(null);
+  const [isolateMsg, setIsolateMsg] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -352,11 +382,64 @@ export default function QcRunElementsPage() {
     }
   }
 
+  function showIsolateMsg(text) {
+    setIsolateMsg(text);
+    setTimeout(() => setIsolateMsg(null), 6000);
+  }
+
+  function onRowClick(row) {
+    setSelectedId(row.id);
+    if (!row.revitUniqueId) {
+      showIsolateMsg(isolationUnavailableMessage(row));
+      return;
+    }
+    setViewerOpen(true);
+    setIsolateRequest({
+      uniqueIds: [row.revitUniqueId],
+      label: row.label || row.typeName || row.familyName || '',
+      notFoundMessage: notFoundMessage(row),
+    });
+  }
+
+  async function isolateFiltered() {
+    if (!runId || copying) return;
+    setCopying(true);
+    try {
+      const data = await fetchQcRunDesignatedElements(runId, {
+        controlCode: controlCode || undefined,
+        category: category || undefined,
+        level: level || undefined,
+        q: q || undefined,
+        idsOnly: 1,
+        sortBy,
+        sortDir,
+      });
+      const ids = data?.revitUniqueIds || [];
+      if (!ids.length) {
+        showIsolateMsg(
+          'Aucun objet 3D isolable dans les résultats filtrés (variantes, sous-projets, phases ou paramètres).'
+        );
+        return;
+      }
+      setViewerOpen(true);
+      setIsolateRequest({
+        uniqueIds: ids,
+        label: `${ids.length} objet(s) des résultats filtrés`,
+        notFoundMessage:
+          'Aucun des objets filtrés n’apparaît dans la maquette 3D (vues, familles, ou traduction différente).',
+      });
+    } catch (err) {
+      showIsolateMsg(err?.message || 'Impossible d’isoler la sélection filtrée.');
+    } finally {
+      setCopying(false);
+    }
+  }
+
   const selectedControl = byControl.find((c) => c.controlCode === controlCode);
 
   return (
     <div style={pageShell}>
-      <div style={{ ...pageInner, maxWidth: 1280 }}>
+      <div style={{ ...pageInner, maxWidth: viewerOpen ? 1680 : 1280 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
           <button type="button" onClick={() => navigate(`/qc-run/${runId}`)} style={btnSecondary}>
             ← Retour au détail du run
@@ -393,7 +476,8 @@ export default function QcRunElementsPage() {
         </h1>
         <p style={{ margin: '0 0 24px', fontSize: 14, color: '#94a3b8' }}>
           Liste filtrable des éléments relevés pour cette exécution. Les identifiants Revit
-          correspondent à la version ACC auditée — le modèle a pu évoluer depuis.
+          correspondent à la version ACC auditée — le modèle a pu évoluer depuis. Cliquez une
+          ligne pour l’isoler dans la maquette 3D de cette même version.
         </p>
 
         {error && <div style={errorBanner}>{error}</div>}
@@ -435,10 +519,19 @@ export default function QcRunElementsPage() {
               Les identifiants Revit ci-dessous sont valables pour la version ACC{' '}
               {run.modelVersion != null ? `v${run.modelVersion}` : 'auditée'}. Si la maquette a
               été publiée à nouveau depuis ce run, ces identifiants peuvent ne plus correspondre.
+              La maquette 3D charge cette même version.
             </p>
           </div>
         )}
 
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: viewerOpen ? 'minmax(0, 1fr) minmax(360px, 480px)' : '1fr',
+            gap: 16,
+            alignItems: 'start',
+          }}
+        >
         <div style={card}>
           <div
             style={{
@@ -469,7 +562,7 @@ export default function QcRunElementsPage() {
                 type="search"
                 value={qInput}
                 onChange={(e) => setQInput(e.target.value)}
-                placeholder="Libellé, type ou famille"
+                placeholder="Libellé, type, famille ou identifiant"
                 style={selectStyle}
               />
             </label>
@@ -550,11 +643,49 @@ export default function QcRunElementsPage() {
             >
               Copier les libellés de tous les résultats filtrés
             </button>
+            <button
+              type="button"
+              onClick={isolateFiltered}
+              disabled={copying || total === 0}
+              style={{
+                ...btnSecondary,
+                background: `linear-gradient(135deg, ${VIOLET} 0%, ${VIOLET_DARK} 100%)`,
+                color: '#fff',
+                border: 'none',
+                opacity: copying || total === 0 ? 0.6 : 1,
+              }}
+            >
+              Isoler les objets 3D de tous les résultats filtrés
+            </button>
           </div>
+          {!viewerOpen && (
+            <div style={{ marginBottom: 12 }}>
+              <QcRunViewerPane
+                runId={runId}
+                open={false}
+                onToggle={() => setViewerOpen(true)}
+                isolateRequest={null}
+              />
+            </div>
+          )}
           <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b' }}>
             « Cette page » = les {items.length} ligne(s) affichées. « Tous les résultats filtrés » = les{' '}
             {total} ligne(s) correspondant aux filtres actuels, pas seulement cette page.
           </p>
+          {isolateMsg && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: '8px 12px',
+                borderRadius: 8,
+                background: 'rgba(245, 158, 11, 0.12)',
+                color: '#92400e',
+                fontSize: 13,
+              }}
+            >
+              {isolateMsg}
+            </div>
+          )}
           {copyMsg && (
             <div
               style={{
@@ -623,8 +754,30 @@ export default function QcRunElementsPage() {
               </thead>
               <tbody>
                 {!loading &&
-                  items.map((row, i) => (
-                    <tr key={row.id} style={{ background: i % 2 ? 'rgba(248,250,252,0.8)' : 'transparent' }}>
+                  items.map((row, i) => {
+                    const isolable = Boolean(row.revitUniqueId);
+                    const selected = selectedId === row.id;
+                    return (
+                    <tr
+                      key={row.id}
+                      onClick={() => onRowClick(row)}
+                      title={
+                        isolable
+                          ? 'Cliquer pour isoler dans la maquette 3D'
+                          : isolationUnavailableMessage(row)
+                      }
+                      style={{
+                        background: selected
+                          ? 'rgba(124,58,237,0.16)'
+                          : i % 2
+                            ? 'rgba(248,250,252,0.8)'
+                            : 'transparent',
+                        cursor: isolable ? 'pointer' : 'default',
+                        opacity: isolable ? 1 : 0.62,
+                        outline: selected ? `2px solid ${VIOLET}` : 'none',
+                        outlineOffset: -2,
+                      }}
+                    >
                       {!controlCode && (
                         <td style={tdStyle}>
                           <div style={{ fontWeight: 700, color: VIOLET_DARK }}>{row.controlCode}</div>
@@ -645,7 +798,8 @@ export default function QcRunElementsPage() {
                         </td>
                       ))}
                     </tr>
-                  ))}
+                    );
+                  })}
               </tbody>
             </table>
           </div>
@@ -688,6 +842,17 @@ export default function QcRunElementsPage() {
               </button>
             </div>
           )}
+        </div>
+        {viewerOpen && (
+          <div style={{ position: 'sticky', top: 16 }}>
+            <QcRunViewerPane
+              runId={runId}
+              open={viewerOpen}
+              onToggle={() => setViewerOpen(false)}
+              isolateRequest={isolateRequest}
+            />
+          </div>
+        )}
         </div>
       </div>
     </div>

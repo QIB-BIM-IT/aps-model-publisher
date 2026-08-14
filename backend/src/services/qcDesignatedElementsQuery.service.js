@@ -69,6 +69,9 @@ function buildWhere({ runIds, controlCode, category, level, q }) {
       { typeName: { [Op.iLike]: like } },
       { familyName: { [Op.iLike]: like } },
     ];
+    if (/^\d+$/.test(needle)) {
+      where[Op.or].push({ revitElementId: needle });
+    }
   }
   return where;
 }
@@ -130,6 +133,8 @@ class QcDesignatedElementsQueryService {
       accModelGuid: plain.accModelGuid || null,
       modelName: plain.job?.modelName || stats.fileName || null,
       modelVersion: plain.modelVersion ?? null,
+      versionUrn: plain.versionUrn || null,
+      region: plain.region || null,
       revitVersion: plain.revitVersion || null,
       jobName: plain.job?.name || null,
     };
@@ -283,7 +288,7 @@ class QcDesignatedElementsQueryService {
       runIds = scope.runIds;
       if (!runIds.length) {
         if (filters.idsOnly) {
-          return { run: null, project, total: 0, truncated: false, revitElementIds: [], labels: [] };
+          return { run: null, project, total: 0, truncated: false, revitElementIds: [], labels: [], revitUniqueIds: [] };
         }
         return this.emptyList({ project, byModel: scopeModels.map((m) => ({ ...m, count: 0 })) });
       }
@@ -297,7 +302,7 @@ class QcDesignatedElementsQueryService {
     if (filters.idsOnly) {
       const rows = await QCDesignatedElement.findAll({
         where,
-        attributes: ['revitElementId', 'label'],
+        attributes: ['revitElementId', 'label', 'revitUniqueId'],
         order: orderFor(filters.sortBy, filters.sortDir),
         limit: MAX_COPY,
       });
@@ -311,6 +316,10 @@ class QcDesignatedElementsQueryService {
           .filter((id) => id != null && id !== '')
           .map((id) => String(id)),
         labels: rows.map((r) => r.label).filter((x) => x != null && String(x).trim() !== ''),
+        revitUniqueIds: rows
+          .map((r) => r.revitUniqueId)
+          .filter((u) => u != null && String(u).trim() !== '')
+          .map((u) => String(u).trim()),
       };
     }
 
@@ -339,6 +348,7 @@ class QcDesignatedElementsQueryService {
           'levelName',
           'label',
           'kind',
+          'revitUniqueId',
           'details',
         ],
       }),
@@ -416,6 +426,7 @@ class QcDesignatedElementsQueryService {
         levelName: plain.levelName || null,
         label: plain.label || null,
         kind: plain.kind,
+        revitUniqueId: plain.revitUniqueId || null,
         details: plain.details && typeof plain.details === 'object' ? plain.details : {},
         modelName: meta.modelName || null,
         accModelGuid: meta.accModelGuid || null,
