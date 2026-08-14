@@ -2585,25 +2585,51 @@ export default function PlanningPage() {
                   )}
                 </div>
                 {selectedProject ? (
-                  <Button
-                    type="button"
-                    onClick={() =>
-                      navigate('/qc-config', {
-                        state: {
-                          preSelectHub: selectedHub,
-                          preSelectProject: selectedProject,
-                        },
-                      })
-                    }
-                    style={{
-                      padding: '10px 16px',
-                      width: '100%',
-                      background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-                      boxShadow: '0 4px 14px rgba(124, 58, 237, 0.35)',
-                    }}
-                  >
-                    Configurer le QC
-                  </Button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        navigate('/qc-config', {
+                          state: {
+                            preSelectHub: selectedHub,
+                            preSelectProject: selectedProject,
+                          },
+                        })
+                      }
+                      style={{
+                        padding: '10px 16px',
+                        width: '100%',
+                        background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                        boxShadow: '0 4px 14px rgba(124, 58, 237, 0.35)',
+                      }}
+                    >
+                      Configurer le QC
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        navigate(
+                          `/qc-project/${encodeURIComponent(selectedProject)}/elements`,
+                          {
+                            state: {
+                              preSelectHub: selectedHub,
+                              preSelectProject: selectedProject,
+                            },
+                          }
+                        )
+                      }
+                      style={{
+                        padding: '10px 16px',
+                        width: '100%',
+                        background: 'transparent',
+                        color: '#6d28d9',
+                        border: '1px solid rgba(124, 58, 237, 0.45)',
+                        boxShadow: 'none',
+                      }}
+                    >
+                      Éléments désignés
+                    </Button>
+                  </div>
                 ) : null}
               </div>
             )}
