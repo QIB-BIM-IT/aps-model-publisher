@@ -12,6 +12,13 @@ function asId(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function asUniqueId(v) {
+  if (v == null || v === '') return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  return s.length > 128 ? null : s;
+}
+
 function asStr(v, max) {
   if (v == null) return null;
   const s = String(v);
@@ -21,6 +28,7 @@ function asStr(v, max) {
 
 function row({
   id,
+  uniqueId,
   category,
   familyName,
   typeName,
@@ -32,6 +40,7 @@ function row({
   const revitElementId = asId(id);
   return {
     revitElementId,
+    revitUniqueId: asUniqueId(uniqueId),
     category: asStr(category, 255),
     familyName: asStr(familyName, 255),
     typeName: asStr(typeName, 255),
@@ -131,6 +140,7 @@ function fromFautifs(fautifs) {
         rows,
         row({
           id: f.id,
+          uniqueId: f.uniqueId,
           category: f.categorie,
           familyName: f.familleRevit || f.famille,
           typeName: f.type || f.nomType,
@@ -164,6 +174,7 @@ function fromG314(j) {
         rows,
         row({
           id: f.id,
+          uniqueId: f.uniqueId,
           category: f.categorie,
           familyName: f.familleRevit,
           typeName: f.type,
@@ -202,16 +213,19 @@ function fromG210(j) {
     const elements = Array.isArray(block.elements) ? block.elements : null;
     const noms = Array.isArray(block.noms) ? block.noms : [];
     const ids = Array.isArray(block.ids) ? block.ids : [];
+    const uniqueIds = Array.isArray(block.uniqueIds) ? block.uniqueIds : [];
     const n = elements ? elements.length : Math.max(noms.length, ids.length);
     for (let i = 0; i < n; i++) {
       const el = elements ? elements[i] : null;
       const nom = el?.nom || noms[i];
       const id = el?.id != null ? el.id : ids[i];
+      const uniqueId = el?.uniqueId != null ? el.uniqueId : uniqueIds[i];
       if (
         !push(
           rows,
           row({
             id,
+            uniqueId,
             label: nom,
             kind: asId(id) != null ? 'element' : 'name',
             category: cat === 'axes' ? 'Grilles' : 'Niveaux',
@@ -230,6 +244,7 @@ function fromG210(j) {
 function fromG410(j) {
   const noms = Array.isArray(j.vuesNonPlacees) ? j.vuesNonPlacees : [];
   const ids = Array.isArray(j.vuesIds) ? j.vuesIds : [];
+  const uniqueIds = Array.isArray(j.vuesUniqueIds) ? j.vuesUniqueIds : [];
   const realCount = Number.isFinite(j.nbVuesNonPlacees) ? j.nbVuesNonPlacees : noms.length;
   const rows = [];
   const n = Math.max(noms.length, ids.length);
@@ -239,6 +254,7 @@ function fromG410(j) {
         rows,
         row({
           id: ids[i],
+          uniqueId: uniqueIds[i],
           label: noms[i],
           kind: asId(ids[i]) != null ? 'view' : 'view',
           details: { nom: noms[i] },
@@ -265,6 +281,7 @@ function fromG412(j) {
         rows,
         row({
           id: f.id,
+          uniqueId: f.uniqueId,
           familyName: f.famille,
           label: f.famille,
           kind: 'family',
@@ -281,6 +298,7 @@ function fromG412(j) {
         rows,
         row({
           id: g.idInstance,
+          uniqueId: g.uniqueId,
           category: g.categorie,
           typeName: g.nomType,
           label: g.nomType,
@@ -310,6 +328,7 @@ function fromG504(j) {
           rows,
           row({
             id: f.id,
+            uniqueId: f.uniqueId,
             category: f.categorie,
             familyName: f.famille,
             typeName: f.nomType,
@@ -329,14 +348,16 @@ function fromG504(j) {
     let instanceCount = 0;
     for (const t of j.typesFautifs) {
       const ids = Array.isArray(t.idsEchantillon) ? t.idsEchantillon : [];
+      const uniqueIds = Array.isArray(t.uniqueIdsEchantillon) ? t.uniqueIdsEchantillon : [];
       instanceCount += Number.isFinite(t.nbInstances) ? t.nbInstances : ids.length;
       if (ids.length) {
-        for (const id of ids) {
+        for (let i = 0; i < ids.length; i++) {
           if (
             !push(
               rows,
               row({
-                id,
+                id: ids[i],
+                uniqueId: uniqueIds[i],
                 category: t.categorie,
                 familyName: t.famille,
                 typeName: t.nomType,
@@ -378,13 +399,15 @@ function fromG508(j) {
   let realCount = 0;
   for (const p of params) {
     const ids = Array.isArray(p.idsEchantillon) ? p.idsEchantillon : [];
+    const uniqueIds = Array.isArray(p.uniqueIdsEchantillon) ? p.uniqueIdsEchantillon : [];
     realCount += Number.isFinite(p.nbFautifs) ? p.nbFautifs : ids.length;
-    for (const id of ids) {
+    for (let i = 0; i < ids.length; i++) {
       if (
         !push(
           rows,
           row({
-            id,
+            id: ids[i],
+            uniqueId: uniqueIds[i],
             label: p.nom,
             kind: 'element',
             details: {
@@ -442,6 +465,7 @@ function slimValeurJson(controlCode, valeurJson, { hitSafetyCap, realCount } = {
       block.noms = sliceArr(block.noms, VALEUR_JSON_EXCERPT);
       if (Array.isArray(block.elements)) block.elements = sliceArr(block.elements, VALEUR_JSON_EXCERPT);
       if (Array.isArray(block.ids)) block.ids = sliceArr(block.ids, VALEUR_JSON_EXCERPT);
+      if (Array.isArray(block.uniqueIds)) block.uniqueIds = sliceArr(block.uniqueIds, VALEUR_JSON_EXCERPT);
       block.listeTronquee = hitSafetyCap ? true : false;
       j[cat] = { ...j[cat], nonMonitoresFautifs: block };
     }
@@ -449,6 +473,7 @@ function slimValeurJson(controlCode, valeurJson, { hitSafetyCap, realCount } = {
 
   if (Array.isArray(j.vuesNonPlacees)) j.vuesNonPlacees = sliceArr(j.vuesNonPlacees, VALEUR_JSON_EXCERPT);
   if (Array.isArray(j.vuesIds)) j.vuesIds = sliceArr(j.vuesIds, VALEUR_JSON_EXCERPT);
+  if (Array.isArray(j.vuesUniqueIds)) j.vuesUniqueIds = sliceArr(j.vuesUniqueIds, VALEUR_JSON_EXCERPT);
 
   if (j.famillesInPlace && typeof j.famillesInPlace === 'object') {
     j.famillesInPlace = {
@@ -469,6 +494,7 @@ function slimValeurJson(controlCode, valeurJson, { hitSafetyCap, realCount } = {
     j.typesFautifs = j.typesFautifs.map((t) => ({
       ...t,
       idsEchantillon: sliceArr(t.idsEchantillon, VALEUR_JSON_EXCERPT),
+      uniqueIdsEchantillon: sliceArr(t.uniqueIdsEchantillon, VALEUR_JSON_EXCERPT),
       listeIdsTronquee: hitSafetyCap ? true : false,
     }));
   }
@@ -478,6 +504,7 @@ function slimValeurJson(controlCode, valeurJson, { hitSafetyCap, realCount } = {
     j.parametres = j.parametres.map((p) => ({
       ...p,
       idsEchantillon: sliceArr(p.idsEchantillon, VALEUR_JSON_EXCERPT),
+      uniqueIdsEchantillon: sliceArr(p.uniqueIdsEchantillon, VALEUR_JSON_EXCERPT),
       listeTronquee: hitSafetyCap ? true : false,
     }));
   }

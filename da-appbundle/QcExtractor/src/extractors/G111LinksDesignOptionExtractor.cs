@@ -46,6 +46,7 @@ namespace QcExtractor.Extractors
 
                 string nom = link.Name ?? string.Empty;
                 long id = link.Id.Value;
+                string uniqueId = UniqueIds.Of(link);
                 bool estConforme = optionOk;
 
                 liens.Add(new
@@ -54,6 +55,7 @@ namespace QcExtractor.Extractors
                     designOptionNom = doNom,
                     estConforme,
                     id,
+                    uniqueId,
                 });
 
                 if (!estConforme)
@@ -66,6 +68,7 @@ namespace QcExtractor.Extractors
                             ? new[] { raisonOption }
                             : new[] { "mauvaise option" },
                         id,
+                        uniqueId,
                     });
                 }
             }

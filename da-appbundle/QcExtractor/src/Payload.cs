@@ -69,6 +69,12 @@ namespace QcExtractor
         [JsonProperty("controls")]
         public List<ControlOutcome> Controls { get; set; } = new List<ControlOutcome>();
 
+        /// <summary>
+        /// Échantillon de round-trip UniqueId → GetElement. Hors scoring.
+        /// </summary>
+        [JsonProperty("uniqueIdValidity", NullValueHandling = NullValueHandling.Ignore)]
+        public object UniqueIdValidity { get; set; }
+
         public void Save(string path)
         {
             File.WriteAllText(path, JsonConvert.SerializeObject(this, Formatting.Indented));

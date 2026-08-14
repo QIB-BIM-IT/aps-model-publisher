@@ -56,6 +56,7 @@ namespace QcExtractor.Extractors
                 bool estConforme = pinned && optionOk;
                 string nom = grid.Name ?? string.Empty;
                 long id = grid.Id.Value;
+                string uniqueId = UniqueIds.Of(grid);
 
                 axes.Add(new
                 {
@@ -64,6 +65,7 @@ namespace QcExtractor.Extractors
                     designOptionNom = doNom,
                     estConforme,
                     id,
+                    uniqueId,
                 });
 
                 if (!estConforme)
@@ -75,6 +77,7 @@ namespace QcExtractor.Extractors
                         designOptionNom = doNom,
                         raisons,
                         id,
+                        uniqueId,
                     });
                 }
             }

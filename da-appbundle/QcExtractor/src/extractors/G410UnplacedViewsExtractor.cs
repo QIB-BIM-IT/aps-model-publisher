@@ -38,6 +38,7 @@ namespace QcExtractor.Extractors
                 {
                     vuesNonPlacees = vues.Take(MaxNomsListes).Select(v => v.Name).ToList(),
                     vuesIds = vues.Take(MaxNomsListes).Select(v => v.Id.Value).ToList(),
+                    vuesUniqueIds = vues.Take(MaxNomsListes).Select(v => UniqueIds.Of(v)).ToList(),
                     listeTronquee = vues.Count > MaxNomsListes,
                 },
             };

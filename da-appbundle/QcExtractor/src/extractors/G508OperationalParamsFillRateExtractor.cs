@@ -141,6 +141,7 @@ namespace QcExtractor.Extractors
                         aucunElement = true,
                         nbFautifs = 0,
                         idsEchantillon = new List<long>(),
+                        uniqueIdsEchantillon = new List<string>(),
                         listeTronquee = false,
                     });
                     continue;
@@ -151,6 +152,7 @@ namespace QcExtractor.Extractors
 
                 int rempli = 0, total = 0, nbFautifs = 0;
                 var idsEch = new List<long>();
+                var uniqueIdsEch = new List<string>();
                 bool tronque = false;
 
                 if (nature == "instance")
@@ -161,7 +163,12 @@ namespace QcExtractor.Extractors
                         Parameter p = ReadParam(inst, builtin, bip, nom);
                         if (NonEmpty(p)) { rempli++; continue; }
                         nbFautifs++;
-                        if (idsEmisGlobal < MaxIdsParParametre) { idsEch.Add(inst.Id.Value); idsEmisGlobal++; }
+                        if (idsEmisGlobal < MaxIdsParParametre)
+                        {
+                            idsEch.Add(inst.Id.Value);
+                            uniqueIdsEch.Add(UniqueIds.Of(inst));
+                            idsEmisGlobal++;
+                        }
                         else tronque = true;
                     }
                 }
@@ -179,7 +186,12 @@ namespace QcExtractor.Extractors
                         nbFautifs++;
                         foreach (Element e in listeInst)
                         {
-                            if (idsEmisGlobal < MaxIdsParParametre) { idsEch.Add(e.Id.Value); idsEmisGlobal++; }
+                            if (idsEmisGlobal < MaxIdsParParametre)
+                            {
+                                idsEch.Add(e.Id.Value);
+                                uniqueIdsEch.Add(UniqueIds.Of(e));
+                                idsEmisGlobal++;
+                            }
                             else { tronque = true; break; }
                         }
                     }
@@ -204,6 +216,7 @@ namespace QcExtractor.Extractors
                     parametreAbsent = absent,
                     nbFautifs = nbFautifs,
                     idsEchantillon = idsEch,
+                    uniqueIdsEchantillon = uniqueIdsEch,
                     listeTronquee = tronque,
                 });
             }

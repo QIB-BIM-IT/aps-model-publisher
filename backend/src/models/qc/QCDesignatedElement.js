@@ -15,6 +15,7 @@ QCDesignatedElement.init(
     controlCode: { type: DataTypes.STRING(32), allowNull: false },
 
     revitElementId: { type: DataTypes.BIGINT, allowNull: true },
+    revitUniqueId: { type: DataTypes.STRING(128), allowNull: true },
     category: { type: DataTypes.STRING(255), allowNull: true },
     familyName: { type: DataTypes.STRING(255), allowNull: true },
     typeName: { type: DataTypes.STRING(255), allowNull: true },

@@ -218,7 +218,9 @@ namespace QcExtractor.Extractors
                 int take = idsRestants > 0 ? Math.Min(listeInst.Count, idsRestants) : 0;
                 bool coupe = listeInst.Count > take;
                 if (coupe) tronque = true;
-                var ids = listeInst.Take(take).Select(e => e.Id.Value).ToList();
+                var sample = listeInst.Take(take).ToList();
+                var ids = sample.Select(e => e.Id.Value).ToList();
+                var uniqueIds = sample.Select(e => UniqueIds.Of(e)).ToList();
                 idsRestants -= ids.Count;
                 ElementType et = typeEl as ElementType;
 
@@ -230,6 +232,7 @@ namespace QcExtractor.Extractors
                     nbInstances = listeInst.Count,
                     raison = tp == null ? "absent" : "vide",
                     idsEchantillon = ids,
+                    uniqueIdsEchantillon = uniqueIds,
                     listeIdsTronquee = coupe,
                 });
             }
@@ -296,6 +299,7 @@ namespace QcExtractor.Extractors
                         nomType = nomType,
                         categorie = e.Category != null ? e.Category.Name : null,
                         id = e.Id.Value,
+                        uniqueId = UniqueIds.Of(e),
                     });
                     idsRestants--;
                 }
