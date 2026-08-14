@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { fetchQcRunDesignatedElements } from '../services/api';
 import { pageShell, pageInner, card, btnSecondary, errorBanner } from '../components/qc-config/qcTheme';
 import QcRunViewerPane from '../components/QcRunViewerPane';
+import { isolationUnavailableMessage, notFoundMessage } from '../components/qcViewerIsolation';
 
 const VIOLET = '#7c3aed';
 const VIOLET_DARK = '#6d28d9';
@@ -64,31 +65,6 @@ const KNOWN_DETAIL_KEYS = {
 };
 
 const SKIP_DETAIL_KEYS = new Set(['uniqueId', 'revitUniqueId']);
-
-function isolationUnavailableMessage(row) {
-  const kind = row?.kind;
-  if (kind === 'view') {
-    return 'Cette ligne désigne une vue : elle n’est pas un objet isolable dans la maquette 3D.';
-  }
-  if (kind === 'family' || kind === 'type') {
-    return 'Cette ligne désigne une famille ou un type, pas une occurrence 3D isolable.';
-  }
-  if (kind === 'option' || kind === 'workset' || kind === 'phase' || kind === 'parameter' || kind === 'name') {
-    return 'Cet objet n’a pas d’identité 3D dans la maquette (variante, sous-projet, phase ou paramètre). L’isolation n’est pas disponible.';
-  }
-  return 'Cet objet n’a pas d’identité 3D dans la maquette. L’isolation n’est pas disponible.';
-}
-
-function notFoundMessage(row) {
-  const kind = row?.kind;
-  if (kind === 'view') {
-    return 'Cette vue n’apparaît pas comme un objet dans la maquette 3D.';
-  }
-  if (kind === 'family' || kind === 'type') {
-    return 'Cette famille ou ce type n’apparaît pas comme un objet dans la maquette 3D.';
-  }
-  return 'Cet élément n’a pas été trouvé dans la maquette affichée (supprimé, ou vue 3D différente de l’extraction).';
-}
 
 const COMMON_SORT = [
   { key: 'revitElementId', label: 'Identifiant Revit' },

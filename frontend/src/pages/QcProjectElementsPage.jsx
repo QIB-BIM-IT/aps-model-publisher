@@ -2,6 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { fetchQcProjectDesignatedElements } from '../services/api';
 import { pageShell, pageInner, card, btnSecondary, errorBanner } from '../components/qc-config/qcTheme';
+import QcRunViewerPane from '../components/QcRunViewerPane';
+import {
+  isolationUnavailableMessage,
+  notFoundMessage,
+  sameAccModel,
+} from '../components/qcViewerIsolation';
 
 const VIOLET = '#7c3aed';
 const VIOLET_DARK = '#6d28d9';
@@ -62,7 +68,7 @@ const KNOWN_DETAIL_KEYS = {
   G507: ['guid', 'nom'],
 };
 
-const SKIP_DETAIL_KEYS = new Set(['id']);
+const SKIP_DETAIL_KEYS = new Set(['id', 'uniqueId', 'revitUniqueId']);
 
 const COMMON_SORT = [
   { key: 'revitElementId', label: 'Identifiant Revit' },
@@ -201,6 +207,11 @@ export default function QcProjectElementsPage() {
   const [payload, setPayload] = useState(null);
   const [copyMsg, setCopyMsg] = useState(null);
   const [copying, setCopying] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [isolateRequest, setIsolateRequest] = useState(null);
+  const [isolateMsg, setIsolateMsg] = useState(null);
+  const [switchOffer, setSwitchOffer] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -252,6 +263,15 @@ export default function QcProjectElementsPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    setIsolateRequest((prev) => {
+      if (!prev) return prev;
+      if (!accModelGuid) return null;
+      if (prev.accModelGuid && !sameAccModel(prev.accModelGuid, accModelGuid)) return null;
+      return prev;
+    });
+  }, [accModelGuid]);
 
   const project = payload?.project;
   const items = payload?.items || [];
@@ -378,15 +398,128 @@ export default function QcProjectElementsPage() {
     }
   }
 
+  function showIsolateMsg(text) {
+    setIsolateMsg(text);
+    setTimeout(() => setIsolateMsg(null), 7000);
+  }
+
+  function requestIsolate(row) {
+    setViewerOpen(true);
+    setIsolateRequest({
+      uniqueIds: [row.revitUniqueId],
+      label: row.label || row.typeName || row.familyName || '',
+      notFoundMessage: notFoundMessage(row),
+      accModelGuid: row.accModelGuid,
+    });
+  }
+
+  function offerSwitchToRowModel(row, extra) {
+    setSwitchOffer({
+      accModelGuid: row.accModelGuid,
+      modelName: row.modelName || 'cette maquette',
+      isolate: row.revitUniqueId
+        ? {
+            uniqueIds: [row.revitUniqueId],
+            label: row.label || row.typeName || row.familyName || '',
+            notFoundMessage: notFoundMessage(row),
+            accModelGuid: row.accModelGuid,
+          }
+        : null,
+    });
+    showIsolateMsg(extra);
+  }
+
+  function acceptSwitchOffer() {
+    if (!switchOffer?.accModelGuid) return;
+    if (switchOffer.isolate) setIsolateRequest(switchOffer.isolate);
+    setViewerOpen(true);
+    replaceFilters({ nextModel: switchOffer.accModelGuid });
+    setSwitchOffer(null);
+    setIsolateMsg(null);
+  }
+
+  function onRowClick(row) {
+    setSelectedId(row.id);
+    if (!row.revitUniqueId) {
+      setSwitchOffer(null);
+      showIsolateMsg(isolationUnavailableMessage(row));
+      return;
+    }
+    if (!accModelGuid) {
+      offerSwitchToRowModel(
+        row,
+        `Choisissez d’abord la maquette « ${row.modelName || 'de cette ligne'} » dans le filtre — ou basculez ci-dessous — pour l’isoler en 3D.`
+      );
+      return;
+    }
+    if (!sameAccModel(row.accModelGuid, accModelGuid)) {
+      offerSwitchToRowModel(
+        row,
+        `Cette ligne appartient à « ${row.modelName || 'une autre maquette'} », pas à la maquette affichée. Filtrez sur cette maquette, ou basculez ci-dessous. L’objet n’a pas été isolé dans le mauvais modèle.`
+      );
+      return;
+    }
+    setSwitchOffer(null);
+    requestIsolate(row);
+  }
+
+  async function isolateFiltered() {
+    if (!projectId || copying) return;
+    if (!accModelGuid) {
+      showIsolateMsg(
+        'Choisissez une maquette dans le filtre pour isoler les objets 3D. En vue de toutes les maquettes, aucun modèle unique n’est chargé.'
+      );
+      return;
+    }
+    setCopying(true);
+    try {
+      const data = await fetchQcProjectDesignatedElements(projectId, {
+        controlCode: controlCode || undefined,
+        accModelGuid,
+        category: category || undefined,
+        level: level || undefined,
+        q: q || undefined,
+        idsOnly: 1,
+        sortBy,
+        sortDir,
+      });
+      const ids = data?.revitUniqueIds || [];
+      if (!ids.length) {
+        showIsolateMsg(
+          'Aucun objet 3D isolable dans les résultats filtrés (variantes, sous-projets, phases ou paramètres).'
+        );
+        return;
+      }
+      setViewerOpen(true);
+      setIsolateRequest({
+        uniqueIds: ids,
+        label: `${ids.length} objet(s) des résultats filtrés`,
+        notFoundMessage:
+          'Aucun des objets filtrés n’apparaît dans la maquette 3D (vues, familles, ou traduction différente).',
+        accModelGuid,
+      });
+    } catch (err) {
+      showIsolateMsg(err?.message || 'Impossible d’isoler la sélection filtrée.');
+    } finally {
+      setCopying(false);
+    }
+  }
+
   const selectedControl = byControl.find((c) => c.controlCode === controlCode);
   const selectedModel = byModel.find(
     (m) => String(m.accModelGuid).toLowerCase() === accModelGuid.toLowerCase()
   );
   const modelsToShow = selectedModel ? [selectedModel] : byModel;
+  const viewerRunId = selectedModel?.runId || null;
+  const viewerSubtitle = selectedModel
+    ? `Dernier contrôle réussi · ${formatDateTime(selectedModel.endedAtUtc || selectedModel.startedAtUtc)}${
+        selectedModel.modelVersion != null ? ` · version ACC v${selectedModel.modelVersion}` : ''
+      }`
+    : undefined;
 
   return (
     <div style={pageShell}>
-      <div style={{ ...pageInner, maxWidth: 1280 }}>
+      <div style={{ ...pageInner, maxWidth: viewerOpen ? 1680 : 1280 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
           <button type="button" onClick={goBackToPlanning} style={btnSecondary}>
             ← Retour à la planification
@@ -407,7 +540,8 @@ export default function QcProjectElementsPage() {
         </h1>
         <p style={{ margin: '0 0 24px', fontSize: 14, color: '#94a3b8' }}>
           Dernier contrôle réussi de chaque maquette du projet. Ce n’est pas l’historique :
-          une maquette sans contrôle réussi n’apparaît pas.
+          une maquette sans contrôle réussi n’apparaît pas. Filtrez sur une maquette pour
+          l’afficher en 3D (version ACC de ce dernier contrôle).
         </p>
 
         {error && <div style={errorBanner}>{error}</div>}
@@ -453,6 +587,14 @@ export default function QcProjectElementsPage() {
           </p>
         </div>
 
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: viewerOpen ? 'minmax(0, 1fr) minmax(360px, 480px)' : '1fr',
+            gap: 16,
+            alignItems: 'start',
+          }}
+        >
         <div style={card}>
           <div
             style={{
@@ -500,7 +642,7 @@ export default function QcProjectElementsPage() {
                 type="search"
                 value={qInput}
                 onChange={(e) => setQInput(e.target.value)}
-                placeholder="Libellé, type ou famille"
+                placeholder="Libellé, type, famille ou identifiant"
                 style={selectStyle}
               />
             </label>
@@ -581,11 +723,65 @@ export default function QcProjectElementsPage() {
             >
               Copier les libellés de tous les résultats filtrés
             </button>
+            <button
+              type="button"
+              onClick={isolateFiltered}
+              disabled={copying || total === 0}
+              style={{
+                ...btnSecondary,
+                background: `linear-gradient(135deg, ${VIOLET} 0%, ${VIOLET_DARK} 100%)`,
+                color: '#fff',
+                border: 'none',
+                opacity: copying || total === 0 ? 0.6 : 1,
+              }}
+            >
+              Isoler les objets 3D de tous les résultats filtrés
+            </button>
           </div>
+          {!viewerOpen && (
+            <div style={{ marginBottom: 12 }}>
+              <QcRunViewerPane
+                runId={viewerRunId}
+                open={false}
+                onToggle={() => setViewerOpen(true)}
+                isolateRequest={null}
+                idleMessage="Choisissez une maquette dans le filtre pour afficher sa vue 3D. Aucun modèle unique ne peut être chargé tant que toutes les maquettes sont listées."
+              />
+            </div>
+          )}
           <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b' }}>
             « Cette page » = les {items.length} ligne(s) affichées. « Tous les résultats filtrés » = les{' '}
             {total} ligne(s) correspondant aux filtres actuels, pas seulement cette page.
           </p>
+          {(isolateMsg || switchOffer) && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: '8px 12px',
+                borderRadius: 8,
+                background: 'rgba(245, 158, 11, 0.12)',
+                color: '#92400e',
+                fontSize: 13,
+              }}
+            >
+              {isolateMsg && <div>{isolateMsg}</div>}
+              {switchOffer?.accModelGuid && (
+                <button
+                  type="button"
+                  onClick={acceptSwitchOffer}
+                  style={{
+                    ...btnSecondary,
+                    marginTop: isolateMsg ? 8 : 0,
+                    background: `linear-gradient(135deg, ${VIOLET} 0%, ${VIOLET_DARK} 100%)`,
+                    color: '#fff',
+                    border: 'none',
+                  }}
+                >
+                  Afficher « {switchOffer.modelName} » et isoler
+                </button>
+              )}
+            </div>
+          )}
           {copyMsg && (
             <div
               style={{
@@ -656,8 +852,30 @@ export default function QcProjectElementsPage() {
               </thead>
               <tbody>
                 {!loading &&
-                  items.map((row, i) => (
-                    <tr key={row.id} style={{ background: i % 2 ? 'rgba(248,250,252,0.8)' : 'transparent' }}>
+                  items.map((row, i) => {
+                    const isolable = Boolean(row.revitUniqueId);
+                    const selected = selectedId === row.id;
+                    return (
+                    <tr
+                      key={row.id}
+                      onClick={() => onRowClick(row)}
+                      title={
+                        isolable
+                          ? 'Cliquer pour isoler dans la maquette 3D'
+                          : isolationUnavailableMessage(row)
+                      }
+                      style={{
+                        background: selected
+                          ? 'rgba(124,58,237,0.16)'
+                          : i % 2
+                            ? 'rgba(248,250,252,0.8)'
+                            : 'transparent',
+                        cursor: isolable || row.accModelGuid ? 'pointer' : 'default',
+                        opacity: isolable ? 1 : 0.62,
+                        outline: selected ? `2px solid ${VIOLET}` : 'none',
+                        outlineOffset: -2,
+                      }}
+                    >
                       <td style={tdStyle}>{row.modelName || 'Maquette'}</td>
                       {!controlCode && (
                         <td style={tdStyle}>
@@ -682,7 +900,10 @@ export default function QcProjectElementsPage() {
                         {row.runId ? (
                           <button
                             type="button"
-                            onClick={() => navigate(`/qc-run/${encodeURIComponent(row.runId)}`)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/qc-run/${encodeURIComponent(row.runId)}`);
+                            }}
                             style={{
                               background: 'none',
                               border: 'none',
@@ -699,7 +920,8 @@ export default function QcProjectElementsPage() {
                         ) : null}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
               </tbody>
             </table>
           </div>
@@ -743,6 +965,19 @@ export default function QcProjectElementsPage() {
               </button>
             </div>
           )}
+        </div>
+        {viewerOpen && (
+          <div style={{ position: 'sticky', top: 16 }}>
+            <QcRunViewerPane
+              runId={viewerRunId}
+              open={viewerOpen}
+              onToggle={() => setViewerOpen(false)}
+              isolateRequest={isolateRequest}
+              subtitle={viewerSubtitle}
+              idleMessage="Choisissez une maquette dans le filtre pour afficher sa vue 3D. Aucun modèle unique ne peut être chargé tant que toutes les maquettes sont listées."
+            />
+          </div>
+        )}
         </div>
       </div>
     </div>
