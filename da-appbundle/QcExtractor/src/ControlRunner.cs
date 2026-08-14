@@ -90,6 +90,15 @@ namespace QcExtractor
                 }
             }
 
+            try
+            {
+                payload.UniqueIdValidity = UniqueIds.SampleRoundTrip(doc, 10);
+            }
+            catch
+            {
+                // Diagnostic uniquement : un échec ici ne doit pas faire échouer l'extraction.
+            }
+
             return payload;
         }
     }

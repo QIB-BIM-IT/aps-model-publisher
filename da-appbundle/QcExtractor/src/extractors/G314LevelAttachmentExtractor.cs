@@ -551,6 +551,7 @@ namespace QcExtractor.Extractors
                 return new
                 {
                     id = el.Id.Value,
+                    uniqueId = UniqueIds.Of(el),
                     famille = "C",
                     groupe = groupe,
                     categorie = el.Category != null ? el.Category.Name : null,
@@ -564,8 +565,9 @@ namespace QcExtractor.Extractors
 
             return new
             {
-                id = el.Id.Value,
-                famille = famille.ToString(),
+                    id = el.Id.Value,
+                    uniqueId = UniqueIds.Of(el),
+                    famille = famille.ToString(),
                 groupe = groupe,
                 categorie = el.Category != null ? el.Category.Name : null,
                 familleRevit = familleRevit,

@@ -127,6 +127,7 @@ namespace QcExtractor.Extractors
                     report.NonMonitores++;
                     report.FautifsNoms.Add(nom);
                     report.FautifsIds.Add(el.Id.Value);
+                    report.FautifsUniqueIds.Add(UniqueIds.Of(el));
                 }
             }
 
@@ -173,6 +174,7 @@ namespace QcExtractor.Extractors
             public int NonMonitores;
             public readonly List<string> FautifsNoms = new List<string>();
             public readonly List<long> FautifsIds = new List<long>();
+            public readonly List<string> FautifsUniqueIds = new List<string>();
             public readonly List<string> ExclusNoms = new List<string>();
             public List<object> RepartitionParLien = new List<object>();
 
@@ -189,6 +191,7 @@ namespace QcExtractor.Extractors
                         total = NonMonitores,
                         noms = FautifsNoms.Take(MaxNomsListes).ToList(),
                         ids = FautifsIds.Take(MaxNomsListes).ToList(),
+                        uniqueIds = FautifsUniqueIds.Take(MaxNomsListes).ToList(),
                         listeTronquee = tronque,
                     },
                     ["repartitionParLien"] = RepartitionParLien,

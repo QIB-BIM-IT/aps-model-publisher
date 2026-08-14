@@ -93,7 +93,7 @@ namespace QcExtractor.Extractors
                 if (!fam.IsInPlace) continue;
                 long id = fam.Id.Value;
                 if (seen.Contains(id)) continue;
-                result.Liste.Add(new { famille = fam.Name, nbInstances = 0, id = id });
+                result.Liste.Add(new { famille = fam.Name, nbInstances = 0, id = id, uniqueId = UniqueIds.Of(fam) });
                 result.NbFamilles++;
             }
 
@@ -107,7 +107,10 @@ namespace QcExtractor.Extractors
                 try { name = g.First().Symbol.Family.Name; }
                 catch { name = "id:" + g.Key; }
                 int n = g.Count();
-                result.Liste.Add(new { famille = name, nbInstances = n, id = g.Key });
+                string uniqueId = null;
+                try { uniqueId = UniqueIds.Of(g.First().Symbol.Family); }
+                catch { /* Family illisible : UniqueId vide, pas de substitution */ }
+                result.Liste.Add(new { famille = name, nbInstances = n, id = g.Key, uniqueId });
                 result.NbFamilles++;
                 result.NbInstances += n;
             }
@@ -152,9 +155,11 @@ namespace QcExtractor.Extractors
                 bool pinned = false;
                 bool viewSpecific = false;
                 long idInstance = 0;
+                string uniqueId = null;
                 if (instance != null)
                 {
                     idInstance = instance.Id.Value;
+                    uniqueId = UniqueIds.Of(instance);
                     try
                     {
                         IList<ElementId> members = instance.GetMemberIds();
@@ -182,6 +187,7 @@ namespace QcExtractor.Extractors
                     viewSpecific = viewSpecific,
                     idType = gt.Id.Value,
                     idInstance = idInstance,
+                    uniqueId = uniqueId,
                 });
             }
 

@@ -31,11 +31,12 @@ namespace QcExtractor.Extractors
                 try { pinned = lvl.Pinned; } catch { /* ignore */ }
                 string nom = lvl.Name ?? string.Empty;
                 long id = lvl.Id.Value;
+                string uniqueId = UniqueIds.Of(lvl);
 
-                niveaux.Add(new { nom, pinned, id });
+                niveaux.Add(new { nom, pinned, id, uniqueId });
                 if (!pinned)
                 {
-                    fautifs.Add(new { nom, pinned, id, raisons = new[] { "non pinne" } });
+                    fautifs.Add(new { nom, pinned, id, uniqueId, raisons = new[] { "non pinne" } });
                 }
             }
 
