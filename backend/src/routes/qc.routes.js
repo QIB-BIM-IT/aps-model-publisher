@@ -9,6 +9,8 @@
 //  - POST /api/qc/runs           (auth JWT) lance un run QC manuel
 //  - GET  /api/qc/runs           (auth JWT) liste les runs récents
 //  - GET  /api/qc/runs/:id       (auth JWT) détail d'un run + résultats + warnings
+//  - GET  /api/qc/viewer/token          (auth JWT) jeton Viewer (viewables:read uniquement)
+//  - GET  /api/qc/runs/:id/viewer       (auth JWT) URN version auditée + état de traduction
 //  - GET  /api/qc/runs/:id/elements (auth JWT) éléments désignés paginés / filtrables
 //  - GET  /api/qc/projects/:projectKey/elements (auth JWT) état actuel projet (derniers runs réussis)
 //  - POST /api/qc/da-callback    (jeton HMAC dans l'URL) complétion onComplete de DA
@@ -32,6 +34,25 @@ function notReady(res) {
     message: 'Module QC non initialisé (voir logs serveur). Les fonctionnalités existantes ne sont pas affectées.',
   });
 }
+
+/**
+ * GET /api/qc/viewer/token
+ * Jeton applicatif restreint à viewables:read, pour le Viewer dans le navigateur.
+ * Ne JAMAIS renvoyer le jeton 3-legged utilisateur (scopes larges).
+ */
+router.get('/viewer/token', authenticateToken, async (req, res) => {
+  try {
+    const qcViewerService = require('../services/qcViewer.service');
+    const data = await qcViewerService.getViewerTokenPayload();
+    return res.json({ success: true, data });
+  } catch (err) {
+    logger.error(`[QC] GET /viewer/token: ${err.message}`);
+    return res.status(500).json({
+      success: false,
+      message: 'Impossible d’obtenir un jeton de visualisation. Réessayez dans un instant.',
+    });
+  }
+});
 
 function httpStatus(err) {
   return Number.isInteger(err?.statusCode) ? err.statusCode : 500;
@@ -171,6 +192,25 @@ router.get('/runs/:id', authenticateToken, async (req, res) => {
     const status = err.statusCode || 500;
     if (status >= 500) logger.error(`[QC] GET /runs/:id: ${err.message}`);
     else logger.warn(`[QC] GET /runs/:id: ${err.message}`);
+    return res.status(status).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * GET /api/qc/runs/:id/viewer
+ * Identifiant de document Viewer (version ACC auditée) + état de la traduction 3D.
+ * Lecture seule — ne lance jamais une traduction.
+ */
+router.get('/runs/:id/viewer', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const qcViewerService = require('../services/qcViewer.service');
+    const data = await qcViewerService.getRunViewerContext(req.params.id);
+    return res.json({ success: true, data });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) logger.error(`[QC] GET /runs/:id/viewer: ${err.message}`);
+    else logger.warn(`[QC] GET /runs/:id/viewer: ${err.message}`);
     return res.status(status).json({ success: false, message: err.message });
   }
 });

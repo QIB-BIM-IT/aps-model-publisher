@@ -19,6 +19,12 @@ class APSAuthService {
         .split(/\s+/)
         .filter(Boolean),
     };
+    // Cache SÉPARÉ du 2-legged générique : jeton Viewer = viewables:read uniquement.
+    // Ne jamais réutiliser this.twoLegged (scopes larges) ni l'écraser.
+    this.viewerToken = {
+      access_token: null,
+      expires_at: 0,
+    };
     // Mutex par userId pour éviter les refresh concurrents
     this._refreshLocks = new Map();
   }
@@ -265,6 +271,58 @@ class APSAuthService {
       const msg = this._extractError(err);
       logger.error(`getTwoLeggedToken failed: ${msg}`);
       throw new Error(`APS 2-legged failed: ${msg}`);
+    }
+  }
+
+  /**
+   * Jeton applicatif destiné UNIQUEMENT au Viewer (navigateur).
+   * Scope unique : viewables:read. Cache dédié — ne touche pas au 2-legged large.
+   */
+  async getViewerToken() {
+    const SCOPES = ['viewables:read'];
+    const now = Date.now();
+    if (this.viewerToken.access_token && now < this.viewerToken.expires_at - 60_000) {
+      return {
+        access_token: this.viewerToken.access_token,
+        expires_in: Math.max(1, Math.floor((this.viewerToken.expires_at - now) / 1000)),
+        expires_at: this.viewerToken.expires_at,
+        scope: SCOPES.join(' '),
+      };
+    }
+
+    const body = {
+      grant_type: 'client_credentials',
+      client_id: apsConfig.credentials.client_id,
+      client_secret: apsConfig.credentials.client_secret,
+      scope: SCOPES.join(' '),
+    };
+
+    try {
+      const { data } = await axios.post(
+        apsConfig.endpoints.TOKEN,
+        qs.stringify(body),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+      const expiresIn = Number(data.expires_in) || 3600;
+      this.viewerToken.access_token = data.access_token;
+      this.viewerToken.expires_at = Date.now() + expiresIn * 1000;
+      const scope = String(data.scope || SCOPES.join(' ')).trim();
+      if (scope && !scope.split(/\s+/).every((s) => s === 'viewables:read')) {
+        this.viewerToken.access_token = null;
+        this.viewerToken.expires_at = 0;
+        throw new Error('Jeton Viewer refusé : la portée n’est pas limitée à viewables:read');
+      }
+      return {
+        access_token: data.access_token,
+        expires_in: expiresIn,
+        expires_at: this.viewerToken.expires_at,
+        scope: 'viewables:read',
+      };
+    } catch (err) {
+      if (err.message && err.message.includes('Jeton Viewer refusé')) throw err;
+      const msg = this._extractError(err);
+      logger.error(`getViewerToken failed: ${msg}`);
+      throw new Error(`APS Viewer token failed: ${msg}`);
     }
   }
 

@@ -38,7 +38,36 @@ const app = express();
 // -------- Middlewares globaux
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:3001';
 app.use(cors({ origin: CORS_ORIGIN, credentials: true }));
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'script-src': ["'self'", "'unsafe-eval'", "'wasm-unsafe-eval'", 'https://developer.api.autodesk.com', 'blob:'],
+        'style-src': ["'self'", 'https:', "'unsafe-inline'", 'https://developer.api.autodesk.com'],
+        'img-src': [
+          "'self'",
+          'data:',
+          'blob:',
+          'https://developer.api.autodesk.com',
+          'https://cdn.derivative.autodesk.com',
+          'https://*.autodesk.com',
+        ],
+        'connect-src': [
+          "'self'",
+          'blob:',
+          'https://developer.api.autodesk.com',
+          'https://cdn.derivative.autodesk.com',
+          'https://*.autodesk.com',
+          'wss://*.autodesk.com',
+        ],
+        'worker-src': ["'self'", 'blob:', 'https://developer.api.autodesk.com'],
+        'font-src': ["'self'", 'data:', 'https:', 'https://developer.api.autodesk.com'],
+        'script-src-elem': ["'self'", "'unsafe-eval'", "'wasm-unsafe-eval'", 'https://developer.api.autodesk.com', 'blob:'],
+      },
+    },
+  })
+);
 app.use(compression());
 app.use(cookieParser());
 app.use(morgan('dev'));

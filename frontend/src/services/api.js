@@ -436,6 +436,42 @@ export async function fetchQcRunDesignatedElements(runId, params = {}) {
   }
 }
 
+/** GET /api/qc/viewer/token — jeton Viewer (viewables:read uniquement). */
+export async function fetchQcViewerToken() {
+  try {
+    const { data } = await api.get('/api/qc/viewer/token');
+    if (!data?.success || !data?.data?.accessToken) {
+      throw new Error(data?.message || 'Échec obtention du jeton de visualisation');
+    }
+    return data.data;
+  } catch (err) {
+    const message =
+      err?.response?.data?.message || err?.message || 'Erreur jeton de visualisation';
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
+}
+
+/** GET /api/qc/runs/:runId/viewer — URN de la version auditée + état de traduction. */
+export async function fetchQcRunViewer(runId) {
+  try {
+    const { data } = await api.get(`/api/qc/runs/${encodeURIComponent(runId)}/viewer`);
+    if (!data?.success) {
+      throw new Error(data?.message || 'Échec chargement du contexte de visualisation');
+    }
+    return data.data;
+  } catch (err) {
+    const message =
+      err?.response?.data?.message ||
+      err?.message ||
+      'Erreur chargement du contexte de visualisation';
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
+}
+
 /** GET /api/qc/runs/:runId — détail + résultats enrichis (fiche / UI). */
 export async function fetchQcRunDetail(runId) {
   try {
