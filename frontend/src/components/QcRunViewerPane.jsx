@@ -58,7 +58,14 @@ function mapDbIds(model, uniqueIds) {
   });
 }
 
-export default function QcRunViewerPane({ runId, open, onToggle, isolateRequest }) {
+export default function QcRunViewerPane({
+  runId,
+  open,
+  onToggle,
+  isolateRequest,
+  subtitle,
+  idleMessage,
+}) {
   const hostRef = useRef(null);
   const viewerRef = useRef(null);
   const readyRef = useRef(false);
@@ -158,12 +165,18 @@ export default function QcRunViewerPane({ runId, open, onToggle, isolateRequest 
               /* ignore */
             }
             viewerRef.current = null;
+            if (typeof window !== 'undefined') {
+              window.__qcViewerLive = Math.max(0, (window.__qcViewerLive || 1) - 1);
+            }
           }
           const viewer = new Av.GuiViewer3D(hostRef.current, {
             extensions: [],
           });
           viewer.start();
           viewerRef.current = viewer;
+          if (typeof window !== 'undefined') {
+            window.__qcViewerLive = (window.__qcViewerLive || 0) + 1;
+          }
           Av.Document.load(
             ctx.documentUrn,
             (doc) => {
@@ -218,6 +231,9 @@ export default function QcRunViewerPane({ runId, open, onToggle, isolateRequest 
         } catch (_) {
           /* ignore */
         }
+        if (typeof window !== 'undefined') {
+          window.__qcViewerLive = Math.max(0, (window.__qcViewerLive || 1) - 1);
+        }
       }
     };
   }, [open, runId, applyIsolate]);
@@ -232,6 +248,47 @@ export default function QcRunViewerPane({ runId, open, onToggle, isolateRequest 
       <button type="button" onClick={onToggle} style={btnSecondary}>
         Afficher la maquette 3D
       </button>
+    );
+  }
+
+  if (!runId) {
+    return (
+      <div
+        style={{
+          border: '1px solid rgba(148,163,184,0.35)',
+          borderRadius: 12,
+          overflow: 'hidden',
+          background: '#0f172a',
+          minHeight: 220,
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 8,
+            padding: '10px 12px',
+            background: 'rgba(15,23,42,0.95)',
+            borderBottom: '1px solid rgba(148,163,184,0.25)',
+          }}
+        >
+          <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 13 }}>Maquette 3D</div>
+          <button
+            type="button"
+            onClick={onToggle}
+            style={{ ...btnSecondary, padding: '6px 10px', fontSize: 12 }}
+          >
+            Replier
+          </button>
+        </div>
+        <div style={{ padding: 16, color: '#e2e8f0', fontSize: 13, lineHeight: 1.5 }}>
+          {idleMessage ||
+            'Choisissez une maquette dans le filtre pour afficher sa vue 3D. Aucun modèle unique ne peut être chargé tant que toutes les maquettes sont listées.'}
+        </div>
+      </div>
     );
   }
 
@@ -264,7 +321,7 @@ export default function QcRunViewerPane({ runId, open, onToggle, isolateRequest 
             {context?.modelVersion != null ? ` — version ACC v${context.modelVersion}` : ''}
           </div>
           <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 2 }}>
-            Version exactement auditée par ce run
+            {subtitle || 'Version exactement auditée par ce run'}
             {loadMs != null ? ` · chargée en ${(loadMs / 1000).toFixed(1)} s` : ''}
           </div>
         </div>
