@@ -90,6 +90,24 @@ function numericPoints(points) {
   return (points || []).filter((p) => p.valeurNum != null && Number.isFinite(Number(p.valeurNum)));
 }
 
+function groupSeriesByVersion(series) {
+  return (series || []).map((s) => {
+    const buckets = new Map();
+    for (const p of s.points || []) {
+      const key = p.modelVersion == null ? '∅' : String(p.modelVersion);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(p);
+    }
+    const points = [...buckets.values()].map((arr) => {
+      const ordered = [...arr].sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+      const last = ordered[ordered.length - 1];
+      return { ...last, runCount: arr.length };
+    });
+    points.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+    return { ...s, points };
+  });
+}
+
 function libelleOf(code, controls) {
   const found = (controls || []).find((c) => c.code === code);
   return found?.libelle || code;
@@ -106,7 +124,42 @@ function breakdownFor(model, breakdowns) {
   );
 }
 
-function ChartTooltip({ active, payload, label, unite }) {
+function ChartTooltip({ active, payload, unite, seriesMode }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload || {};
+  const runs = row.runCount;
+  return (
+    <div
+      style={{
+        background: 'rgba(15, 23, 42, 0.96)',
+        border: '1px solid rgba(148, 163, 184, 0.35)',
+        borderRadius: 8,
+        padding: '8px 10px',
+        color: '#fff',
+        fontSize: 12,
+        maxWidth: 300,
+      }}
+    >
+      <div style={{ marginBottom: 4, color: '#cbd5e1' }}>{versionLabel(row.version)}</div>
+      <div style={{ marginBottom: 6, color: '#94a3b8' }}>{formatDateTime(row.at)}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} style={{ color: p.color || '#fff' }}>
+          {p.name} : {formatNumber(p.value)}
+          {unite ? ` ${unite}` : ''}
+        </div>
+      ))}
+      {seriesMode === 'version' && runs != null ? (
+        <div style={{ marginTop: 6, color: '#94a3b8' }}>
+          {runs === 1
+            ? '1 contrôle réussi sur cette version'
+            : `${formatNumber(runs)} contrôles réussis sur cette version`}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CompareTooltip({ active, payload, unite }) {
   if (!active || !payload?.length) return null;
   return (
     <div
@@ -117,18 +170,50 @@ function ChartTooltip({ active, payload, label, unite }) {
         padding: '8px 10px',
         color: '#fff',
         fontSize: 12,
-        maxWidth: 280,
       }}
     >
-      <div style={{ marginBottom: 4, color: '#cbd5e1' }}>{label}</div>
+      <div style={{ marginBottom: 4, color: '#cbd5e1' }}>{payload[0]?.payload?.name}</div>
       {payload.map((p) => (
         <div key={p.dataKey} style={{ color: p.color || '#fff' }}>
           {p.name} : {formatNumber(p.value)}
           {unite ? ` ${unite}` : ''}
-          {p.payload?.version != null ? ` · ${versionLabel(p.payload.version)}` : ''}
         </div>
       ))}
     </div>
+  );
+}
+
+function HorizontalCompareChart({ data, bars, unite, height }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart
+        layout="vertical"
+        data={data}
+        margin={{ top: 4, right: 16, bottom: 4, left: 8 }}
+      >
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.25)" horizontal={false} />
+        <XAxis type="number" stroke="#94a3b8" tick={{ fontSize: 11, fill: '#64748b' }} />
+        <YAxis
+          type="category"
+          dataKey="name"
+          width={168}
+          stroke="#94a3b8"
+          tick={{ fontSize: 11, fill: '#334155' }}
+        />
+        <Tooltip content={<CompareTooltip unite={unite} />} />
+        {bars.length > 1 ? <Legend wrapperStyle={{ fontSize: 12 }} /> : null}
+        {bars.map((b) => (
+          <Bar
+            key={b.key}
+            dataKey={b.key}
+            name={b.name}
+            fill={b.fill}
+            stackId={b.stackId}
+            radius={b.stackId ? [0, 0, 0, 0] : [0, 4, 4, 0]}
+          />
+        ))}
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
 
@@ -245,6 +330,8 @@ export default function QcHygieneDashboardPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const accModelGuid = searchParams.get('accModelGuid') || '';
+  const seriesMode = searchParams.get('series') === 'run' ? 'run' : 'version';
+  const previewCompare = searchParams.get('apercuComparaison') === '1';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -276,7 +363,14 @@ export default function QcHygieneDashboardPage() {
   const controls = payload?.controls || [];
   const current = payload?.current || [];
   const series = payload?.series || [];
+  const seriesByVersion = payload?.seriesByVersion || [];
   const warningBreakdown = payload?.warningBreakdown || [];
+  const seriesForCharts =
+    seriesMode === 'run'
+      ? series
+      : seriesByVersion.length
+        ? seriesByVersion
+        : groupSeriesByVersion(series);
 
   const modelOptions = useMemo(() => {
     const fromApi = payload?.models || [];
@@ -299,9 +393,15 @@ export default function QcHygieneDashboardPage() {
     return map;
   }, [modelOptions]);
 
+  function replaceParams({ nextModel = accModelGuid, nextSeries = seriesMode }) {
+    const next = {};
+    if (nextModel) next.accModelGuid = nextModel;
+    if (nextSeries === 'run') next.series = 'run';
+    setSearchParams(next, { replace: true });
+  }
+
   function setModelFilter(next) {
-    if (next) setSearchParams({ accModelGuid: next }, { replace: true });
-    else setSearchParams({}, { replace: true });
+    replaceParams({ nextModel: next, nextSeries: seriesMode });
   }
 
   function goBackToPlanning() {
@@ -321,7 +421,7 @@ export default function QcHygieneDashboardPage() {
 
   const chartsByControl = useMemo(() => {
     return HYGIENE_CONTROLS.map((code) => {
-      const rows = series.filter((s) => s.controlCode === code);
+      const rows = seriesForCharts.filter((s) => s.controlCode === code);
       const modelsWithHistory = rows
         .map((s) => ({
           ...s,
@@ -334,13 +434,24 @@ export default function QcHygieneDashboardPage() {
       const dateKeys = new Map();
       for (const s of modelsWithHistory) {
         for (const p of s.numeric) {
-          const key = p.at ? new Date(p.at).toISOString() : p.runId;
+          const key =
+            seriesMode === 'version'
+              ? `v:${p.modelVersion ?? '∅'}:${p.at || p.runId}`
+              : p.at
+                ? new Date(p.at).toISOString()
+                : p.runId;
           if (!dateKeys.has(key)) {
             dateKeys.set(key, {
               key,
               at: p.at,
-              label: `${formatDateShort(p.at)} · v${p.modelVersion ?? '?'}`,
+              tick:
+                seriesMode === 'version'
+                  ? p.modelVersion != null
+                    ? `v${p.modelVersion}`
+                    : '—'
+                  : formatDateShort(p.at),
               version: p.modelVersion,
+              runCount: p.runCount ?? 1,
             });
           }
         }
@@ -349,10 +460,21 @@ export default function QcHygieneDashboardPage() {
         (a, b) => new Date(a.at || 0) - new Date(b.at || 0)
       );
       const data = sorted.map((d) => {
-        const row = { key: d.key, label: d.label, version: d.version, at: d.at };
+        const row = {
+          key: d.key,
+          tick: d.tick,
+          version: d.version,
+          at: d.at,
+          runCount: d.runCount,
+        };
         for (const s of modelsWithHistory) {
           const hit = s.numeric.find((p) => {
-            const k = p.at ? new Date(p.at).toISOString() : p.runId;
+            const k =
+              seriesMode === 'version'
+                ? `v:${p.modelVersion ?? '∅'}:${p.at || p.runId}`
+                : p.at
+                  ? new Date(p.at).toISOString()
+                  : p.runId;
             return k === d.key;
           });
           row[s.accModelGuid] = hit ? Number(hit.valeurNum) : null;
@@ -362,20 +484,55 @@ export default function QcHygieneDashboardPage() {
 
       return { code, modelsWithHistory, canChart, singleOnly, data };
     });
-  }, [series]);
+  }, [seriesForCharts, seriesMode]);
+
+  const compareModels = useMemo(() => {
+    if (current.length >= 2 || !previewCompare || current.length !== 1) return current;
+    const a = current[0];
+    const scale = (n, f) => (n == null ? null : Math.round(Number(n) * f * 100) / 100);
+    const bValues = {};
+    for (const [code, v] of Object.entries(a.values || {})) {
+      bValues[code] = v ? { ...v, valeurNum: scale(v.valeurNum, 0.62) } : v;
+    }
+    return [
+      a,
+      {
+        ...a,
+        accModelGuid: '00000000-0000-0000-0000-apercu',
+        modelName: `${modelLabel(a)} (aperçu)`,
+        values: bValues,
+      },
+    ];
+  }, [current, previewCompare]);
+
+  const compareBreakdown = useMemo(() => {
+    if (compareModels.length < 2) return warningBreakdown;
+    if (!previewCompare || current.length >= 2) return warningBreakdown;
+    const src = warningBreakdown[0] || {};
+    return [
+      src,
+      {
+        ...src,
+        accModelGuid: '00000000-0000-0000-0000-apercu',
+        critique: src.critique == null ? null : Math.max(0, Math.round(src.critique * 0.5)),
+        faible: src.faible == null ? null : Math.max(0, Math.round(src.faible * 0.7)),
+        total: null,
+      },
+    ];
+  }, [compareModels, previewCompare, current.length, warningBreakdown]);
 
   const compareRows = useMemo(() => {
-    if (current.length < 2) return [];
+    if (compareModels.length < 2) return [];
     return HYGIENE_CONTROLS.map((code) => {
       const row = { code, libelle: libelleOf(code, controls), unite: uniteOf(code, controls) };
-      for (const m of current) {
+      for (const m of compareModels) {
         const v = m.values?.[code];
         row[m.accModelGuid] =
           v && v.etatExtraction !== 'echec' && v.valeurNum != null ? Number(v.valeurNum) : null;
       }
       return row;
     });
-  }, [current, controls]);
+  }, [compareModels, controls]);
 
   return (
     <div style={pageShell}>
@@ -521,13 +678,47 @@ export default function QcHygieneDashboardPage() {
                   <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
                     Évolution dans le temps
                   </h2>
-                  <p style={{ margin: '0 0 18px', fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
-                    Preuve d’amélioration continue : chaque point est un run réussi, avec sa date et la
-                    version ACC auditée. Une baisse des avertissements d’une révision à l’autre est
-                    lisible ici.
+                  <p style={{ margin: '0 0 12px', fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
+                    {seriesMode === 'version'
+                      ? 'Un point par version ACC auditée (dernier contrôle réussi de cette version). C’est l’évolution de la maquette, pas le nombre de relances.'
+                      : 'Un point par contrôle réussi. Utile pour voir chaque mesure, y compris les relances sur une même version.'}
                   </p>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+                    <button
+                      type="button"
+                      onClick={() => replaceParams({ nextSeries: 'version' })}
+                      style={{
+                        ...btnSecondary,
+                        background: seriesMode === 'version' ? 'rgba(124, 58, 237, 0.12)' : undefined,
+                        color: seriesMode === 'version' ? VIOLET_DARK : undefined,
+                        border:
+                          seriesMode === 'version'
+                            ? '1px solid rgba(124, 58, 237, 0.45)'
+                            : undefined,
+                      }}
+                    >
+                      Par version ACC
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => replaceParams({ nextSeries: 'run' })}
+                      style={{
+                        ...btnSecondary,
+                        background: seriesMode === 'run' ? 'rgba(124, 58, 237, 0.12)' : undefined,
+                        color: seriesMode === 'run' ? VIOLET_DARK : undefined,
+                        border:
+                          seriesMode === 'run' ? '1px solid rgba(124, 58, 237, 0.45)' : undefined,
+                      }}
+                    >
+                      Chaque contrôle
+                    </button>
+                  </div>
                   {chartsByControl.map(({ code, modelsWithHistory, canChart, singleOnly, data }) => {
                     const unite = uniteOf(code, controls);
+                    const singleHint =
+                      seriesMode === 'version'
+                        ? 'Une seule version ACC a un contrôle réussi'
+                        : 'Un seul contrôle réussi à ce jour';
                     return (
                       <div key={code} style={{ marginBottom: 28 }}>
                         <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
@@ -540,21 +731,28 @@ export default function QcHygieneDashboardPage() {
                           </div>
                         ) : singleOnly ? (
                           <div style={{ fontSize: 13, color: '#64748b', padding: '8px 0', lineHeight: 1.5 }}>
-                            Un seul contrôle réussi à ce jour
+                            {singleHint}
                             {modelsWithHistory[0]?.numeric?.[0]
                               ? ` (${formatDateTime(modelsWithHistory[0].numeric[0].at)}, ${versionLabel(
                                   modelsWithHistory[0].numeric[0].modelVersion
                                 )} : ${formatNumber(modelsWithHistory[0].numeric[0].valeurNum)}${unite ? ` ${unite}` : ''})`
                               : ''}
-                            . La courbe d’évolution apparaîtra dès le prochain run réussi.
+                            . La courbe d’évolution apparaîtra dès qu’une autre{' '}
+                            {seriesMode === 'version' ? 'version' : 'mesure'} sera disponible.
                           </div>
                         ) : canChart ? (
                           <ResponsiveContainer width="100%" height={240}>
-                            <LineChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+                            <LineChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
                               <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.25)" />
-                              <XAxis dataKey="label" stroke="#94a3b8" tick={{ fontSize: 11, fill: '#64748b' }} />
+                              <XAxis
+                                dataKey="tick"
+                                stroke="#94a3b8"
+                                interval="preserveStartEnd"
+                                minTickGap={36}
+                                tick={{ fontSize: 11, fill: '#64748b' }}
+                              />
                               <YAxis stroke="#94a3b8" tick={{ fontSize: 11, fill: '#64748b' }} />
-                              <Tooltip content={<ChartTooltip unite={unite} />} />
+                              <Tooltip content={<ChartTooltip unite={unite} seriesMode={seriesMode} />} />
                               {modelsWithHistory.length > 1 ? (
                                 <Legend wrapperStyle={{ fontSize: 12 }} />
                               ) : null}
@@ -582,7 +780,7 @@ export default function QcHygieneDashboardPage() {
                   <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
                     Comparaison entre maquettes
                   </h2>
-                  {current.length < 2 ? (
+                  {compareModels.length < 2 ? (
                     <p style={{ margin: 0, fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
                       Une seule maquette a un contrôle réussi sur ce projet
                       {accModelGuid ? ' (filtre actif)' : ''}. La comparaison n’a de sens qu’avec au
@@ -591,8 +789,9 @@ export default function QcHygieneDashboardPage() {
                   ) : (
                     <>
                       <p style={{ margin: '0 0 16px', fontSize: 13, color: '#64748b' }}>
-                        Même instant métier : dernier run réussi de chaque maquette, pour repérer celle
-                        qui décroche.
+                        {previewCompare && current.length < 2
+                          ? 'Aperçu construit pour illustration : ce projet n’a qu’une maquette. Les barres de droite ne sont pas des données réelles.'
+                          : 'Même instant métier : dernier run réussi de chaque maquette, pour repérer celle qui décroche. Barres horizontales, une par maquette.'}
                       </p>
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -601,7 +800,7 @@ export default function QcHygieneDashboardPage() {
                               <th style={{ textAlign: 'left', padding: '8px 10px', color: '#64748b' }}>
                                 Contrôle
                               </th>
-                              {current.map((m) => (
+                              {compareModels.map((m) => (
                                 <th
                                   key={m.accModelGuid}
                                   style={{ textAlign: 'right', padding: '8px 10px', color: '#64748b' }}
@@ -620,7 +819,7 @@ export default function QcHygieneDashboardPage() {
                                     <span style={{ fontWeight: 500, color: '#64748b' }}> ({row.unite})</span>
                                   ) : null}
                                 </td>
-                                {current.map((m) => (
+                                {compareModels.map((m) => (
                                   <td
                                     key={m.accModelGuid}
                                     style={{ padding: '8px 10px', textAlign: 'right', color: '#0f172a' }}
@@ -633,33 +832,62 @@ export default function QcHygieneDashboardPage() {
                           </tbody>
                         </table>
                       </div>
-                      <div style={{ marginTop: 20 }}>
-                        <ResponsiveContainer width="100%" height={280}>
-                          <BarChart data={compareRows} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.25)" />
-                            <XAxis dataKey="libelle" stroke="#94a3b8" tick={{ fontSize: 10, fill: '#64748b' }} interval={0} />
-                            <YAxis stroke="#94a3b8" tick={{ fontSize: 11, fill: '#64748b' }} />
-                            <Tooltip
-                              contentStyle={{
-                                background: 'rgba(15, 23, 42, 0.95)',
-                                border: '1px solid rgba(148, 163, 184, 0.3)',
-                                borderRadius: 8,
-                                color: '#fff',
-                                fontSize: 12,
-                              }}
-                            />
-                            <Legend wrapperStyle={{ fontSize: 12 }} />
-                            {current.map((m) => (
-                              <Bar
-                                key={m.accModelGuid}
-                                dataKey={m.accModelGuid}
-                                name={modelLabel(m)}
-                                fill={colorByModel.get(String(m.accModelGuid).toLowerCase()) || VIOLET}
-                                radius={[4, 4, 0, 0]}
+                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 22 }}>
+                        {HYGIENE_CONTROLS.map((code) => {
+                          const unite = uniteOf(code, controls);
+                          const height = Math.max(120, compareModels.length * 40 + 48);
+                          if (code === 'G408') {
+                            const data = compareModels.map((m) => {
+                              const b = breakdownFor(m, compareBreakdown);
+                              return {
+                                name: modelLabel(m),
+                                critique: b?.critique ?? 0,
+                                faible: b?.faible ?? 0,
+                              };
+                            });
+                            return (
+                              <div key={code}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+                                  {libelleOf(code, controls)}
+                                  {unite ? <span style={{ fontWeight: 500, color: '#64748b' }}> ({unite})</span> : null}
+                                </div>
+                                <HorizontalCompareChart
+                                  data={data}
+                                  unite={unite}
+                                  height={height}
+                                  bars={[
+                                    { key: 'critique', name: 'Critiques', fill: '#b91c1c', stackId: 'g408' },
+                                    { key: 'faible', name: 'Faibles', fill: '#d97706', stackId: 'g408' },
+                                  ]}
+                                />
+                              </div>
+                            );
+                          }
+                          const data = compareModels.map((m) => {
+                            const v = m.values?.[code];
+                            return {
+                              name: modelLabel(m),
+                              valeur:
+                                v && v.etatExtraction !== 'echec' && v.valeurNum != null
+                                  ? Number(v.valeurNum)
+                                  : 0,
+                            };
+                          });
+                          return (
+                            <div key={code}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+                                {libelleOf(code, controls)}
+                                {unite ? <span style={{ fontWeight: 500, color: '#64748b' }}> ({unite})</span> : null}
+                              </div>
+                              <HorizontalCompareChart
+                                data={data}
+                                unite={unite}
+                                height={height}
+                                bars={[{ key: 'valeur', name: libelleOf(code, controls), fill: VIOLET }]}
                               />
-                            ))}
-                          </BarChart>
-                        </ResponsiveContainer>
+                            </div>
+                          );
+                        })}
                       </div>
                     </>
                   )}

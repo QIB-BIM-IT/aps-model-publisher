@@ -21,7 +21,7 @@
       "source": "meta",
       "forme": "egalite",
       "unite": "version",
-      "libelle": "Version du logiciel (écart PEB vs réel)",
+      "libelle": "Version du logiciel",
       "descriptionCible": {
         "typeWidget": "menu",
         "libelle": "Version Revit attendue (PEB)",
@@ -46,7 +46,7 @@
       "forme": "seuil",
       "sens": "max",
       "unite": "Mo",
-      "libelle": "Taille du fichier en Mo (storageSize DM / 1048576)",
+      "libelle": "Taille du fichier",
       "descriptionCible": {
         "typeWidget": "valeurNumerique",
         "libelle": "Seuil de taille du fichier",
@@ -97,7 +97,7 @@
       "forme": "comptage",
       "sens": "max",
       "unite": "variantes",
-      "libelle": "Variantes présentes (indicatif, jugement humain)",
+      "libelle": "Variantes présentes",
       "descriptionCible": {
         "typeWidget": "indicatif",
         "libelle": "Variantes présentes",
@@ -113,7 +113,7 @@
       "source": "modele",
       "forme": "presence",
       "champListe": "phases",
-      "libelle": "Phases du document (noms, liste ordonnée)",
+      "libelle": "Phases du document",
       "descriptionCible": {
         "typeWidget": "liste",
         "libelle": "Noms de phases attendus",
@@ -134,7 +134,7 @@
       "source": "modele",
       "forme": "sequence",
       "champListe": "phases",
-      "libelle": "Phases du document (ordre vs séquence de référence)",
+      "libelle": "Ordre des phases du document",
       "descriptionCible": {
         "typeWidget": "listeOrdonnee",
         "libelle": "Séquence de phases de référence",
@@ -227,7 +227,7 @@
       "source": "modele",
       "forme": "nommage",
       "champListe": "sousProjets",
-      "libelle": "Sous-projets utilisateur (préfixes autorisés, liste maison listePrefixes)",
+      "libelle": "Sous-projets utilisateur",
       "descriptionCible": {
         "typeWidget": "listePrefixes",
         "libelle": "Préfixes de sous-projets autorisés",
@@ -289,7 +289,7 @@
       "source": "modele",
       "forme": "etatReference",
       "unite": "fautifs",
-      "libelle": "Niveaux pinnés (état, pas nommage)",
+      "libelle": "Niveaux pinnés",
       "descriptionCible": {
         "typeWidget": "regleMaisonLectureSeule",
         "libelle": "Niveaux pinnés",
@@ -305,7 +305,7 @@
       "source": "modele",
       "forme": "etatReference",
       "unite": "fautifs",
-      "libelle": "Axes pinnés et dans la design option principale",
+      "libelle": "Axes pinnés et dans la variante principale",
       "descriptionCible": {
         "typeWidget": "texte",
         "libelle": "Nom de la variante des axes",
@@ -322,7 +322,7 @@
       "source": "modele",
       "forme": "etatReference",
       "unite": "fautifs",
-      "libelle": "Liens dans la design option principale",
+      "libelle": "Liens dans la variante principale",
       "descriptionCible": {
         "typeWidget": "texte",
         "libelle": "Nom de la variante des liens",
@@ -364,7 +364,7 @@
       "source": "modele",
       "forme": "infosProjet",
       "champListe": "champsRenseignes",
-      "libelle": "Informations projet (valeurs ProjectInfo vs attendues)",
+      "libelle": "Informations du projet",
       "descriptionCible": {
         "typeWidget": "table",
         "libelle": "Champs projet à valider",
@@ -438,7 +438,7 @@
       "forme": "coordonnees",
       "champObjet": "surveyPoint",
       "unite": "metres",
-      "libelle": "Géoréférencement (survey point vs PEB)",
+      "libelle": "Géoréférencement",
       "descriptionCible": {
         "typeWidget": "coordonnees",
         "libelle": "Coordonnées attendues du survey point",
@@ -482,7 +482,7 @@
       "source": "modele",
       "forme": "angle",
       "unite": "degres",
-      "libelle": "Angle du nord projet (orientation vs valeur attendue PEB)",
+      "libelle": "Angle du nord projet",
       "descriptionCible": {
         "typeWidget": "angle",
         "libelle": "Angle du nord projet attendu",
@@ -510,7 +510,7 @@
       "source": "modele",
       "forme": "couverture",
       "unite": "pourcentage",
-      "libelle": "Couverture de codification UNIFORMAT (types/instances de design avec code)",
+      "libelle": "Couverture de codification UNIFORMAT",
       "descriptionCible": {
         "typeWidget": "parametreUniformat",
         "libelle": "Codification UNIFORMAT",
@@ -599,7 +599,7 @@
       "source": "modele",
       "forme": "remplissage",
       "unite": "pourcentage",
-      "libelle": "Taux de remplissage des paramètres d'exploitation (7D, liste par projet)",
+      "libelle": "Taux de remplissage des paramètres d’exploitation",
       "descriptionCible": {
         "typeWidget": "table",
         "libelle": "Paramètres d’exploitation à vérifier",
@@ -632,7 +632,7 @@
       "source": "modele",
       "forme": "copieControle",
       "unite": "pourcentage",
-      "libelle": "Copie-contrôle des axes et niveaux (présence de monitoring)",
+      "libelle": "Copie-contrôle des axes et niveaux",
       "descriptionCible": {
         "typeWidget": "regleMaisonLectureSeule",
         "libelle": "Copie-contrôle axes et niveaux",
@@ -659,7 +659,7 @@
       "forme": "pourcentage",
       "sens": "min",
       "unite": "pourcentage",
-      "libelle": "Rattachement au niveau (plages d'étages + paramètres natifs, MEP+structure)",
+      "libelle": "Rattachement au niveau",
       "descriptionCible": {
         "typeWidget": "indicatif",
         "libelle": "Rattachement au niveau",
@@ -675,7 +675,7 @@
       "source": "modele",
       "forme": "hygieneModele",
       "unite": "groupes-instance-unique",
-      "libelle": "Hygiène du modèle (familles in place + groupes à instance unique)",
+      "libelle": "Hygiène du modèle",
       "descriptionCible": {
         "typeWidget": "regleMaisonLectureSeule",
         "libelle": "Hygiène du modèle",
