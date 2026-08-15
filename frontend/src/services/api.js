@@ -395,6 +395,28 @@ export async function fetchQcRuns(params = {}) {
   return Array.isArray(data?.runs) ? data.runs : [];
 }
 
+/** GET /api/qc/projects/:projectId/dashboard — état actuel + séries (liste de contrôles). */
+export async function fetchQcProjectDashboard(projectId, params = {}) {
+  try {
+    const { data } = await api.get(
+      `/api/qc/projects/${encodeURIComponent(projectId)}/dashboard`,
+      { params }
+    );
+    if (!data?.success) {
+      throw new Error(data?.message || 'Échec chargement du tableau de bord QC');
+    }
+    return data.data;
+  } catch (err) {
+    const message =
+      err?.response?.data?.message ||
+      err?.message ||
+      'Erreur chargement du tableau de bord QC';
+    const error = new Error(message);
+    if (err?.response?.status) error.status = err.response.status;
+    throw error;
+  }
+}
+
 /** GET /api/qc/projects/:projectId/elements — état actuel (derniers runs réussis). */
 export async function fetchQcProjectDesignatedElements(projectId, params = {}) {
   try {

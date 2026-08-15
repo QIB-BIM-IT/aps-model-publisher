@@ -2629,6 +2629,30 @@ export default function PlanningPage() {
                     >
                       Éléments désignés
                     </Button>
+                    <Button
+                      type="button"
+                      onClick={() =>
+                        navigate(
+                          `/qc-dashboard/${encodeURIComponent(selectedProject)}/hygiene`,
+                          {
+                            state: {
+                              preSelectHub: selectedHub,
+                              preSelectProject: selectedProject,
+                            },
+                          }
+                        )
+                      }
+                      style={{
+                        padding: '10px 16px',
+                        width: '100%',
+                        background: 'transparent',
+                        color: '#6d28d9',
+                        border: '1px solid rgba(124, 58, 237, 0.45)',
+                        boxShadow: 'none',
+                      }}
+                    >
+                      Hygiène et santé du modèle
+                    </Button>
                   </div>
                 ) : null}
               </div>
