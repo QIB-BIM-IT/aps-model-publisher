@@ -13,6 +13,7 @@
 //  - GET  /api/qc/runs/:id/viewer       (auth JWT) URN version auditée + état de traduction
 //  - GET  /api/qc/runs/:id/elements (auth JWT) éléments désignés paginés / filtrables
 //  - GET  /api/qc/projects/:projectKey/elements (auth JWT) état actuel projet (derniers runs réussis)
+//  - GET  /api/qc/projects/:projectKey/dashboard (auth JWT) agrégation tableau de bord (liste de contrôles)
 //  - POST /api/qc/da-callback    (jeton HMAC dans l'URL) complétion onComplete de DA
 //  - GET  /api/qc/controls/cible-descriptions  (auth JWT) catalogue formulaire (lot 1)
 //  - GET  /api/qc/projects/:projectKey/config  (auth JWT) lecture config projet
@@ -271,6 +272,32 @@ router.get('/projects/:projectKey/elements', authenticateToken, async (req, res)
     const status = err.statusCode || 500;
     if (status >= 500) logger.error(`[QC] GET /projects/:projectKey/elements: ${err.message}`);
     else logger.warn(`[QC] GET /projects/:projectKey/elements: ${err.message}`);
+    return res.status(status).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * GET /api/qc/projects/:projectKey/dashboard
+ * Agrégation en lecture seule : état actuel (dernier run réussi / maquette),
+ * séries temporelles (tous les runs réussis) et répartition G408 par criticité.
+ * Query : controls=G408,G412,… (obligatoire pour des valeurs) & accModelGuid= (optionnel).
+ * projectKey = b.<guid> OU GUID ACC (resolvePrefixedProjectId). Projet / maquette
+ * sans donnée → payload vide, HTTP 200.
+ */
+router.get('/projects/:projectKey/dashboard', authenticateToken, async (req, res) => {
+  if (!qcRunService.isReady()) return notReady(res);
+  try {
+    const qcDashboardService = require('../services/qcDashboard.service');
+    const data = await qcDashboardService.getDashboard({
+      projectKey: req.params.projectKey,
+      controlsRaw: req.query.controls,
+      accModelGuid: req.query.accModelGuid,
+    });
+    return res.json({ success: true, data });
+  } catch (err) {
+    const status = err.statusCode || 500;
+    if (status >= 500) logger.error(`[QC] GET /projects/:projectKey/dashboard: ${err.message}`);
+    else logger.warn(`[QC] GET /projects/:projectKey/dashboard: ${err.message}`);
     return res.status(status).json({ success: false, message: err.message });
   }
 });

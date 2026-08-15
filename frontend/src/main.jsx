@@ -11,6 +11,7 @@ import QcConfigPage from './pages/QcConfigPage.jsx';
 import QcRunResultsPage from './pages/QcRunResultsPage.jsx';
 import QcRunElementsPage from './pages/QcRunElementsPage.jsx';
 import QcProjectElementsPage from './pages/QcProjectElementsPage.jsx';
+import QcHygieneDashboardPage from './pages/QcHygieneDashboardPage.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 function Root() {
@@ -83,6 +84,14 @@ function Root() {
             element={
               <ProtectedRoute>
                 <QcProjectElementsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="qc-dashboard/:projectId/hygiene"
+            element={
+              <ProtectedRoute>
+                <QcHygieneDashboardPage />
               </ProtectedRoute>
             }
           />
