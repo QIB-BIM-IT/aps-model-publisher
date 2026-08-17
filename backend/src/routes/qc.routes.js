@@ -278,8 +278,9 @@ router.get('/projects/:projectKey/elements', authenticateToken, async (req, res)
 
 /**
  * GET /api/qc/projects/:projectKey/dashboard
- * Agrégation en lecture seule : état actuel (dernier run réussi / maquette),
- * séries temporelles (tous les runs réussis) et répartition G408 par criticité.
+ * Agrégation en lecture seule : état actuel (dernier run réussi / maquette,
+ * avec statut du scoring, delta face à la version ACC précédente et tendance
+ * courte), séries temporelles et répartition G408 par criticité.
  * Query : controls=G408,G412,… (obligatoire pour des valeurs) & accModelGuid= (optionnel).
  * projectKey = b.<guid> OU GUID ACC (resolvePrefixedProjectId). Projet / maquette
  * sans donnée → payload vide, HTTP 200.
