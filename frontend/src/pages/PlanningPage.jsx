@@ -33,6 +33,7 @@ import api, {
   deleteQcJob,
 } from '../services/api';
 import { PDFExportModal } from '../components/PDFExportModal';
+import { qcDashboardPath } from '../components/qc-config/qcDashboardNav';
 
 // Helpers
 function nameOf(node, fall = '') {
@@ -2633,7 +2634,7 @@ export default function PlanningPage() {
                       type="button"
                       onClick={() =>
                         navigate(
-                          `/qc-dashboard/${encodeURIComponent(selectedProject)}/hygiene`,
+                          qcDashboardPath(selectedProject),
                           {
                             state: {
                               preSelectHub: selectedHub,
@@ -2651,7 +2652,7 @@ export default function PlanningPage() {
                         boxShadow: 'none',
                       }}
                     >
-                      Hygiène et santé du modèle
+                      Tableau de bord QC
                     </Button>
                   </div>
                 ) : null}

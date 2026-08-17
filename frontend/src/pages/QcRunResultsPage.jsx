@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { fetchQcRunDetail, downloadQcRunFiche } from '../services/api';
 import { labelBuiltinCategoryFr } from '../components/qc-config/builtinCategoryLabelsFr';
 import {
@@ -13,6 +13,10 @@ import {
   sectionKeyFromCode,
   controlNum,
 } from '../components/qc-config/qcTheme';
+import {
+  qcDashboardOriginFromState,
+  qcDashboardReturnPath,
+} from '../components/qc-config/qcDashboardNav';
 
 const VIOLET = '#7c3aed';
 const VIOLET_DARK = '#6d28d9';
@@ -550,7 +554,7 @@ function SummaryPill({ label, value, tone }) {
   );
 }
 
-function ControlRow({ result, runId }) {
+function ControlRow({ result, runId, navState }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ligne = valeurReleveeLigne(result);
@@ -610,7 +614,8 @@ function ControlRow({ result, runId }) {
               type="button"
               onClick={() =>
                 navigate(
-                  `/qc-run/${encodeURIComponent(runId)}/elements?controlCode=${encodeURIComponent(result.controlCode)}`
+                  `/qc-run/${encodeURIComponent(runId)}/elements?controlCode=${encodeURIComponent(result.controlCode)}`,
+                  navState ? { state: navState } : undefined
                 )
               }
               style={{
@@ -637,6 +642,7 @@ function ControlRow({ result, runId }) {
 export default function QcRunResultsPage() {
   const { runId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
@@ -694,6 +700,22 @@ export default function QcRunResultsPage() {
     });
   }
 
+  const dashboardOrigin = qcDashboardOriginFromState(location.state);
+  const dashboardReturnPath = qcDashboardReturnPath(
+    dashboardOrigin,
+    dashboardOrigin?.preSelectProject || run?.projectId
+  );
+
+  function goBackToDashboard() {
+    if (!dashboardReturnPath) return;
+    navigate(dashboardReturnPath, {
+      state: {
+        preSelectHub: dashboardOrigin.preSelectHub || run?.hubId || null,
+        preSelectProject: dashboardOrigin.preSelectProject || run?.projectId,
+      },
+    });
+  }
+
   async function handleDownloadFiche() {
     if (!runId || ficheLoading) return;
     setFicheLoading(true);
@@ -719,6 +741,11 @@ export default function QcRunResultsPage() {
     <div style={pageShell}>
       <div style={{ ...pageInner, maxWidth: 960 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
+          {dashboardReturnPath ? (
+            <button type="button" onClick={goBackToDashboard} style={{ ...btnSecondary }}>
+              ← Retour au tableau de bord QC
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={goBackToPlanning}
@@ -883,7 +910,7 @@ export default function QcRunResultsPage() {
                   {SECTION_TITLES[key] || items[0]?.section || `Section ${key}`}
                 </h2>
                 {items.map((r) => (
-                  <ControlRow key={r.id || r.controlCode} result={r} runId={runId} />
+                  <ControlRow key={r.id || r.controlCode} result={r} runId={runId} navState={location.state} />
                 ))}
               </div>
             ))}

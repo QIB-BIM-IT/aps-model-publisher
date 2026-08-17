@@ -8,6 +8,10 @@ import {
   notFoundMessage,
   sameAccModel,
 } from '../components/qcViewerIsolation';
+import {
+  qcDashboardOriginFromState,
+  qcDashboardReturnPath,
+} from '../components/qc-config/qcDashboardNav';
 
 const VIOLET = '#7c3aed';
 const VIOLET_DARK = '#6d28d9';
@@ -323,6 +327,22 @@ export default function QcProjectElementsPage() {
     });
   }
 
+  const dashboardOrigin = qcDashboardOriginFromState(location.state);
+  const dashboardReturnPath = qcDashboardReturnPath(
+    dashboardOrigin,
+    dashboardOrigin?.preSelectProject || project?.projectId || projectId
+  );
+
+  function goBackToDashboard() {
+    if (!dashboardReturnPath) return;
+    navigate(dashboardReturnPath, {
+      state: {
+        preSelectHub: dashboardOrigin.preSelectHub || project?.hubId || null,
+        preSelectProject: dashboardOrigin.preSelectProject || project?.projectId || projectId,
+      },
+    });
+  }
+
   async function copyText(text, scopeLabel) {
     try {
       await navigator.clipboard.writeText(text);
@@ -521,6 +541,11 @@ export default function QcProjectElementsPage() {
     <div style={pageShell}>
       <div style={{ ...pageInner, maxWidth: viewerOpen ? 1680 : 1280 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
+          {dashboardReturnPath ? (
+            <button type="button" onClick={goBackToDashboard} style={btnSecondary}>
+              ← Retour au tableau de bord QC
+            </button>
+          ) : null}
           <button type="button" onClick={goBackToPlanning} style={btnSecondary}>
             ← Retour à la planification
           </button>
@@ -902,7 +927,9 @@ export default function QcProjectElementsPage() {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              navigate(`/qc-run/${encodeURIComponent(row.runId)}`);
+                              navigate(`/qc-run/${encodeURIComponent(row.runId)}`, {
+                                state: location.state || undefined,
+                              });
                             }}
                             style={{
                               background: 'none',
