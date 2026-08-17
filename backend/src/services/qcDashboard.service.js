@@ -21,6 +21,7 @@ function emptyPayload(project = null, controls = [], models = []) {
     models,
     current: [],
     series: [],
+    seriesByVersion: [],
     warningBreakdown: [],
   };
 }
@@ -289,24 +290,54 @@ class QcDashboardService {
       modelsInHistory.push(key);
     }
 
+    function pointFromRun(h, code) {
+      const row = byRunCode.get(`${h.runId}|${code}`);
+      const failed = row?.etatExtraction === 'echec';
+      return {
+        runId: h.runId,
+        at: h.endedAtUtc || h.startedAtUtc,
+        modelVersion: h.modelVersion,
+        valeurNum: failed || !row ? null : valeurNumSuivie(code, row),
+        etatExtraction: row?.etatExtraction || null,
+        runCount: 1,
+      };
+    }
+
+    function pointsByVersion(runs, code) {
+      const groups = new Map();
+      for (const h of runs) {
+        const key = h.modelVersion == null ? '∅' : String(h.modelVersion);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(h);
+      }
+      const points = [];
+      for (const group of groups.values()) {
+        const last = group[group.length - 1];
+        points.push({
+          ...pointFromRun(last, code),
+          runCount: group.length,
+        });
+      }
+      points.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+      return points;
+    }
+
+    const seriesByVersion = [];
     for (const modelGuid of modelsInHistory) {
       const runs = history.filter((h) => String(h.accModelGuid).toLowerCase() === modelGuid);
+      const modelName = nameByModel.get(modelGuid) || null;
       for (const code of codes) {
         series.push({
           accModelGuid: modelGuid,
-          modelName: nameByModel.get(modelGuid) || null,
+          modelName,
           controlCode: code,
-          points: runs.map((h) => {
-            const row = byRunCode.get(`${h.runId}|${code}`);
-            const failed = row?.etatExtraction === 'echec';
-            return {
-              runId: h.runId,
-              at: h.endedAtUtc || h.startedAtUtc,
-              modelVersion: h.modelVersion,
-              valeurNum: failed || !row ? null : valeurNumSuivie(code, row),
-              etatExtraction: row?.etatExtraction || null,
-            };
-          }),
+          points: runs.map((h) => pointFromRun(h, code)),
+        });
+        seriesByVersion.push({
+          accModelGuid: modelGuid,
+          modelName,
+          controlCode: code,
+          points: pointsByVersion(runs, code),
         });
       }
     }
@@ -324,6 +355,7 @@ class QcDashboardService {
       models: allModels,
       current,
       series,
+      seriesByVersion,
       warningBreakdown,
     };
   }
