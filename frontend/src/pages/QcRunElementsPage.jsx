@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { fetchQcRunDesignatedElements } from '../services/api';
 import { pageShell, pageInner, card, btnSecondary, errorBanner } from '../components/qc-config/qcTheme';
+import {
+  qcDashboardOriginFromState,
+  qcDashboardReturnPath,
+} from '../components/qc-config/qcDashboardNav';
 import QcRunViewerPane from '../components/QcRunViewerPane';
 import { isolationUnavailableMessage, notFoundMessage } from '../components/qcViewerIsolation';
 
@@ -181,6 +185,7 @@ const tdStyle = {
 export default function QcRunElementsPage() {
   const { runId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const controlCode = searchParams.get('controlCode') || '';
 
@@ -252,6 +257,11 @@ export default function QcRunElementsPage() {
   }, [load]);
 
   const run = payload?.run;
+  const dashboardOrigin = qcDashboardOriginFromState(location.state);
+  const dashboardReturnPath = qcDashboardReturnPath(
+    dashboardOrigin,
+    dashboardOrigin?.preSelectProject || run?.projectId
+  );
   const items = payload?.items || [];
   const total = payload?.total ?? 0;
   const pageCount = payload?.pageCount ?? 0;
@@ -417,7 +427,29 @@ export default function QcRunElementsPage() {
     <div style={pageShell}>
       <div style={{ ...pageInner, maxWidth: viewerOpen ? 1680 : 1280 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
-          <button type="button" onClick={() => navigate(`/qc-run/${runId}`)} style={btnSecondary}>
+          {dashboardReturnPath ? (
+            <button
+              type="button"
+              onClick={() =>
+                navigate(dashboardReturnPath, {
+                  state: {
+                    preSelectHub: dashboardOrigin.preSelectHub || run?.hubId || null,
+                    preSelectProject: dashboardOrigin.preSelectProject || run?.projectId,
+                  },
+                })
+              }
+              style={btnSecondary}
+            >
+              ← Retour au tableau de bord QC
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() =>
+              navigate(`/qc-run/${runId}`, location.state ? { state: location.state } : undefined)
+            }
+            style={btnSecondary}
+          >
             ← Retour au détail du run
           </button>
           {run?.projectId && (
@@ -426,8 +458,17 @@ export default function QcRunElementsPage() {
               onClick={() =>
                 navigate(`/qc-project/${encodeURIComponent(run.projectId)}/elements`, {
                   state: {
-                    preSelectHub: run.hubId || null,
+                    preSelectHub: run.hubId || location.state?.preSelectHub || null,
                     preSelectProject: run.projectId,
+                    ...(dashboardOrigin
+                      ? {
+                          qcDashboardTheme: dashboardOrigin.theme,
+                          qcDashboardAccModelGuid: dashboardOrigin.accModelGuid,
+                          ...(dashboardOrigin.series === 'run'
+                            ? { qcDashboardSeries: 'run' }
+                            : {}),
+                        }
+                      : {}),
                   },
                 })
               }

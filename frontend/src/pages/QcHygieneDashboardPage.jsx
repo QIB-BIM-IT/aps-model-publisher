@@ -14,6 +14,12 @@ import {
 } from 'recharts';
 import { fetchQcProjectDashboard } from '../services/api';
 import { btnSecondary, card, errorBanner, pageInner, pageShell } from '../components/qc-config/qcTheme';
+import {
+  QC_DASHBOARD_THEMES,
+  qcDashboardPath,
+  resolveQcDashboardTheme,
+  withQcDashboardOrigin,
+} from '../components/qc-config/qcDashboardNav';
 
 const VIOLET = '#7c3aed';
 const VIOLET_DARK = '#6d28d9';
@@ -217,7 +223,7 @@ function HorizontalCompareChart({ data, bars, unite, height }) {
   );
 }
 
-function KpiCard({ control, model, breakdown, projectId }) {
+function KpiCard({ control, model, breakdown, projectId, linkState }) {
   const code = control.code;
   const value = model.values?.[code] || null;
   const href = detailHref(code, model.runId);
@@ -306,6 +312,7 @@ function KpiCard({ control, model, breakdown, projectId }) {
         {href ? (
           <Link
             to={href}
+            state={linkState}
             style={{ fontSize: 12, fontWeight: 600, color: VIOLET_DARK, textDecoration: 'none' }}
           >
             Voir le détail →
@@ -314,6 +321,7 @@ function KpiCard({ control, model, breakdown, projectId }) {
         {projectId && (code === 'G412' || code === 'G411' || code === 'G402' || code === 'G410') ? (
           <Link
             to={`/qc-project/${encodeURIComponent(projectId)}/elements?controlCode=${encodeURIComponent(code)}&accModelGuid=${encodeURIComponent(model.accModelGuid)}`}
+            state={linkState}
             style={{ fontSize: 12, color: '#64748b', textDecoration: 'none' }}
           >
             Éléments désignés
@@ -325,13 +333,15 @@ function KpiCard({ control, model, breakdown, projectId }) {
 }
 
 export default function QcHygieneDashboardPage() {
-  const { projectId } = useParams();
+  const { projectId, theme: themeParam } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const accModelGuid = searchParams.get('accModelGuid') || '';
   const seriesMode = searchParams.get('series') === 'run' ? 'run' : 'version';
   const previewCompare = searchParams.get('apercuComparaison') === '1';
+  const theme = resolveQcDashboardTheme(themeParam);
+  const themeMeta = QC_DASHBOARD_THEMES.find((t) => t.id === theme);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -358,6 +368,15 @@ export default function QcHygieneDashboardPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    if (themeParam === theme) return;
+    navigate(qcDashboardPath(projectId, theme) + location.search, {
+      replace: true,
+      state: location.state,
+    });
+  }, [projectId, theme, themeParam, location.search, location.state, navigate]);
 
   const project = payload?.project;
   const controls = payload?.controls || [];
@@ -418,6 +437,21 @@ export default function QcHygieneDashboardPage() {
       },
     });
   }
+
+  function goToTheme(nextTheme) {
+    if (!projectId || nextTheme === theme) return;
+    navigate(qcDashboardPath(projectId, nextTheme) + location.search, {
+      state: location.state,
+    });
+  }
+
+  const detailLinkState = withQcDashboardOrigin(
+    {
+      preSelectHub: location.state?.preSelectHub || project?.hubId || null,
+      preSelectProject: location.state?.preSelectProject || project?.projectId || projectId,
+    },
+    { theme, accModelGuid, series: seriesMode }
+  );
 
   const chartsByControl = useMemo(() => {
     return HYGIENE_CONTROLS.map((code) => {
@@ -553,13 +587,59 @@ export default function QcHygieneDashboardPage() {
             WebkitTextFillColor: 'transparent',
           }}
         >
-          Hygiène et santé du modèle
+          Tableau de bord QC
         </h1>
-        <p style={{ margin: '0 0 20px', fontSize: 14, color: '#94a3b8', lineHeight: 1.5, maxWidth: 820 }}>
-          État actuel du projet (dernier contrôle réussi de chaque maquette), évolution dans le temps
-          et comparaison entre maquettes. Les dates comptent : les maquettes d’un même projet ne sont
-          pas nécessairement contrôlées le même jour.
+        <p style={{ margin: '0 0 16px', fontSize: 14, color: '#94a3b8', lineHeight: 1.5, maxWidth: 820 }}>
+          Suivi de la qualité des maquettes du projet. Le thème actif décrit un regroupement de
+          contrôles ; d’autres thèmes arriveront ensuite.
         </p>
+
+        <div
+          role="tablist"
+          aria-label="Thèmes du tableau de bord"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 8,
+            marginBottom: 20,
+          }}
+        >
+          {QC_DASHBOARD_THEMES.map((t) => {
+            const active = t.id === theme;
+            const clickable = t.available;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                disabled={!clickable}
+                onClick={() => clickable && goToTheme(t.id)}
+                title={clickable ? t.label : `${t.label} — à venir`}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 999,
+                  fontSize: 13,
+                  fontWeight: active ? 700 : 600,
+                  cursor: clickable ? 'pointer' : 'default',
+                  border: active
+                    ? `1px solid ${VIOLET}`
+                    : '1px solid rgba(148, 163, 184, 0.35)',
+                  background: active ? 'rgba(124, 58, 237, 0.12)' : 'transparent',
+                  color: !clickable ? '#64748b' : active ? VIOLET_DARK : '#cbd5e1',
+                  opacity: clickable ? 1 : 0.7,
+                }}
+              >
+                {t.label}
+                {!clickable ? (
+                  <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: '#94a3b8' }}>
+                    à venir
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
 
         {loading && (
           <div style={{ ...card, color: '#64748b' }}>Chargement de l’état du projet…</div>
@@ -584,6 +664,9 @@ export default function QcHygieneDashboardPage() {
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
                     {project?.projectName || 'Projet'}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
+                    {themeMeta?.label || 'Hygiène et santé du modèle'}
                   </div>
                 </div>
                 <label style={{ minWidth: 260, flex: '1 1 260px' }}>
@@ -667,6 +750,7 @@ export default function QcHygieneDashboardPage() {
                             model={model}
                             breakdown={breakdownFor(model, warningBreakdown)}
                             projectId={project?.projectId || projectId}
+                            linkState={detailLinkState}
                           />
                         ))}
                       </div>

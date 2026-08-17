@@ -88,7 +88,15 @@ function Root() {
             }
           />
           <Route
-            path="qc-dashboard/:projectId/hygiene"
+            path="qc-dashboard/:projectId"
+            element={
+              <ProtectedRoute>
+                <QcHygieneDashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="qc-dashboard/:projectId/:theme"
             element={
               <ProtectedRoute>
                 <QcHygieneDashboardPage />
