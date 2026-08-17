@@ -223,6 +223,134 @@ function HorizontalCompareChart({ data, bars, unite, height }) {
   );
 }
 
+function formatPercent(rel) {
+  if (rel == null || !Number.isFinite(Number(rel))) return null;
+  return new Intl.NumberFormat('fr-CA', {
+    style: 'percent',
+    maximumFractionDigits: Math.abs(rel) < 0.01 ? 2 : 1,
+  }).format(rel);
+}
+
+function MiniTrend({ points }) {
+  const numeric = (points || []).filter(
+    (p) => p.valeurNum != null && Number.isFinite(Number(p.valeurNum))
+  );
+  if (!numeric.length) return null;
+  const w = 88;
+  const h = 28;
+  const pad = 3;
+  if (numeric.length === 1) {
+    return (
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
+        <circle cx={w / 2} cy={h / 2} r={3} fill="#64748b" />
+      </svg>
+    );
+  }
+  const vals = numeric.map((p) => Number(p.valeurNum));
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const span = max - min || 1;
+  const coords = vals.map((v, i) => {
+    const x = pad + (i / (vals.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v - min) / span) * (h - pad * 2);
+    return [x, y];
+  });
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
+      <polyline
+        fill="none"
+        stroke="#64748b"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        points={coords.map(([x, y]) => `${x},${y}`).join(' ')}
+      />
+      {coords.map(([x, y], i) => (
+        <circle
+          key={`${x}-${y}-${i}`}
+          cx={x}
+          cy={y}
+          r={i === coords.length - 1 ? 2.4 : 1.5}
+          fill="#475569"
+        />
+      ))}
+    </svg>
+  );
+}
+
+function VerdictBadge({ value }) {
+  if (!value || value.etatExtraction === 'echec') return null;
+  let label = 'Indicatif';
+  let style = {
+    background: 'rgba(148, 163, 184, 0.16)',
+    color: '#475569',
+    border: '1px solid rgba(148, 163, 184, 0.35)',
+  };
+  if (value.statut === 'conforme') {
+    label = 'Conforme';
+    style = {
+      background: 'rgba(22, 163, 74, 0.1)',
+      color: '#15803d',
+      border: '1px solid rgba(22, 163, 74, 0.28)',
+    };
+  } else if (value.statut === 'non_conforme') {
+    label = 'Non conforme';
+    style = {
+      background: 'rgba(220, 38, 38, 0.1)',
+      color: '#b91c1c',
+      border: '1px solid rgba(220, 38, 38, 0.28)',
+    };
+  }
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: 0.02,
+        padding: '3px 8px',
+        borderRadius: 999,
+        ...style,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function DeltaLine({ delta, unite }) {
+  if (!delta) return null;
+  const muted = { marginTop: 8, fontSize: 12, color: '#475569', lineHeight: 1.4 };
+  if (delta.reason === 'extraction_failed') return null;
+  if (delta.reason === 'no_previous_version') {
+    return (
+      <div style={muted}>Premier contrôle de cette maquette — aucune version antérieure à comparer.</div>
+    );
+  }
+  if (delta.reason === 'no_numeric' || !delta.available) {
+    const prev = delta.previousVersion != null ? versionLabel(delta.previousVersion) : null;
+    return (
+      <div style={muted}>
+        {prev
+          ? `Pas de comparaison chiffrée avec la ${prev}.`
+          : 'Pas de comparaison chiffrée avec la version précédente.'}
+      </div>
+    );
+  }
+  const vs = `depuis la ${versionLabel(delta.previousVersion)} (${formatDateShort(delta.previousAt)})`;
+  if (delta.abs === 0) {
+    return <div style={muted}>Inchangé {vs}</div>;
+  }
+  const sens = delta.abs > 0 ? 'en hausse' : 'en baisse';
+  const pct = formatPercent(delta.rel);
+  return (
+    <div style={muted}>
+      {sens} de {formatNumber(Math.abs(delta.abs))}
+      {unite ? ` ${unite}` : ''} {vs}
+      {pct ? ` · ${pct}` : ''}
+    </div>
+  );
+}
+
 function KpiCard({ control, model, breakdown, projectId, linkState }) {
   const code = control.code;
   const value = model.values?.[code] || null;
@@ -234,7 +362,11 @@ function KpiCard({ control, model, breakdown, projectId, linkState }) {
 
   let body;
   if (failed) {
-    body = <div style={{ fontSize: 14, color: '#b45309' }}>Relevé indisponible</div>;
+    body = (
+      <div style={{ fontSize: 14, color: '#b45309' }}>
+        Relevé indisponible — aucun verdict, aucune comparaison.
+      </div>
+    );
   } else if (missing || value.valeurNum == null) {
     body = <div style={{ fontSize: 14, color: '#64748b' }}>Pas de donnée chiffrée</div>;
   } else if (code === 'G408') {
@@ -297,18 +429,35 @@ function KpiCard({ control, model, breakdown, projectId, linkState }) {
   return (
     <div
       style={{
-        border: code === 'G408' ? `1px solid rgba(124, 58, 237, 0.35)` : '1px solid rgba(148, 163, 184, 0.25)',
+        border: '1px solid rgba(148, 163, 184, 0.25)',
         borderRadius: 12,
         padding: 16,
-        background: code === 'G408' ? 'rgba(124, 58, 237, 0.04)' : 'rgba(248, 250, 252, 0.9)',
+        background: 'rgba(248, 250, 252, 0.9)',
         minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
-      <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 8, lineHeight: 1.35 }}>
-        {control.libelle}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
+          {control.libelle}
+        </div>
+        <VerdictBadge value={value} />
       </div>
       {body}
-      <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+      {!failed ? <DeltaLine delta={value?.delta} unite={unite} /> : null}
+      <div style={{ marginTop: 10 }}>
+        <MiniTrend points={value?.trend} />
+      </div>
+      <div style={{ marginTop: 'auto', paddingTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         {href ? (
           <Link
             to={href}
@@ -328,6 +477,90 @@ function KpiCard({ control, model, breakdown, projectId, linkState }) {
           </Link>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function WhatChangedSection({ current, controls }) {
+  if (!current.length) return null;
+  return (
+    <div style={card}>
+      <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
+        Ce qui a changé
+      </h2>
+      <p style={{ margin: '0 0 16px', fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
+        Mouvements depuis la version ACC précédente, pas depuis le dernier run. Ce sont des faits,
+        pas un jugement.
+      </p>
+      {current.map((model) => {
+        const moved = [];
+        const stable = [];
+        let noPrevious = 0;
+        for (const control of controls) {
+          const value = model.values?.[control.code];
+          const delta = value?.delta;
+          if (!delta || delta.reason === 'extraction_failed') continue;
+          if (delta.reason === 'no_previous_version') {
+            noPrevious += 1;
+            continue;
+          }
+          if (!delta.available || delta.abs == null) continue;
+          const item = {
+            control,
+            delta,
+            unite: uniteLabel(control.unite),
+            currentN: value?.valeurNum,
+          };
+          if (delta.abs === 0) stable.push(item);
+          else moved.push(item);
+        }
+        const onlyFirstVersion = noPrevious === controls.length && !moved.length && !stable.length;
+        return (
+          <div key={model.runId} style={{ marginBottom: current.length > 1 ? 18 : 0 }}>
+            {current.length > 1 ? (
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#334155', marginBottom: 8 }}>
+                {modelLabel(model)}
+              </div>
+            ) : null}
+            {onlyFirstVersion ? (
+              <div style={{ fontSize: 14, color: '#475569', lineHeight: 1.5 }}>
+                Premier contrôle de cette maquette — aucune version antérieure à comparer.
+              </div>
+            ) : (
+              <>
+                {moved.length ? (
+                  <ul style={{ margin: 0, paddingLeft: 18, color: '#0f172a', fontSize: 14, lineHeight: 1.55 }}>
+                    {moved.map(({ control, delta, unite, currentN }) => (
+                      <li key={control.code} style={{ marginBottom: 6 }}>
+                        <strong>{control.libelle}</strong>
+                        {' : '}
+                        {formatNumber(delta.previousValeurNum)}
+                        {' → '}
+                        {formatNumber(currentN)}
+                        {unite ? ` ${unite}` : ''}
+                        {' ('}
+                        {versionLabel(delta.previousVersion)}
+                        {' → '}
+                        {versionLabel(delta.currentVersion)}
+                        {')'}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div style={{ fontSize: 14, color: '#475569' }}>
+                    Aucune grandeur n’a bougé depuis la version ACC précédente.
+                  </div>
+                )}
+                {stable.length ? (
+                  <div style={{ marginTop: 8, fontSize: 13, color: '#64748b' }}>
+                    Inchangés : {stable.map((s) => s.control.libelle).join(', ')}.
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -723,8 +956,9 @@ export default function QcHygieneDashboardPage() {
                     État actuel
                   </h2>
                   <p style={{ margin: '0 0 18px', fontSize: 13, color: '#64748b' }}>
-                    Grandeurs relevées sur le dernier run réussi. Un avertissement critique n’a pas le
-                    même poids qu’un avertissement faible.
+                    Grandeurs relevées sur le dernier run réussi. Le verdict vient du scoring du
+                    projet ; sans cible, le contrôle reste indicatif. Un avertissement critique n’a
+                    pas le même poids qu’un avertissement faible.
                   </p>
                   {current.map((model) => (
                     <div key={model.runId} style={{ marginBottom: current.length > 1 ? 22 : 0 }}>
@@ -739,7 +973,7 @@ export default function QcHygieneDashboardPage() {
                       <div
                         style={{
                           display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
                           gap: 12,
                         }}
                       >
@@ -757,6 +991,8 @@ export default function QcHygieneDashboardPage() {
                     </div>
                   ))}
                 </div>
+
+                <WhatChangedSection current={current} controls={controls} />
 
                 <div style={card}>
                   <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#0f172a' }}>

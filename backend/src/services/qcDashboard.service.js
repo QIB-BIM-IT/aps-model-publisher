@@ -99,7 +99,14 @@ function extrasFromSlim(code, json) {
 }
 
 function valuePayload(row, code) {
-  if (!row) return null;
+  if (!row) {
+    return {
+      valeurNum: null,
+      etatExtraction: null,
+      statut: null,
+      extras: null,
+    };
+  }
   const failed = row.etatExtraction === 'echec';
   return {
     valeurNum: failed ? null : valeurNumSuivie(code, row),
@@ -107,6 +114,76 @@ function valuePayload(row, code) {
     statut: failed ? null : row.statut || null,
     extras: failed ? null : extrasFromSlim(code, row.valeurJsonSlim),
   };
+}
+
+const TREND_MAX_POINTS = 8;
+
+function trendFromPoints(points) {
+  return (points || []).slice(-TREND_MAX_POINTS).map((p) => ({
+    at: p.at || null,
+    modelVersion: p.modelVersion ?? null,
+    valeurNum: p.valeurNum ?? null,
+  }));
+}
+
+/**
+ * Delta face à la version ACC précédente (dernier run retenu de cette version).
+ * Fait numérique uniquement : aucun verdict, aucun seuil.
+ */
+function deltaFromPoints(currentVal, points) {
+  const last = points.length ? points[points.length - 1] : null;
+  const prev = points.length >= 2 ? points[points.length - 2] : null;
+  const base = {
+    available: false,
+    reason: null,
+    currentVersion: last?.modelVersion ?? null,
+    currentAt: last?.at ?? null,
+    previousVersion: prev?.modelVersion ?? null,
+    previousAt: prev?.at ?? null,
+    previousValeurNum: prev?.valeurNum ?? null,
+    abs: null,
+    rel: null,
+  };
+
+  if (currentVal?.etatExtraction === 'echec') {
+    return { ...base, reason: 'extraction_failed' };
+  }
+  if (!prev) {
+    return { ...base, reason: 'no_previous_version' };
+  }
+
+  const currN = currentVal?.valeurNum;
+  const prevN = prev.valeurNum;
+  if (currN == null || prevN == null) {
+    return { ...base, reason: 'no_numeric' };
+  }
+
+  const abs = Math.round((currN - prevN) * 1e6) / 1e6;
+  const rel = prevN === 0 ? null : abs / prevN;
+  return {
+    ...base,
+    available: true,
+    previousValeurNum: prevN,
+    abs,
+    rel,
+  };
+}
+
+function attachCurrentDelta(current, seriesByVersion, codes) {
+  const byKey = new Map();
+  for (const s of seriesByVersion) {
+    byKey.set(`${String(s.accModelGuid).toLowerCase()}|${s.controlCode}`, s.points || []);
+  }
+  for (const m of current) {
+    const guid = String(m.accModelGuid).toLowerCase();
+    if (!m.values) m.values = {};
+    for (const code of codes) {
+      if (!m.values[code]) m.values[code] = valuePayload(null, code);
+      const points = byKey.get(`${guid}|${code}`) || [];
+      m.values[code].trend = trendFromPoints(points);
+      m.values[code].delta = deltaFromPoints(m.values[code], points);
+    }
+  }
 }
 
 class QcDashboardService {
@@ -341,6 +418,8 @@ class QcDashboardService {
         });
       }
     }
+
+    attachCurrentDelta(current, seriesByVersion, codes);
 
     const ms = Date.now() - t0;
     const logLine =
