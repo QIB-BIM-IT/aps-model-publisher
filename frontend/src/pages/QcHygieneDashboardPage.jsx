@@ -339,6 +339,44 @@ function MiniTrend({ points }) {
   );
 }
 
+/**
+ * Teintes du delta — distinctes des badges de verdict.
+ * Badge Non conforme = pastille 11px, rouge #b91c1c.
+ * Delta défavorable = grand chiffre, orange brûlé, sans pastille.
+ * Delta favorable = sarcelle, pas le vert du badge Conforme.
+ */
+const DELTA_TONE = {
+  none: '#1e293b',
+  good: '#0f766e',
+  bad: '#c2410c',
+};
+
+function deltaTone(sensSouhaitable, abs, stable) {
+  if (stable) return 'none';
+  const n = Number(abs);
+  if (!Number.isFinite(n) || n === 0) return 'none';
+  if (sensSouhaitable === 'baisse') return n > 0 ? 'bad' : 'good';
+  if (sensSouhaitable === 'hausse') return n > 0 ? 'good' : 'bad';
+  return 'none';
+}
+
+function DirectionMark({ dir, color }) {
+  const d =
+    dir === 'up' ? 'M5 16 L12 7 L19 16' : dir === 'down' ? 'M5 8 L12 17 L19 8' : 'M5 12 H19';
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d={d}
+        fill="none"
+        stroke={color}
+        strokeWidth="2.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function VerdictBadge({ value }) {
   if (!value || value.etatExtraction === 'echec') return null;
   let label = 'Indicatif';
@@ -378,7 +416,7 @@ function VerdictBadge({ value }) {
   );
 }
 
-function DeltaLine({ delta, unite }) {
+function DeltaLine({ delta, unite, sensSouhaitable }) {
   if (!delta) return null;
   const muted = { marginTop: 8, fontSize: 12, color: '#475569', lineHeight: 1.35 };
   if (delta.reason === 'extraction_failed' || delta.reason === 'no_previous_version') return null;
@@ -394,17 +432,28 @@ function DeltaLine({ delta, unite }) {
   }
   const vs = `${versionLabel(delta.previousVersion)} · ${formatDateShort(delta.previousAt)}`;
   const stable = isNegligibleMovement(delta, unite);
-  const arrow = stable ? '→' : delta.abs > 0 ? '↑' : '↓';
+  const dir = stable ? 'flat' : delta.abs > 0 ? 'up' : 'down';
+  const tone = deltaTone(sensSouhaitable, delta.abs, stable);
+  const color = DELTA_TONE[tone];
   const compact = stable ? 'stable' : formatDeltaCompact(delta.abs, unite);
   return (
     <div style={muted} title={`Comparé à la ${vs}`}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: '#334155', letterSpacing: 0.01 }}>
-        <span style={{ marginRight: 6 }} aria-hidden="true">
-          {arrow}
-        </span>
-        {compact}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 22,
+          fontWeight: 800,
+          color,
+          letterSpacing: 0.01,
+          lineHeight: 1.1,
+        }}
+      >
+        <DirectionMark dir={dir} color={color} />
+        <span>{compact}</span>
       </div>
-      <div style={{ marginTop: 2, fontSize: 11, color: '#64748b' }}>depuis la {vs}</div>
+      <div style={{ marginTop: 3, fontSize: 11, color: '#64748b' }}>depuis la {vs}</div>
     </div>
   );
 }
@@ -512,7 +561,9 @@ function KpiCard({ control, model, breakdown, projectId, linkState, hideDelta })
         <VerdictBadge value={value} />
       </div>
       {body}
-      {!failed && !hideDelta ? <DeltaLine delta={value?.delta} unite={unite} /> : null}
+      {!failed && !hideDelta ? (
+        <DeltaLine delta={value?.delta} unite={unite} sensSouhaitable={control.sensSouhaitable} />
+      ) : null}
       {showTrend ? (
         <div style={{ marginTop: 10 }}>
           <MiniTrend points={value?.trend} />

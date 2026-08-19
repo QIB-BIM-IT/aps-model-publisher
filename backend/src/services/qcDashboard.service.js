@@ -49,6 +49,14 @@ function unitOf(code, entry) {
   return null;
 }
 
+/** Métadonnée d'affichage du delta. Distincte de `sens` (min/max) consommé par le scoring. */
+const DESIRED_SENSE = new Set(['baisse', 'hausse', 'aucun']);
+
+function desiredSenseOf(entry) {
+  const v = entry?.sensSouhaitable;
+  return DESIRED_SENSE.has(v) ? v : 'aucun';
+}
+
 function metaForCodes(codes) {
   const catalog = qcProjectConfigService.loadCatalog();
   return codes.map((code) => {
@@ -58,6 +66,7 @@ function metaForCodes(codes) {
       libelle: entry.libelle || code,
       unite: unitOf(code, entry),
       section: qcProjectConfigService.sectionOf(code),
+      sensSouhaitable: desiredSenseOf(entry),
     };
   });
 }
