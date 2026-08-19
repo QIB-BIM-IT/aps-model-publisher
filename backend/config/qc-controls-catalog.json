@@ -6,6 +6,7 @@
       "source": "modele",
       "forme": "guid",
       "libelle": "Avertissements du modèle",
+      "sensSouhaitable": "baisse",
       "descriptionCible": {
         "typeWidget": "regleMaisonLectureSeule",
         "libelle": "Avertissements du modèle",
@@ -45,6 +46,7 @@
       "source": "meta",
       "forme": "seuil",
       "sens": "max",
+      "sensSouhaitable": "aucun",
       "unite": "Mo",
       "libelle": "Taille du fichier",
       "descriptionCible": {
@@ -96,6 +98,7 @@
       "source": "modele",
       "forme": "comptage",
       "sens": "max",
+      "sensSouhaitable": "aucun",
       "unite": "variantes",
       "libelle": "Variantes présentes",
       "descriptionCible": {
@@ -155,6 +158,7 @@
       "source": "modele",
       "forme": "comptage",
       "sens": "max",
+      "sensSouhaitable": "baisse",
       "unite": "vues",
       "libelle": "Vues non placées sur feuille",
       "descriptionCible": {
@@ -175,6 +179,7 @@
       "source": "modele",
       "forme": "comptage",
       "sens": "max",
+      "sensSouhaitable": "baisse",
       "libelle": "Types de groupes inutilisés",
       "descriptionCible": {
         "typeWidget": "valeurNumerique",
@@ -676,6 +681,7 @@
       "forme": "hygieneModele",
       "unite": "groupes-instance-unique",
       "libelle": "Hygiène du modèle",
+      "sensSouhaitable": "baisse",
       "descriptionCible": {
         "typeWidget": "regleMaisonLectureSeule",
         "libelle": "Hygiène du modèle",
