@@ -24,7 +24,22 @@ import {
 const VIOLET = '#7c3aed';
 const VIOLET_DARK = '#6d28d9';
 const HYGIENE_CONTROLS = ['G408', 'G412', 'G411', 'G402', 'G410', 'G102'];
-const MODEL_COLORS = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#db2777', '#0f766e'];
+const MODEL_COLORS = ['#2563eb', '#0f766e', '#d97706', '#db2777', '#475569', '#0891b2'];
+const EVOLUTION_CHART_HEIGHT = 360;
+const MIN_TREND_POINTS = 5;
+
+/**
+ * Seuil d'affichage du MOUVEMENT (pas un verdict de qualité).
+ * Ajuster ici uniquement.
+ * - Comptages : 1 unité = un objet réel (avertissement, groupe, vue…).
+ * - Taille (Mo) : 0,03 Mo sur 156 Mo est du bruit ; on signale dès 0,5 Mo
+ *   ou 1 % de variation relative, le premier atteint.
+ */
+const STABILITY = {
+  countAbs: 1,
+  sizeAbsMo: 0.5,
+  sizeRel: 0.01,
+};
 
 const UNITE_FR = {
   avertissements: 'avertissements',
@@ -61,6 +76,26 @@ function formatDateShort(iso) {
   } catch {
     return String(iso);
   }
+}
+
+function formatTimeTick(ms) {
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms).toLocaleDateString('fr-CA', { day: 'numeric', month: 'short' });
+}
+
+function pointTimeMs(p) {
+  const t = new Date(p?.at || 0).getTime();
+  return Number.isFinite(t) && t > 0 ? t : null;
+}
+
+function timeAxisDomain(data) {
+  if (!data?.length) return ['auto', 'auto'];
+  const ts = data.map((d) => d.t).filter((t) => Number.isFinite(t));
+  if (!ts.length) return ['auto', 'auto'];
+  const min = Math.min(...ts);
+  const max = Math.max(...ts);
+  const pad = min === max ? 12 * 3600 * 1000 : Math.max((max - min) * 0.05, 6 * 3600 * 1000);
+  return [min - pad, max + pad];
 }
 
 function formatNumber(n) {
@@ -132,8 +167,10 @@ function breakdownFor(model, breakdowns) {
 
 function ChartTooltip({ active, payload, unite, seriesMode }) {
   if (!active || !payload?.length) return null;
-  const row = payload[0]?.payload || {};
-  const runs = row.runCount;
+  const items = payload.filter(
+    (p) => p.value != null && p.dataKey && !String(p.dataKey).includes('__')
+  );
+  if (!items.length) return null;
   return (
     <div
       style={{
@@ -143,24 +180,34 @@ function ChartTooltip({ active, payload, unite, seriesMode }) {
         padding: '8px 10px',
         color: '#fff',
         fontSize: 12,
-        maxWidth: 300,
+        maxWidth: 320,
       }}
     >
-      <div style={{ marginBottom: 4, color: '#cbd5e1' }}>{versionLabel(row.version)}</div>
-      <div style={{ marginBottom: 6, color: '#94a3b8' }}>{formatDateTime(row.at)}</div>
-      {payload.map((p) => (
-        <div key={p.dataKey} style={{ color: p.color || '#fff' }}>
-          {p.name} : {formatNumber(p.value)}
-          {unite ? ` ${unite}` : ''}
-        </div>
-      ))}
-      {seriesMode === 'version' && runs != null ? (
-        <div style={{ marginTop: 6, color: '#94a3b8' }}>
-          {runs === 1
-            ? '1 contrôle réussi sur cette version'
-            : `${formatNumber(runs)} contrôles réussis sur cette version`}
-        </div>
-      ) : null}
+      {items.map((p) => {
+        const guid = String(p.dataKey);
+        const row = p.payload || {};
+        const at = row[`${guid}__at`];
+        const version = row[`${guid}__version`];
+        const runs = row[`${guid}__runCount`];
+        return (
+          <div key={guid} style={{ marginBottom: items.length > 1 ? 10 : 0 }}>
+            <div style={{ fontWeight: 700, color: p.color || '#fff', marginBottom: 4 }}>{p.name}</div>
+            <div style={{ color: '#cbd5e1' }}>{formatDateTime(at)}</div>
+            <div style={{ color: '#94a3b8', margin: '2px 0 4px' }}>{versionLabel(version)}</div>
+            <div>
+              {formatNumber(p.value)}
+              {unite ? ` ${unite}` : ''}
+            </div>
+            {seriesMode === 'version' && runs != null ? (
+              <div style={{ marginTop: 4, color: '#94a3b8' }}>
+                {runs === 1
+                  ? '1 contrôle réussi sur cette version'
+                  : `${formatNumber(runs)} contrôles réussis sur cette version`}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -223,29 +270,43 @@ function HorizontalCompareChart({ data, bars, unite, height }) {
   );
 }
 
-function formatPercent(rel) {
-  if (rel == null || !Number.isFinite(Number(rel))) return null;
-  return new Intl.NumberFormat('fr-CA', {
-    style: 'percent',
-    maximumFractionDigits: Math.abs(rel) < 0.01 ? 2 : 1,
-  }).format(rel);
+function isNegligibleMovement(delta, unite) {
+  if (!delta?.available || delta.abs == null) return false;
+  const abs = Math.abs(Number(delta.abs));
+  if (!Number.isFinite(abs) || abs === 0) return true;
+  if (unite === 'Mo') {
+    const rel = delta.rel == null ? 0 : Math.abs(Number(delta.rel));
+    return abs < STABILITY.sizeAbsMo && rel < STABILITY.sizeRel;
+  }
+  return abs < STABILITY.countAbs;
+}
+
+function isFirstControlledVersion(model, controls) {
+  const deltas = (controls || []).map((c) => model.values?.[c.code]?.delta).filter(Boolean);
+  if (!deltas.length) return false;
+  return deltas.every((d) => d.reason === 'no_previous_version');
+}
+
+function trendNumericCount(points) {
+  return (points || []).filter((p) => p.valeurNum != null && Number.isFinite(Number(p.valeurNum))).length;
+}
+
+function formatDeltaCompact(abs, unite) {
+  const n = Number(abs);
+  if (!Number.isFinite(n) || n === 0) return '0';
+  const sign = n > 0 ? '+' : '−';
+  const body = formatNumber(Math.abs(n));
+  return unite === 'Mo' ? `${sign}${body} Mo` : `${sign}${body}`;
 }
 
 function MiniTrend({ points }) {
   const numeric = (points || []).filter(
     (p) => p.valeurNum != null && Number.isFinite(Number(p.valeurNum))
   );
-  if (!numeric.length) return null;
+  if (numeric.length < MIN_TREND_POINTS) return null;
   const w = 88;
   const h = 28;
   const pad = 3;
-  if (numeric.length === 1) {
-    return (
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-        <circle cx={w / 2} cy={h / 2} r={3} fill="#64748b" />
-      </svg>
-    );
-  }
   const vals = numeric.map((p) => Number(p.valeurNum));
   const min = Math.min(...vals);
   const max = Math.max(...vals);
@@ -319,13 +380,8 @@ function VerdictBadge({ value }) {
 
 function DeltaLine({ delta, unite }) {
   if (!delta) return null;
-  const muted = { marginTop: 8, fontSize: 12, color: '#475569', lineHeight: 1.4 };
-  if (delta.reason === 'extraction_failed') return null;
-  if (delta.reason === 'no_previous_version') {
-    return (
-      <div style={muted}>Premier contrôle de cette maquette — aucune version antérieure à comparer.</div>
-    );
-  }
+  const muted = { marginTop: 8, fontSize: 12, color: '#475569', lineHeight: 1.35 };
+  if (delta.reason === 'extraction_failed' || delta.reason === 'no_previous_version') return null;
   if (delta.reason === 'no_numeric' || !delta.available) {
     const prev = delta.previousVersion != null ? versionLabel(delta.previousVersion) : null;
     return (
@@ -336,22 +392,24 @@ function DeltaLine({ delta, unite }) {
       </div>
     );
   }
-  const vs = `depuis la ${versionLabel(delta.previousVersion)} (${formatDateShort(delta.previousAt)})`;
-  if (delta.abs === 0) {
-    return <div style={muted}>Inchangé {vs}</div>;
-  }
-  const sens = delta.abs > 0 ? 'en hausse' : 'en baisse';
-  const pct = formatPercent(delta.rel);
+  const vs = `${versionLabel(delta.previousVersion)} · ${formatDateShort(delta.previousAt)}`;
+  const stable = isNegligibleMovement(delta, unite);
+  const arrow = stable ? '→' : delta.abs > 0 ? '↑' : '↓';
+  const compact = stable ? 'stable' : formatDeltaCompact(delta.abs, unite);
   return (
-    <div style={muted}>
-      {sens} de {formatNumber(Math.abs(delta.abs))}
-      {unite ? ` ${unite}` : ''} {vs}
-      {pct ? ` · ${pct}` : ''}
+    <div style={muted} title={`Comparé à la ${vs}`}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: '#334155', letterSpacing: 0.01 }}>
+        <span style={{ marginRight: 6 }} aria-hidden="true">
+          {arrow}
+        </span>
+        {compact}
+      </div>
+      <div style={{ marginTop: 2, fontSize: 11, color: '#64748b' }}>depuis la {vs}</div>
     </div>
   );
 }
 
-function KpiCard({ control, model, breakdown, projectId, linkState }) {
+function KpiCard({ control, model, breakdown, projectId, linkState, hideDelta }) {
   const code = control.code;
   const value = model.values?.[code] || null;
   const href = detailHref(code, model.runId);
@@ -359,6 +417,7 @@ function KpiCard({ control, model, breakdown, projectId, linkState }) {
   const missing = !value;
   const unite = uniteLabel(control.unite);
   const extras = value?.extras;
+  const showTrend = !hideDelta && trendNumericCount(value?.trend) >= MIN_TREND_POINTS;
 
   let body;
   if (failed) {
@@ -453,10 +512,12 @@ function KpiCard({ control, model, breakdown, projectId, linkState }) {
         <VerdictBadge value={value} />
       </div>
       {body}
-      {!failed ? <DeltaLine delta={value?.delta} unite={unite} /> : null}
-      <div style={{ marginTop: 10 }}>
-        <MiniTrend points={value?.trend} />
-      </div>
+      {!failed && !hideDelta ? <DeltaLine delta={value?.delta} unite={unite} /> : null}
+      {showTrend ? (
+        <div style={{ marginTop: 10 }}>
+          <MiniTrend points={value?.trend} />
+        </div>
+      ) : null}
       <div style={{ marginTop: 'auto', paddingTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         {href ? (
           <Link
@@ -579,6 +640,8 @@ export default function QcHygieneDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [payload, setPayload] = useState(null);
+  const [metricCode, setMetricCode] = useState('');
+  const [hiddenModels, setHiddenModels] = useState(() => new Set());
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -623,6 +686,13 @@ export default function QcHygieneDashboardPage() {
       : seriesByVersion.length
         ? seriesByVersion
         : groupSeriesByVersion(series);
+
+  useEffect(() => {
+    if (!controls.length) return;
+    if (!controls.some((c) => c.code === metricCode)) {
+      setMetricCode(controls[0].code);
+    }
+  }, [controls, metricCode]);
 
   const modelOptions = useMemo(() => {
     const fromApi = payload?.models || [];
@@ -686,72 +756,48 @@ export default function QcHygieneDashboardPage() {
     { theme, accModelGuid, series: seriesMode }
   );
 
-  const chartsByControl = useMemo(() => {
-    return HYGIENE_CONTROLS.map((code) => {
-      const rows = seriesForCharts.filter((s) => s.controlCode === code);
-      const modelsWithHistory = rows
-        .map((s) => ({
-          ...s,
-          numeric: numericPoints(s.points),
-        }))
-        .filter((s) => s.numeric.length > 0);
-      const canChart = modelsWithHistory.some((s) => s.numeric.length >= 2);
-      const singleOnly = modelsWithHistory.length > 0 && !canChart;
-
-      const dateKeys = new Map();
-      for (const s of modelsWithHistory) {
-        for (const p of s.numeric) {
-          const key =
-            seriesMode === 'version'
-              ? `v:${p.modelVersion ?? '∅'}:${p.at || p.runId}`
-              : p.at
-                ? new Date(p.at).toISOString()
-                : p.runId;
-          if (!dateKeys.has(key)) {
-            dateKeys.set(key, {
-              key,
-              at: p.at,
-              tick:
-                seriesMode === 'version'
-                  ? p.modelVersion != null
-                    ? `v${p.modelVersion}`
-                    : '—'
-                  : formatDateShort(p.at),
-              version: p.modelVersion,
-              runCount: p.runCount ?? 1,
-            });
-          }
-        }
-      }
-      const sorted = [...dateKeys.values()].sort(
-        (a, b) => new Date(a.at || 0) - new Date(b.at || 0)
-      );
-      const data = sorted.map((d) => {
-        const row = {
-          key: d.key,
-          tick: d.tick,
-          version: d.version,
-          at: d.at,
-          runCount: d.runCount,
-        };
-        for (const s of modelsWithHistory) {
-          const hit = s.numeric.find((p) => {
-            const k =
-              seriesMode === 'version'
-                ? `v:${p.modelVersion ?? '∅'}:${p.at || p.runId}`
-                : p.at
-                  ? new Date(p.at).toISOString()
-                  : p.runId;
-            return k === d.key;
-          });
-          row[s.accModelGuid] = hit ? Number(hit.valeurNum) : null;
-        }
-        return row;
-      });
-
-      return { code, modelsWithHistory, canChart, singleOnly, data };
+  function toggleChartModel(guid) {
+    const key = String(guid).toLowerCase();
+    setHiddenModels((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
     });
-  }, [seriesForCharts, seriesMode]);
+  }
+
+  const timeChart = useMemo(() => {
+    const code = metricCode;
+    const enabled = new Set(
+      modelOptions
+        .filter((m) => !hiddenModels.has(String(m.accModelGuid).toLowerCase()))
+        .map((m) => String(m.accModelGuid).toLowerCase())
+    );
+    const rows = (seriesForCharts || [])
+      .filter((s) => s.controlCode === code)
+      .map((s) => ({
+        ...s,
+        guid: String(s.accModelGuid).toLowerCase(),
+        numeric: numericPoints(s.points),
+      }))
+      .filter((s) => enabled.has(s.guid) && s.numeric.length > 0);
+
+    const byT = new Map();
+    for (const s of rows) {
+      for (const p of s.numeric) {
+        const t = pointTimeMs(p);
+        if (t == null) continue;
+        if (!byT.has(t)) byT.set(t, { t });
+        const row = byT.get(t);
+        row[s.guid] = Number(p.valeurNum);
+        row[`${s.guid}__version`] = p.modelVersion;
+        row[`${s.guid}__runCount`] = p.runCount ?? 1;
+        row[`${s.guid}__at`] = p.at;
+      }
+    }
+    const data = [...byT.values()].sort((a, b) => a.t - b.t);
+    return { rows, data, domain: timeAxisDomain(data) };
+  }, [seriesForCharts, metricCode, modelOptions, hiddenModels]);
 
   const compareModels = useMemo(() => {
     if (current.length >= 2 || !previewCompare || current.length !== 1) return current;
@@ -960,14 +1006,24 @@ export default function QcHygieneDashboardPage() {
                     projet ; sans cible, le contrôle reste indicatif. Un avertissement critique n’a
                     pas le même poids qu’un avertissement faible.
                   </p>
-                  {current.map((model) => (
+                  {current.map((model) => {
+                    const firstVersion = isFirstControlledVersion(model, controls);
+                    const showHeading = current.length > 1 || accModelGuid || firstVersion;
+                    return (
                     <div key={model.runId} style={{ marginBottom: current.length > 1 ? 22 : 0 }}>
-                      {current.length > 1 || accModelGuid ? (
-                        <div style={{ fontSize: 14, fontWeight: 700, color: '#334155', marginBottom: 10 }}>
-                          {modelLabel(model)}
-                          <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
-                            {formatDateTime(model.endedAtUtc || model.startedAtUtc)} · {versionLabel(model.modelVersion)}
-                          </span>
+                      {showHeading ? (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#334155' }}>
+                            {modelLabel(model)}
+                            <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
+                              {formatDateTime(model.endedAtUtc || model.startedAtUtc)} · {versionLabel(model.modelVersion)}
+                            </span>
+                          </div>
+                          {firstVersion ? (
+                            <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                              Premier contrôle de cette maquette — aucune version antérieure à comparer.
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                       <div
@@ -985,11 +1041,13 @@ export default function QcHygieneDashboardPage() {
                             breakdown={breakdownFor(model, warningBreakdown)}
                             projectId={project?.projectId || projectId}
                             linkState={detailLinkState}
+                            hideDelta={firstVersion}
                           />
                         ))}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <WhatChangedSection current={current} controls={controls} />
@@ -1000,10 +1058,10 @@ export default function QcHygieneDashboardPage() {
                   </h2>
                   <p style={{ margin: '0 0 12px', fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
                     {seriesMode === 'version'
-                      ? 'Un point par version ACC auditée (dernier contrôle réussi de cette version). C’est l’évolution de la maquette, pas le nombre de relances.'
-                      : 'Un point par contrôle réussi. Utile pour voir chaque mesure, y compris les relances sur une même version.'}
+                      ? 'Un point par version ACC de chaque maquette, placé à la date du dernier contrôle réussi de cette version. Les numéros de version ne sont pas comparés d’une maquette à l’autre.'
+                      : 'Un point par contrôle réussi, placé à sa date réelle.'}
                   </p>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                     <button
                       type="button"
                       onClick={() => replaceParams({ nextSeries: 'version' })}
@@ -1033,67 +1091,119 @@ export default function QcHygieneDashboardPage() {
                       Chaque contrôle
                     </button>
                   </div>
-                  {chartsByControl.map(({ code, modelsWithHistory, canChart, singleOnly, data }) => {
-                    const unite = uniteOf(code, controls);
-                    const singleHint =
-                      seriesMode === 'version'
-                        ? 'Une seule version ACC a un contrôle réussi'
-                        : 'Un seul contrôle réussi à ce jour';
-                    return (
-                      <div key={code} style={{ marginBottom: 28 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
-                          {libelleOf(code, controls)}
-                          {unite ? <span style={{ fontWeight: 500, color: '#64748b' }}> ({unite})</span> : null}
-                        </div>
-                        {!modelsWithHistory.length ? (
-                          <div style={{ fontSize: 13, color: '#64748b', padding: '8px 0' }}>
-                            Pas de valeur chiffrée pour ce contrôle sur l’historique disponible.
-                          </div>
-                        ) : singleOnly ? (
-                          <div style={{ fontSize: 13, color: '#64748b', padding: '8px 0', lineHeight: 1.5 }}>
-                            {singleHint}
-                            {modelsWithHistory[0]?.numeric?.[0]
-                              ? ` (${formatDateTime(modelsWithHistory[0].numeric[0].at)}, ${versionLabel(
-                                  modelsWithHistory[0].numeric[0].modelVersion
-                                )} : ${formatNumber(modelsWithHistory[0].numeric[0].valeurNum)}${unite ? ` ${unite}` : ''})`
-                              : ''}
-                            . La courbe d’évolution apparaîtra dès qu’une autre{' '}
-                            {seriesMode === 'version' ? 'version' : 'mesure'} sera disponible.
-                          </div>
-                        ) : canChart ? (
-                          <ResponsiveContainer width="100%" height={240}>
-                            <LineChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.25)" />
-                              <XAxis
-                                dataKey="tick"
-                                stroke="#94a3b8"
-                                interval="preserveStartEnd"
-                                minTickGap={36}
-                                tick={{ fontSize: 11, fill: '#64748b' }}
-                              />
-                              <YAxis stroke="#94a3b8" tick={{ fontSize: 11, fill: '#64748b' }} />
-                              <Tooltip content={<ChartTooltip unite={unite} seriesMode={seriesMode} />} />
-                              {modelsWithHistory.length > 1 ? (
-                                <Legend wrapperStyle={{ fontSize: 12 }} />
-                              ) : null}
-                              {modelsWithHistory.map((s) => (
-                                <Line
-                                  key={s.accModelGuid}
-                                  type="monotone"
-                                  dataKey={s.accModelGuid}
-                                  name={modelLabel(s)}
-                                  stroke={colorByModel.get(String(s.accModelGuid).toLowerCase()) || VIOLET}
-                                  strokeWidth={2}
-                                  dot={{ r: 3 }}
-                                  connectNulls
-                                />
-                              ))}
-                            </LineChart>
-                          </ResponsiveContainer>
-                        ) : null}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
+                      Grandeur
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {controls.map((c) => {
+                        const active = c.code === metricCode;
+                        return (
+                          <button
+                            key={c.code}
+                            type="button"
+                            onClick={() => setMetricCode(c.code)}
+                            style={{
+                              ...btnSecondary,
+                              background: active ? 'rgba(124, 58, 237, 0.12)' : undefined,
+                              color: active ? VIOLET_DARK : undefined,
+                              border: active ? '1px solid rgba(124, 58, 237, 0.45)' : undefined,
+                            }}
+                          >
+                            {c.libelle}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {modelOptions.length > 1 ? (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
+                        Maquettes
                       </div>
+                      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                        {modelOptions.map((m) => {
+                          const guid = String(m.accModelGuid).toLowerCase();
+                          const checked = !hiddenModels.has(guid);
+                          return (
+                            <label
+                              key={guid}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                fontSize: 13,
+                                color: '#334155',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleChartModel(m.accModelGuid)}
+                                style={{ accentColor: VIOLET }}
+                              />
+                              <span
+                                style={{
+                                  width: 10,
+                                  height: 10,
+                                  borderRadius: 99,
+                                  background: colorByModel.get(guid) || '#64748b',
+                                  flexShrink: 0,
+                                }}
+                              />
+                              {modelLabel(m)}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                  {(() => {
+                    const unite = uniteOf(metricCode, controls);
+                    if (!timeChart.rows.length) {
+                      return (
+                        <div style={{ fontSize: 13, color: '#64748b', padding: '8px 0' }}>
+                          {hiddenModels.size && modelOptions.length
+                            ? 'Activez au moins une maquette pour afficher la courbe.'
+                            : 'Pas de valeur chiffrée pour cette grandeur sur l’historique disponible.'}
+                        </div>
+                      );
+                    }
+                    return (
+                      <ResponsiveContainer width="100%" height={EVOLUTION_CHART_HEIGHT}>
+                        <LineChart data={timeChart.data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.25)" />
+                          <XAxis
+                            type="number"
+                            dataKey="t"
+                            domain={timeChart.domain}
+                            tickFormatter={formatTimeTick}
+                            minTickGap={48}
+                            tick={{ fontSize: 11, fill: '#64748b' }}
+                            stroke="#94a3b8"
+                          />
+                          <YAxis stroke="#94a3b8" tick={{ fontSize: 11, fill: '#64748b' }} />
+                          <Tooltip content={<ChartTooltip unite={unite} seriesMode={seriesMode} />} />
+                          {timeChart.rows.length > 1 ? (
+                            <Legend wrapperStyle={{ fontSize: 12 }} />
+                          ) : null}
+                          {timeChart.rows.map((s) => (
+                            <Line
+                              key={s.guid}
+                              type="monotone"
+                              dataKey={s.guid}
+                              name={modelLabel(s)}
+                              stroke={colorByModel.get(s.guid) || '#2563eb'}
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                              connectNulls
+                            />
+                          ))}
+                        </LineChart>
+                      </ResponsiveContainer>
                     );
-                  })}
+                  })()}
                 </div>
 
                 <div style={card}>
@@ -1110,8 +1220,8 @@ export default function QcHygieneDashboardPage() {
                     <>
                       <p style={{ margin: '0 0 16px', fontSize: 13, color: '#64748b' }}>
                         {previewCompare && current.length < 2
-                          ? 'Aperçu construit pour illustration : ce projet n’a qu’une maquette. Les barres de droite ne sont pas des données réelles.'
-                          : 'Même instant métier : dernier run réussi de chaque maquette, pour repérer celle qui décroche. Barres horizontales, une par maquette.'}
+                          ? 'Aperçu construit pour illustration : ce projet n’a qu’une maquette. Les chiffres de droite ne sont pas des données réelles.'
+                          : 'Dernier contrôle réussi de chaque maquette. La barre segmentée montre la composition des avertissements, que le tableau ne détaille pas.'}
                       </p>
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -1152,63 +1262,35 @@ export default function QcHygieneDashboardPage() {
                           </tbody>
                         </table>
                       </div>
-                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 22 }}>
-                        {HYGIENE_CONTROLS.map((code) => {
-                          const unite = uniteOf(code, controls);
-                          const height = Math.max(120, compareModels.length * 40 + 48);
-                          if (code === 'G408') {
-                            const data = compareModels.map((m) => {
+                      {controls.some((c) => c.code === 'G408') ? (
+                        <div style={{ marginTop: 18 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
+                            {libelleOf('G408', controls)}
+                            {uniteOf('G408', controls) ? (
+                              <span style={{ fontWeight: 500, color: '#64748b' }}>
+                                {' '}
+                                ({uniteOf('G408', controls)})
+                              </span>
+                            ) : null}
+                          </div>
+                          <HorizontalCompareChart
+                            data={compareModels.map((m) => {
                               const b = breakdownFor(m, compareBreakdown);
                               return {
                                 name: modelLabel(m),
                                 critique: b?.critique ?? 0,
                                 faible: b?.faible ?? 0,
                               };
-                            });
-                            return (
-                              <div key={code}>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
-                                  {libelleOf(code, controls)}
-                                  {unite ? <span style={{ fontWeight: 500, color: '#64748b' }}> ({unite})</span> : null}
-                                </div>
-                                <HorizontalCompareChart
-                                  data={data}
-                                  unite={unite}
-                                  height={height}
-                                  bars={[
-                                    { key: 'critique', name: 'Critiques', fill: '#b91c1c', stackId: 'g408' },
-                                    { key: 'faible', name: 'Faibles', fill: '#d97706', stackId: 'g408' },
-                                  ]}
-                                />
-                              </div>
-                            );
-                          }
-                          const data = compareModels.map((m) => {
-                            const v = m.values?.[code];
-                            return {
-                              name: modelLabel(m),
-                              valeur:
-                                v && v.etatExtraction !== 'echec' && v.valeurNum != null
-                                  ? Number(v.valeurNum)
-                                  : 0,
-                            };
-                          });
-                          return (
-                            <div key={code}>
-                              <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 8 }}>
-                                {libelleOf(code, controls)}
-                                {unite ? <span style={{ fontWeight: 500, color: '#64748b' }}> ({unite})</span> : null}
-                              </div>
-                              <HorizontalCompareChart
-                                data={data}
-                                unite={unite}
-                                height={height}
-                                bars={[{ key: 'valeur', name: libelleOf(code, controls), fill: VIOLET }]}
-                              />
-                            </div>
-                          );
-                        })}
-                      </div>
+                            })}
+                            unite={uniteOf('G408', controls)}
+                            height={Math.max(120, compareModels.length * 40 + 48)}
+                            bars={[
+                              { key: 'critique', name: 'Critiques', fill: '#b91c1c', stackId: 'g408' },
+                              { key: 'faible', name: 'Faibles', fill: '#d97706', stackId: 'g408' },
+                            ]}
+                          />
+                        </div>
+                      ) : null}
                     </>
                   )}
                 </div>
