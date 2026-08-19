@@ -360,19 +360,18 @@ function deltaTone(sensSouhaitable, abs, stable) {
   return 'none';
 }
 
-function DirectionMark({ dir, color }) {
-  const d =
-    dir === 'up' ? 'M5 16 L12 7 L19 16' : dir === 'down' ? 'M5 8 L12 17 L19 8' : 'M5 12 H19';
+function DirectionMark({ dir, color, size = 18 }) {
+  if (dir === 'flat') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
+        <path d="M4 12 H20" fill="none" stroke={color} strokeWidth="2.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  const points = dir === 'up' ? '12,3 22,21 2,21' : '2,3 22,3 12,21';
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <path
-        d={d}
-        fill="none"
-        stroke={color}
-        strokeWidth="2.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <polygon points={points} fill={color} />
     </svg>
   );
 }
@@ -450,7 +449,7 @@ function DeltaLine({ delta, unite, sensSouhaitable }) {
           lineHeight: 1.1,
         }}
       >
-        <DirectionMark dir={dir} color={color} />
+        <DirectionMark dir={dir} color={color} size={18} />
         <span>{compact}</span>
       </div>
       <div style={{ marginTop: 3, fontSize: 11, color: '#64748b' }}>depuis la {vs}</div>
@@ -595,6 +594,8 @@ function KpiCard({ control, model, breakdown, projectId, linkState, hideDelta })
 
 function WhatChangedSection({ current, controls }) {
   if (!current.length) return null;
+  const modelsWithHistory = current.filter((m) => !isFirstControlledVersion(m, controls));
+  if (!modelsWithHistory.length) return null;
   return (
     <div style={card}>
       <h2 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
@@ -604,46 +605,53 @@ function WhatChangedSection({ current, controls }) {
         Mouvements depuis la version ACC précédente, pas depuis le dernier run. Ce sont des faits,
         pas un jugement.
       </p>
-      {current.map((model) => {
+      {modelsWithHistory.map((model) => {
         const moved = [];
         const stable = [];
-        let noPrevious = 0;
         for (const control of controls) {
           const value = model.values?.[control.code];
           const delta = value?.delta;
           if (!delta || delta.reason === 'extraction_failed') continue;
-          if (delta.reason === 'no_previous_version') {
-            noPrevious += 1;
-            continue;
-          }
+          if (delta.reason === 'no_previous_version') continue;
           if (!delta.available || delta.abs == null) continue;
+          const unite = uniteLabel(control.unite);
           const item = {
             control,
             delta,
-            unite: uniteLabel(control.unite),
+            unite,
             currentN: value?.valeurNum,
+            negligible: isNegligibleMovement(delta, unite),
           };
-          if (delta.abs === 0) stable.push(item);
+          if (item.negligible) stable.push(item);
           else moved.push(item);
         }
-        const onlyFirstVersion = noPrevious === controls.length && !moved.length && !stable.length;
         return (
-          <div key={model.runId} style={{ marginBottom: current.length > 1 ? 18 : 0 }}>
+          <div key={model.runId} style={{ marginBottom: modelsWithHistory.length > 1 ? 18 : 0 }}>
             {current.length > 1 ? (
               <div style={{ fontSize: 14, fontWeight: 700, color: '#334155', marginBottom: 8 }}>
                 {modelLabel(model)}
               </div>
             ) : null}
-            {onlyFirstVersion ? (
-              <div style={{ fontSize: 14, color: '#475569', lineHeight: 1.5 }}>
-                Premier contrôle de cette maquette — aucune version antérieure à comparer.
-              </div>
-            ) : (
-              <>
-                {moved.length ? (
-                  <ul style={{ margin: 0, paddingLeft: 18, color: '#0f172a', fontSize: 14, lineHeight: 1.55 }}>
-                    {moved.map(({ control, delta, unite, currentN }) => (
-                      <li key={control.code} style={{ marginBottom: 6 }}>
+            {moved.length ? (
+              <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', color: '#0f172a', fontSize: 14, lineHeight: 1.55 }}>
+                {moved.map(({ control, delta, unite, currentN }) => {
+                  const dir = delta.abs > 0 ? 'up' : 'down';
+                  const tone = deltaTone(control.sensSouhaitable, delta.abs, false);
+                  const color = DELTA_TONE[tone];
+                  return (
+                    <li
+                      key={control.code}
+                      style={{
+                        marginBottom: 8,
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 8,
+                      }}
+                    >
+                      <span style={{ marginTop: 2 }}>
+                        <DirectionMark dir={dir} color={color} size={14} />
+                      </span>
+                      <span>
                         <strong>{control.libelle}</strong>
                         {' : '}
                         {formatNumber(delta.previousValeurNum)}
@@ -655,21 +663,21 @@ function WhatChangedSection({ current, controls }) {
                         {' → '}
                         {versionLabel(delta.currentVersion)}
                         {')'}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div style={{ fontSize: 14, color: '#475569' }}>
-                    Aucune grandeur n’a bougé depuis la version ACC précédente.
-                  </div>
-                )}
-                {stable.length ? (
-                  <div style={{ marginTop: 8, fontSize: 13, color: '#64748b' }}>
-                    Inchangés : {stable.map((s) => s.control.libelle).join(', ')}.
-                  </div>
-                ) : null}
-              </>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <div style={{ fontSize: 14, color: '#475569' }}>
+                Aucune grandeur n’a bougé depuis la version ACC précédente.
+              </div>
             )}
+            {stable.length ? (
+              <div style={{ marginTop: 8, fontSize: 13, color: '#64748b' }}>
+                Inchangés : {stable.map((s) => s.control.libelle).join(', ')}.
+              </div>
+            ) : null}
           </div>
         );
       })}
