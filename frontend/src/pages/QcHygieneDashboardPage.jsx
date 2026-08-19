@@ -26,6 +26,20 @@ const VIOLET_DARK = '#6d28d9';
 const HYGIENE_CONTROLS = ['G408', 'G412', 'G411', 'G402', 'G410', 'G102'];
 const MODEL_COLORS = ['#2563eb', '#0f766e', '#d97706', '#db2777', '#475569', '#0891b2'];
 const EVOLUTION_CHART_HEIGHT = 360;
+const MIN_TREND_POINTS = 5;
+
+/**
+ * Seuil d'affichage du MOUVEMENT (pas un verdict de qualité).
+ * Ajuster ici uniquement.
+ * - Comptages : 1 unité = un objet réel (avertissement, groupe, vue…).
+ * - Taille (Mo) : 0,03 Mo sur 156 Mo est du bruit ; on signale dès 0,5 Mo
+ *   ou 1 % de variation relative, le premier atteint.
+ */
+const STABILITY = {
+  countAbs: 1,
+  sizeAbsMo: 0.5,
+  sizeRel: 0.01,
+};
 
 const UNITE_FR = {
   avertissements: 'avertissements',
@@ -256,29 +270,43 @@ function HorizontalCompareChart({ data, bars, unite, height }) {
   );
 }
 
-function formatPercent(rel) {
-  if (rel == null || !Number.isFinite(Number(rel))) return null;
-  return new Intl.NumberFormat('fr-CA', {
-    style: 'percent',
-    maximumFractionDigits: Math.abs(rel) < 0.01 ? 2 : 1,
-  }).format(rel);
+function isNegligibleMovement(delta, unite) {
+  if (!delta?.available || delta.abs == null) return false;
+  const abs = Math.abs(Number(delta.abs));
+  if (!Number.isFinite(abs) || abs === 0) return true;
+  if (unite === 'Mo') {
+    const rel = delta.rel == null ? 0 : Math.abs(Number(delta.rel));
+    return abs < STABILITY.sizeAbsMo && rel < STABILITY.sizeRel;
+  }
+  return abs < STABILITY.countAbs;
+}
+
+function isFirstControlledVersion(model, controls) {
+  const deltas = (controls || []).map((c) => model.values?.[c.code]?.delta).filter(Boolean);
+  if (!deltas.length) return false;
+  return deltas.every((d) => d.reason === 'no_previous_version');
+}
+
+function trendNumericCount(points) {
+  return (points || []).filter((p) => p.valeurNum != null && Number.isFinite(Number(p.valeurNum))).length;
+}
+
+function formatDeltaCompact(abs, unite) {
+  const n = Number(abs);
+  if (!Number.isFinite(n) || n === 0) return '0';
+  const sign = n > 0 ? '+' : '−';
+  const body = formatNumber(Math.abs(n));
+  return unite === 'Mo' ? `${sign}${body} Mo` : `${sign}${body}`;
 }
 
 function MiniTrend({ points }) {
   const numeric = (points || []).filter(
     (p) => p.valeurNum != null && Number.isFinite(Number(p.valeurNum))
   );
-  if (!numeric.length) return null;
+  if (numeric.length < MIN_TREND_POINTS) return null;
   const w = 88;
   const h = 28;
   const pad = 3;
-  if (numeric.length === 1) {
-    return (
-      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-        <circle cx={w / 2} cy={h / 2} r={3} fill="#64748b" />
-      </svg>
-    );
-  }
   const vals = numeric.map((p) => Number(p.valeurNum));
   const min = Math.min(...vals);
   const max = Math.max(...vals);
@@ -352,13 +380,8 @@ function VerdictBadge({ value }) {
 
 function DeltaLine({ delta, unite }) {
   if (!delta) return null;
-  const muted = { marginTop: 8, fontSize: 12, color: '#475569', lineHeight: 1.4 };
-  if (delta.reason === 'extraction_failed') return null;
-  if (delta.reason === 'no_previous_version') {
-    return (
-      <div style={muted}>Premier contrôle de cette maquette — aucune version antérieure à comparer.</div>
-    );
-  }
+  const muted = { marginTop: 8, fontSize: 12, color: '#475569', lineHeight: 1.35 };
+  if (delta.reason === 'extraction_failed' || delta.reason === 'no_previous_version') return null;
   if (delta.reason === 'no_numeric' || !delta.available) {
     const prev = delta.previousVersion != null ? versionLabel(delta.previousVersion) : null;
     return (
@@ -369,22 +392,24 @@ function DeltaLine({ delta, unite }) {
       </div>
     );
   }
-  const vs = `depuis la ${versionLabel(delta.previousVersion)} (${formatDateShort(delta.previousAt)})`;
-  if (delta.abs === 0) {
-    return <div style={muted}>Inchangé {vs}</div>;
-  }
-  const sens = delta.abs > 0 ? 'en hausse' : 'en baisse';
-  const pct = formatPercent(delta.rel);
+  const vs = `${versionLabel(delta.previousVersion)} · ${formatDateShort(delta.previousAt)}`;
+  const stable = isNegligibleMovement(delta, unite);
+  const arrow = stable ? '→' : delta.abs > 0 ? '↑' : '↓';
+  const compact = stable ? 'stable' : formatDeltaCompact(delta.abs, unite);
   return (
-    <div style={muted}>
-      {sens} de {formatNumber(Math.abs(delta.abs))}
-      {unite ? ` ${unite}` : ''} {vs}
-      {pct ? ` · ${pct}` : ''}
+    <div style={muted} title={`Comparé à la ${vs}`}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: '#334155', letterSpacing: 0.01 }}>
+        <span style={{ marginRight: 6 }} aria-hidden="true">
+          {arrow}
+        </span>
+        {compact}
+      </div>
+      <div style={{ marginTop: 2, fontSize: 11, color: '#64748b' }}>depuis la {vs}</div>
     </div>
   );
 }
 
-function KpiCard({ control, model, breakdown, projectId, linkState }) {
+function KpiCard({ control, model, breakdown, projectId, linkState, hideDelta }) {
   const code = control.code;
   const value = model.values?.[code] || null;
   const href = detailHref(code, model.runId);
@@ -392,6 +417,7 @@ function KpiCard({ control, model, breakdown, projectId, linkState }) {
   const missing = !value;
   const unite = uniteLabel(control.unite);
   const extras = value?.extras;
+  const showTrend = !hideDelta && trendNumericCount(value?.trend) >= MIN_TREND_POINTS;
 
   let body;
   if (failed) {
@@ -486,10 +512,12 @@ function KpiCard({ control, model, breakdown, projectId, linkState }) {
         <VerdictBadge value={value} />
       </div>
       {body}
-      {!failed ? <DeltaLine delta={value?.delta} unite={unite} /> : null}
-      <div style={{ marginTop: 10 }}>
-        <MiniTrend points={value?.trend} />
-      </div>
+      {!failed && !hideDelta ? <DeltaLine delta={value?.delta} unite={unite} /> : null}
+      {showTrend ? (
+        <div style={{ marginTop: 10 }}>
+          <MiniTrend points={value?.trend} />
+        </div>
+      ) : null}
       <div style={{ marginTop: 'auto', paddingTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         {href ? (
           <Link
@@ -978,14 +1006,24 @@ export default function QcHygieneDashboardPage() {
                     projet ; sans cible, le contrôle reste indicatif. Un avertissement critique n’a
                     pas le même poids qu’un avertissement faible.
                   </p>
-                  {current.map((model) => (
+                  {current.map((model) => {
+                    const firstVersion = isFirstControlledVersion(model, controls);
+                    const showHeading = current.length > 1 || accModelGuid || firstVersion;
+                    return (
                     <div key={model.runId} style={{ marginBottom: current.length > 1 ? 22 : 0 }}>
-                      {current.length > 1 || accModelGuid ? (
-                        <div style={{ fontSize: 14, fontWeight: 700, color: '#334155', marginBottom: 10 }}>
-                          {modelLabel(model)}
-                          <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
-                            {formatDateTime(model.endedAtUtc || model.startedAtUtc)} · {versionLabel(model.modelVersion)}
-                          </span>
+                      {showHeading ? (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#334155' }}>
+                            {modelLabel(model)}
+                            <span style={{ fontWeight: 500, color: '#64748b', marginLeft: 8 }}>
+                              {formatDateTime(model.endedAtUtc || model.startedAtUtc)} · {versionLabel(model.modelVersion)}
+                            </span>
+                          </div>
+                          {firstVersion ? (
+                            <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>
+                              Premier contrôle de cette maquette — aucune version antérieure à comparer.
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                       <div
@@ -1003,11 +1041,13 @@ export default function QcHygieneDashboardPage() {
                             breakdown={breakdownFor(model, warningBreakdown)}
                             projectId={project?.projectId || projectId}
                             linkState={detailLinkState}
+                            hideDelta={firstVersion}
                           />
                         ))}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <WhatChangedSection current={current} controls={controls} />
