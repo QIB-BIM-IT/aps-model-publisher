@@ -19,6 +19,11 @@ const {
   isSkipUnchangedVersionEnabled,
   shouldSkipUnchangedAutomaticRun,
 } = require('./qcSkipUnchangedVersion');
+const {
+  isSkipInFlightEnabled,
+  shouldSkipInFlightAutomaticRun,
+  IN_FLIGHT_STATUSES,
+} = require('./qcSkipInFlight');
 
 const POLL_INTERVAL_MS = parseInt(process.env.QC_POLL_INTERVAL_MS || '30000', 10);
 const POLL_TIMEOUT_MS = parseInt(process.env.QC_POLL_TIMEOUT_MS || '1200000', 10); // 20 min
@@ -129,8 +134,9 @@ class QcRunService {
    * @param {string} [p.runType]   - 'quotidien' (défaut) | 'jalon'
    * @param {string} [p.jobId]     - job qc à rattacher (optionnel)
    * @param {'automatic'|'manual'} [p.trigger='manual'] - 'automatic' = scheduler / rattrapage /
-   *   futur webhook de publication (garde-fou version inchangée). 'manual' = Run Now / POST /runs
-   *   (jamais sauté). Défaut manual : un appel oublié n'économise pas un contrôle.
+   *   futur webhook de publication (garde-fous version inchangée ET run déjà en cours).
+   *   'manual' = Run Now / POST /runs (jamais sauté). Défaut manual : un appel oublié
+   *   n'économise pas un contrôle.
    * @param {string} [p.simulerEchec] - TEST UNIQUEMENT : code du contrôle MODÈLE à faire
    *                                    échouer dans l'addin (preuve d'isolation)
    */
@@ -203,6 +209,38 @@ class QcRunService {
           `(activities configurées: ${qcDa.configuredVersions().join(', ') || 'aucune'}). Aucun workitem soumis.`,
         guard: 'version',
       });
+    }
+
+    // Garde-fou automatique : un run est déjà en cours sur CETTE maquette → pas de workitem.
+    // Indépendant du garde-fou version (ci-dessous) : une nouvelle version ACC ne lève pas
+    // celui-ci. Manuel / flag off / GUID inconnu / run trop vieux (au-delà du timeout de
+    // polling) / doute → on soumet. AUCUNE ligne qc.runs si sauté.
+    const inFlightDecision = await this._evaluateInFlightSkip({ trigger, resolved });
+    if (inFlightDecision.skip) {
+      await this._markAssociatedJobIdle(jobId);
+      const other = inFlightDecision.inFlightRun;
+      logger.info(
+        `[QC] Run automatique sauté (run déjà en cours): job=${jobId || '-'} ` +
+          `model=${resolved.modelGuid} file=${resolved.fileName || '-'} ` +
+          `enCours=${other.id} status=${other.status} startedAt=${
+            other.startedAtUtc instanceof Date
+              ? other.startedAtUtc.toISOString()
+              : other.startedAtUtc
+          } ` +
+          `— aucun workitem, aucune ligne qc.runs`
+      );
+      return {
+        skipped: true,
+        reason: 'run_in_flight',
+        jobId,
+        accModelGuid: resolved.modelGuid,
+        modelVersion: resolved.dmVersionNumber,
+        versionUrn: resolved.versionUrn,
+        fileName: resolved.fileName || null,
+        inFlightRunId: other.id,
+        inFlightStatus: other.status,
+        inFlightStartedAtUtc: other.startedAtUtc,
+      };
     }
 
     // Garde-fou automatique : version ACC déjà contrôlée avec succès → pas de workitem.
@@ -403,6 +441,49 @@ class QcRunService {
   }
 
   /**
+   * Run encore en vol pour cette maquette (même accModelGuid), limité au délai de
+   * polling DA. Doute (erreur SQL, GUID invalide) → null → on soumet.
+   */
+  async _findInFlightRunForModel(accModelGuid) {
+    const guid = String(accModelGuid || '').trim();
+    if (!guid || guid === NIL_GUID || !this._isGuid(guid)) return null;
+    const { QCRun } = this.getModels();
+    const { Op } = require('sequelize');
+    const cutoff = new Date(Date.now() - POLL_TIMEOUT_MS);
+    return QCRun.findOne({
+      where: {
+        accModelGuid: guid,
+        status: IN_FLIGHT_STATUSES,
+        startedAtUtc: { [Op.gte]: cutoff },
+      },
+      order: [['startedAtUtc', 'DESC']],
+    });
+  }
+
+  async _evaluateInFlightSkip({ trigger, resolved }) {
+    const enabled = isSkipInFlightEnabled();
+    try {
+      const inFlightRun = resolved?.modelGuid
+        ? await this._findInFlightRunForModel(resolved.modelGuid)
+        : null;
+      const skip = shouldSkipInFlightAutomaticRun({
+        trigger,
+        enabled,
+        resolved,
+        inFlightRun,
+        now: Date.now(),
+        maxAgeMs: POLL_TIMEOUT_MS,
+      });
+      return { skip, enabled, inFlightRun };
+    } catch (e) {
+      logger.warn(
+        `[QC] Garde-fou run en cours: évaluation échouée, soumission (${e.message})`
+      );
+      return { skip: false, enabled, inFlightRun: null };
+    }
+  }
+
+  /**
    * Run sauté : le job ne doit ni rester `running` ni passer en `error`.
    * lastRun / nextRun restent ceux déjà posés par le scheduler (créneau consommé).
    */
@@ -412,7 +493,7 @@ class QcRunService {
       const { QCJob } = this.getModels();
       const [updated] = await QCJob.update({ status: 'idle' }, { where: { id: jobId } });
       if (updated === 0) {
-        logger.warn(`[QC] Job ${jobId} introuvable pour retour idle après saut (version inchangée)`);
+        logger.warn(`[QC] Job ${jobId} introuvable pour retour idle après saut`);
       }
     } catch (e) {
       logger.warn(`[QC] Retour idle job ${jobId} après saut échoué: ${e.message}`);

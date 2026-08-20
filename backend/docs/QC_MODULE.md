@@ -59,10 +59,19 @@ rattrapage créneaux manqués (même `MISSED_RUN_GRACE_MIN`). Migration `0005` :
 `nextRun` / `lastRun` sur `qc.jobs`. Le chemin sync Publish/PDF/Copie est inchangé.
 **Garde-fou version inchangée** : après `resolveModel` (GET tip DM, version connue **avant**
 soumission) et avant `QCRun.create` / `submitWorkitem`, un run `trigger=automatic` est sauté
-si `versionUrn` (repli `modelVersion`) égale le dernier `qc.runs` **success** de la même
+si `versionUrn` (repli `modelVersion`) égale le dernier `qc.runs` **success** de cette
 maquette. Job → `idle` (pas `error`), `nextRun` déjà recalculé. Aucune ligne `qc.runs`
 (évite de fausser historique / dashboard / dernier succès). Désactivation :
 `QC_SKIP_UNCHANGED_VERSION=false` (env global, zéro migration). Run Now reste `trigger=manual`.
+**Garde-fou run déjà en cours** : même point d'insertion, **indépendant** du précédent. Un
+run `trigger=automatic` est sauté s'il existe déjà un `qc.runs` de la **même maquette**
+(`accModelGuid`) en statut `queued` | `submitted` | `running` dont `startedAtUtc` n'est pas
+plus vieux que `QC_POLL_TIMEOUT_MS` (défaut 20 min — le délai d'expiration du polling DA).
+Au-delà, le run n'est plus considéré en cours (un `running` coincé, non couvert par le
+watchdog Publish/PDF/Copie, ne paralyse pas la maquette). Trace journal uniquement.
+Désactivation : `QC_SKIP_IN_FLIGHT=false`. Run Now **jamais** sauté. Doute → soumettre.
+Concurrence check-then-create acceptée (pas d'index unique : une migration serait requise) ;
+un double submit rare vaut mieux qu'un contrôle manquant.
 **Mails d’échec QC** : label `jobTypeLabel('qc')` prêt, mais les jobs QC n’ont pas encore
 de champs notification — pas d’envoi mail QC pour l’instant.
 
@@ -126,6 +135,7 @@ POST /api/qc/runs (JWT)                       [qc.routes.js]
 | `QC_DA_NICKNAME` / `QC_DA_APPBUNDLE` / `QC_DA_ACTIVITY` / `QC_DA_ALIAS` / `QC_DA_ENGINE` | non | Défauts : client id / `QcExtractor` / `QcExtractG408` / `prod` / `Autodesk.Revit+2024`. |
 | `QC_POLL_INTERVAL_MS` / `QC_POLL_TIMEOUT_MS` | non | Polling de secours (30 000 / 1 200 000). |
 | `QC_SKIP_UNCHANGED_VERSION` | non | Garde-fou des runs **automatiques** (cron + rattrapage). Défaut **actif** : pas de workitem si la version ACC de la maquette est identique au dernier run **réussi** de cette maquette. `false` / `0` / `off` / `no` désactive. Run Now / `POST /runs` **jamais** sauté. Trace : journal uniquement (aucune ligne `qc.runs`). |
+| `QC_SKIP_IN_FLIGHT` | non | Garde-fou des runs **automatiques** : pas de workitem si un run de **cette maquette** (`accModelGuid`) est déjà `queued` / `submitted` / `running` et plus récent que `QC_POLL_TIMEOUT_MS`. Défaut **actif**. `false` / `0` / `off` / `no` désactive. Run Now **jamais** sauté. Indépendant de `QC_SKIP_UNCHANGED_VERSION`. Trace journal uniquement. |
 
 **Scopes** : ajouter `code:all` à `APS_SCOPES` (3 legs, pour les prochains logins) et il est
 demandé automatiquement par le token 2 legs privé du module QC. Montée progressive : aucune
