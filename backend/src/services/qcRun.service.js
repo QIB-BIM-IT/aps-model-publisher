@@ -15,6 +15,10 @@ const crypto = require('crypto');
 const logger = require('../config/logger');
 const apsAuthService = require('./apsAuth.service');
 const qcDa = require('./qcDesignAutomation.service');
+const {
+  isSkipUnchangedVersionEnabled,
+  shouldSkipUnchangedAutomaticRun,
+} = require('./qcSkipUnchangedVersion');
 
 const POLL_INTERVAL_MS = parseInt(process.env.QC_POLL_INTERVAL_MS || '30000', 10);
 const POLL_TIMEOUT_MS = parseInt(process.env.QC_POLL_TIMEOUT_MS || '1200000', 10); // 20 min
@@ -124,10 +128,20 @@ class QcRunService {
    *                                 | { projectId, itemUrn } — aucun GUID codé en dur
    * @param {string} [p.runType]   - 'quotidien' (défaut) | 'jalon'
    * @param {string} [p.jobId]     - job qc à rattacher (optionnel)
+   * @param {'automatic'|'manual'} [p.trigger='manual'] - 'automatic' = scheduler / rattrapage /
+   *   futur webhook de publication (garde-fou version inchangée). 'manual' = Run Now / POST /runs
+   *   (jamais sauté). Défaut manual : un appel oublié n'économise pas un contrôle.
    * @param {string} [p.simulerEchec] - TEST UNIQUEMENT : code du contrôle MODÈLE à faire
    *                                    échouer dans l'addin (preuve d'isolation)
    */
-  async startRun({ user, designation, runType = 'quotidien', jobId = null, simulerEchec = null }) {
+  async startRun({
+    user,
+    designation,
+    runType = 'quotidien',
+    jobId = null,
+    trigger = 'manual',
+    simulerEchec = null,
+  }) {
     if (!this._ready) throw this._err(503, 'Module QC non initialisé');
     if (!qcDa.isConfigured()) throw this._err(503, qcDa.configurationHint());
     if (!['quotidien', 'jalon'].includes(runType)) {
@@ -189,6 +203,33 @@ class QcRunService {
           `(activities configurées: ${qcDa.configuredVersions().join(', ') || 'aucune'}). Aucun workitem soumis.`,
         guard: 'version',
       });
+    }
+
+    // Garde-fou automatique : version ACC déjà contrôlée avec succès → pas de workitem.
+    // La version est connue ICI (GET tip DM, sans ouverture du modèle) — AVANT submitWorkitem.
+    // Manuel / version inconnue / pas d'ancien succès / flag off → on soumet (comportement actuel).
+    const skipDecision = await this._evaluateUnchangedVersionSkip({ trigger, resolved });
+    if (skipDecision.skip) {
+      await this._markAssociatedJobIdle(jobId);
+      logger.info(
+        `[QC] Run automatique sauté (version inchangée): job=${jobId || '-'} ` +
+          `model=${resolved.modelGuid} file=${resolved.fileName || '-'} ` +
+          `version=${resolved.dmVersionNumber} urn=${resolved.versionUrn || '-'} ` +
+          `dernierSuccès=${skipDecision.lastSuccess.id} (v${skipDecision.lastSuccess.modelVersion}) ` +
+          `— aucun workitem, aucune ligne qc.runs`
+      );
+      return {
+        skipped: true,
+        reason: 'unchanged_version',
+        jobId,
+        accModelGuid: resolved.modelGuid,
+        modelVersion: resolved.dmVersionNumber,
+        versionUrn: resolved.versionUrn,
+        fileName: resolved.fileName || null,
+        previousRunId: skipDecision.lastSuccess.id,
+        previousModelVersion: skipDecision.lastSuccess.modelVersion,
+        previousVersionUrn: skipDecision.lastSuccess.versionUrn,
+      };
     }
 
     const { QCRun } = this.getModels();
@@ -329,6 +370,53 @@ class QcRunService {
     logger.warn(`[QC] Run ${run.id} refusé (garde=${guard}): ${message}`);
     await this._syncAssociatedJobStatus(run, 'failed');
     return run;
+  }
+
+  /**
+   * Dernier run RÉUSSI de cette maquette (même accModelGuid).
+   * Aligné sur le tableau de bord / éléments désignés : status=success, plus récent
+   * par COALESCE(endedAtUtc, startedAtUtc, createdAt). Requête dédiée (un modèle).
+   */
+  async _findLastSuccessfulRunForModel(accModelGuid) {
+    const guid = String(accModelGuid || '').trim();
+    if (!guid || guid === NIL_GUID || !this._isGuid(guid)) return null;
+    const { QCRun } = this.getModels();
+    const { sequelize } = require('../config/database');
+    return QCRun.findOne({
+      where: { accModelGuid: guid, status: 'success' },
+      order: [[sequelize.literal('COALESCE("endedAtUtc", "startedAtUtc", "createdAt")'), 'DESC']],
+    });
+  }
+
+  async _evaluateUnchangedVersionSkip({ trigger, resolved }) {
+    const enabled = isSkipUnchangedVersionEnabled();
+    const lastSuccess = resolved?.modelGuid
+      ? await this._findLastSuccessfulRunForModel(resolved.modelGuid)
+      : null;
+    const skip = shouldSkipUnchangedAutomaticRun({
+      trigger,
+      enabled,
+      resolved,
+      lastSuccess,
+    });
+    return { skip, enabled, lastSuccess };
+  }
+
+  /**
+   * Run sauté : le job ne doit ni rester `running` ni passer en `error`.
+   * lastRun / nextRun restent ceux déjà posés par le scheduler (créneau consommé).
+   */
+  async _markAssociatedJobIdle(jobId) {
+    if (!jobId) return;
+    try {
+      const { QCJob } = this.getModels();
+      const [updated] = await QCJob.update({ status: 'idle' }, { where: { id: jobId } });
+      if (updated === 0) {
+        logger.warn(`[QC] Job ${jobId} introuvable pour retour idle après saut (version inchangée)`);
+      }
+    } catch (e) {
+      logger.warn(`[QC] Retour idle job ${jobId} après saut échoué: ${e.message}`);
+    }
   }
 
   // ======== Complétion (double canal, verrou EN BASE) ========

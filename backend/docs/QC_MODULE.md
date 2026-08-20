@@ -57,6 +57,12 @@ branche **async** early-return (`runQcJob`) — `startRun` puis rendu de la main
 que Publish (refresh_token en `public.users`). `initQcSchedule()` après `qcRun.init()` ;
 rattrapage créneaux manqués (même `MISSED_RUN_GRACE_MIN`). Migration `0005` :
 `nextRun` / `lastRun` sur `qc.jobs`. Le chemin sync Publish/PDF/Copie est inchangé.
+**Garde-fou version inchangée** : après `resolveModel` (GET tip DM, version connue **avant**
+soumission) et avant `QCRun.create` / `submitWorkitem`, un run `trigger=automatic` est sauté
+si `versionUrn` (repli `modelVersion`) égale le dernier `qc.runs` **success** de la même
+maquette. Job → `idle` (pas `error`), `nextRun` déjà recalculé. Aucune ligne `qc.runs`
+(évite de fausser historique / dashboard / dernier succès). Désactivation :
+`QC_SKIP_UNCHANGED_VERSION=false` (env global, zéro migration). Run Now reste `trigger=manual`.
 **Mails d’échec QC** : label `jobTypeLabel('qc')` prêt, mais les jobs QC n’ont pas encore
 de champs notification — pas d’envoi mail QC pour l’instant.
 
@@ -119,6 +125,7 @@ POST /api/qc/runs (JWT)                       [qc.routes.js]
 | `QC_CALLBACK_SECRET` | non | Secret HMAC du callback (défaut : `WEBHOOK_SECRET` puis `JWT_SECRET`). |
 | `QC_DA_NICKNAME` / `QC_DA_APPBUNDLE` / `QC_DA_ACTIVITY` / `QC_DA_ALIAS` / `QC_DA_ENGINE` | non | Défauts : client id / `QcExtractor` / `QcExtractG408` / `prod` / `Autodesk.Revit+2024`. |
 | `QC_POLL_INTERVAL_MS` / `QC_POLL_TIMEOUT_MS` | non | Polling de secours (30 000 / 1 200 000). |
+| `QC_SKIP_UNCHANGED_VERSION` | non | Garde-fou des runs **automatiques** (cron + rattrapage). Défaut **actif** : pas de workitem si la version ACC de la maquette est identique au dernier run **réussi** de cette maquette. `false` / `0` / `off` / `no` désactive. Run Now / `POST /runs` **jamais** sauté. Trace : journal uniquement (aucune ligne `qc.runs`). |
 
 **Scopes** : ajouter `code:all` à `APS_SCOPES` (3 legs, pour les prochains logins) et il est
 demandé automatiquement par le token 2 legs privé du module QC. Montée progressive : aucune

@@ -142,8 +142,10 @@ async function resolveJobById(jobId) {
  * Token Autodesk : même mécanisme que Publish (apsAuth.ensureValidToken via startRun
  * sur le userId propriétaire du job / refresh_token en public.users).
  * Finalisation job idle/error : qcRun._syncAssociatedJobStatus (PR #192).
+ * trigger=automatic (cron + rattrapage) : garde-fou version inchangée.
+ * trigger=manual (Run Now) : toujours soumis.
  */
-async function runQcJob(job) {
+async function runQcJob(job, { trigger = 'automatic' } = {}) {
   const User = require('../models/User');
   const qcRunService = require('./qcRun.service');
 
@@ -185,7 +187,22 @@ async function runQcJob(job) {
       },
       runType: 'quotidien',
       jobId: job.id,
+      trigger,
     });
+    if (run?.skipped) {
+      await job.reload();
+      if (job.status === 'running') {
+        job.status = 'idle';
+        await job.save();
+      }
+      logger.info(
+        `[Scheduler] QC job ${job.id} sauté (version inchangée v${run.modelVersion}, ` +
+          `dernierSuccès=${run.previousRunId}) — idle, nextRun=${
+            job.nextRun instanceof Date ? job.nextRun.toISOString() : job.nextRun
+          }, aucun workitem`
+      );
+      return run;
+    }
     logger.info(
       `[Scheduler] QC job ${job.id} soumis async (run=${run?.id}, status=${run?.status}) — pas de lock projet, finalisation via callback/poll`
     );
@@ -548,11 +565,14 @@ async function runJobNow(jobId, options = {}) {
     return { run: null, alreadyRunning: false };
   }
 
-  // —— QC Run Now : async, sans lock projet ——
+  // —— QC Run Now / rattrapage QC : async, sans lock projet ——
+  // Défaut MANUAL : POST /jobs/:id/run ne doit jamais sauter.
+  // Le rattrapage des créneaux QC passe { trigger: 'automatic' }.
   if (getJobType(job) === 'qc') {
+    const trigger = options.trigger === 'automatic' ? 'automatic' : 'manual';
     RUNNING.add(key);
     try {
-      const run = await runQcJob(job);
+      const run = await runQcJob(job, { trigger });
       return { run, alreadyRunning: false };
     } catch (e) {
       logger.error(`[Scheduler] runJobNow QC error: ${e.message}`);
@@ -840,7 +860,7 @@ async function initQcSchedule() {
     missedJobIds.forEach((jobId, i) => {
       setTimeout(() => {
         logger.info(`[Scheduler] Rattrapage du créneau QC manqué pour job ${jobId}`);
-        runJobNow(jobId).catch((e) =>
+        runJobNow(jobId, { trigger: 'automatic' }).catch((e) =>
           logger.error(`[Scheduler] Rattrapage QC job ${jobId} échec: ${e.message}`)
         );
       }, i * 5000);
