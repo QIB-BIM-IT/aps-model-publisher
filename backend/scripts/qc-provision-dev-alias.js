@@ -2,6 +2,11 @@
 // Provisionne UNIQUEMENT l'alias `dev` (appbundles + activities QC).
 // L'alias `prod` n'est JAMAIS créé, patché, ni mentionné en écriture.
 //
+// La définition d'activity référence le bundle par le MÊME alias que l'activity
+// (`TARGET_ALIAS`, défaut `dev`). Ne plus graver `+dev` en dur à un endroit et
+// un autre alias ailleurs : pointer `prod` vers une version `+dev` recouple
+// la production au bac à sable (DA résout l'alias de bundle au workitem).
+//
 // Usage (depuis backend/) :
 //   node scripts/qc-provision-dev-alias.js
 //
@@ -15,8 +20,20 @@ const { apsConfig } = require('../src/config/aps.config');
 
 const BASE = apsConfig.apis.baseUrl;
 const DA = apsConfig.apis.designAutomation;
+// Alias d'activity que CE script a le droit d'écrire. L'alias de bundle
+// inscrit dans la définition d'activity DOIT être le même (sinon un PATCH
+// ultérieur de `prod` vers cette version recouple la production à `dev`).
+const TARGET_ALIAS = String(process.env.QC_DA_PROVISION_ALIAS || 'dev').trim();
 const DEV = 'dev';
 const PROD = 'prod';
+if (TARGET_ALIAS !== DEV) {
+  throw new Error(
+    `qc-provision-dev-alias.js ne provisionne que l'alias "${DEV}" ` +
+      `(QC_DA_PROVISION_ALIAS=${TARGET_ALIAS}). Pour production: créer une ` +
+      `version d'activity dont appbundles référence +prod, puis PATCH prod — ` +
+      `ne jamais pointer prod vers une version +dev.`
+  );
+}
 
 const RESOURCES = [
   { kind: 'appbundles', id: 'qc_extractor_appbundle_2024' },
@@ -114,16 +131,16 @@ async function newAppbundleVersion(id, engine, zipPath, token) {
   return r.data.version;
 }
 
-async function ensureDevAlias(kind, id, version, token) {
-  const r = await daFetch('POST', `${BASE}${listPath(kind)}/${id}/aliases`, { id: DEV, version }, token);
+async function ensureTargetAlias(kind, id, version, token) {
+  const r = await daFetch('POST', `${BASE}${listPath(kind)}/${id}/aliases`, { id: TARGET_ALIAS, version }, token);
   if (r.status === 409) {
-    const p = await daFetch('PATCH', `${BASE}${listPath(kind)}/${id}/aliases/${DEV}`, { version }, token);
-    if (p.status >= 300) fail(`PATCH ${kind}/${id}+${DEV}`, p);
-    console.log(`Alias ${id}+${DEV} mis à jour → version ${version} (prod non touché)`);
+    const p = await daFetch('PATCH', `${BASE}${listPath(kind)}/${id}/aliases/${TARGET_ALIAS}`, { version }, token);
+    if (p.status >= 300) fail(`PATCH ${kind}/${id}+${TARGET_ALIAS}`, p);
+    console.log(`Alias ${id}+${TARGET_ALIAS} mis à jour → version ${version} (prod non touché)`);
     return;
   }
-  if (r.status >= 300) fail(`POST ${kind}/${id}+${DEV}`, r);
-  console.log(`Alias ${id}+${DEV} créé → version ${version} (prod non touché)`);
+  if (r.status >= 300) fail(`POST ${kind}/${id}+${TARGET_ALIAS}`, r);
+  console.log(`Alias ${id}+${TARGET_ALIAS} créé → version ${version} (prod non touché)`);
 }
 
 async function getQualified(kind, qualifiedId, token) {
@@ -161,7 +178,7 @@ async function main() {
     zip2024,
     token
   );
-  await ensureDevAlias('appbundles', 'qc_extractor_appbundle_2024', bundleVer2024, token);
+  await ensureTargetAlias('appbundles', 'qc_extractor_appbundle_2024', bundleVer2024, token);
 
   const bundleVer2025 = await newAppbundleVersion(
     'qc_extractor_appbundle_2025',
@@ -169,27 +186,27 @@ async function main() {
     zip2025,
     token
   );
-  await ensureDevAlias('appbundles', 'qc_extractor_appbundle_2025', bundleVer2025, token);
+  await ensureTargetAlias('appbundles', 'qc_extractor_appbundle_2025', bundleVer2025, token);
 
   // 2026 : pas de zip dédié (engine 2026 réutilise le bundle net8 2025).
   // Si un appbundle_2026 existe, on ne le versionne pas ici.
 
-  // --- Activities : nouvelle version qui référence le bundle +dev ---
+  // --- Activities : nouvelle version dont le bundle suit le MÊME alias que l'activity ---
   const actSpecs = [
     {
       id: 'qc_extractor_activity_2024',
       engine: 'Autodesk.Revit+2024',
-      bundle: `${nickname}.qc_extractor_appbundle_2024+${DEV}`,
+      bundle: `${nickname}.qc_extractor_appbundle_2024+${TARGET_ALIAS}`,
     },
     {
       id: 'qc_extractor_activity_2025',
       engine: 'Autodesk.Revit+2025',
-      bundle: `${nickname}.qc_extractor_appbundle_2025+${DEV}`,
+      bundle: `${nickname}.qc_extractor_appbundle_2025+${TARGET_ALIAS}`,
     },
     {
       id: 'qc_extractor_activity_2026',
       engine: 'Autodesk.Revit+2026',
-      bundle: `${nickname}.qc_extractor_appbundle_2025+${DEV}`,
+      bundle: `${nickname}.qc_extractor_appbundle_2025+${TARGET_ALIAS}`,
     },
   ];
 
@@ -204,16 +221,16 @@ async function main() {
       description: current.description || `QC BIM ${spec.id} (alias dev)`,
     };
     const ver = await newActivityVersion(spec.id, payload, token);
-    await ensureDevAlias('activities', spec.id, ver, token);
-    console.log(`Activity ${spec.id}+${DEV} → v${ver} bundle=${spec.bundle}`);
+    await ensureTargetAlias('activities', spec.id, ver, token);
+    console.log(`Activity ${spec.id}+${TARGET_ALIAS} → v${ver} bundle=${spec.bundle}`);
   }
 
   const after = await snapshotAliases(token, 'APRÈS');
   assertProdUnchanged(before, after);
 
-  console.log('\n===== ACTIVITY IDs DEV (à poser en local uniquement) =====');
+  console.log('\n===== ACTIVITY IDs (alias provisionné, à poser en local uniquement) =====');
   for (const v of ['2024', '2025', '2026']) {
-    console.log(`QC_DA_ACTIVITY_ID_${v}=${nickname}.qc_extractor_activity_${v}+${DEV}`);
+    console.log(`QC_DA_ACTIVITY_ID_${v}=${nickname}.qc_extractor_activity_${v}+${TARGET_ALIAS}`);
   }
 }
 
