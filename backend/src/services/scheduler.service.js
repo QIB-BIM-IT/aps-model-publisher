@@ -142,7 +142,7 @@ async function resolveJobById(jobId) {
  * Token Autodesk : même mécanisme que Publish (apsAuth.ensureValidToken via startRun
  * sur le userId propriétaire du job / refresh_token en public.users).
  * Finalisation job idle/error : qcRun._syncAssociatedJobStatus (PR #192).
- * trigger=automatic (cron + rattrapage) : garde-fou version inchangée.
+ * trigger=automatic (cron + rattrapage) : garde-fous version inchangée et run déjà en cours.
  * trigger=manual (Run Now) : toujours soumis.
  */
 async function runQcJob(job, { trigger = 'automatic' } = {}) {
@@ -195,11 +195,14 @@ async function runQcJob(job, { trigger = 'automatic' } = {}) {
         job.status = 'idle';
         await job.save();
       }
+      const nextIso =
+        job.nextRun instanceof Date ? job.nextRun.toISOString() : job.nextRun;
+      const reasonLabel =
+        run.reason === 'run_in_flight'
+          ? `run déjà en cours (${run.inFlightRunId}, status=${run.inFlightStatus})`
+          : `version inchangée v${run.modelVersion}, dernierSuccès=${run.previousRunId}`;
       logger.info(
-        `[Scheduler] QC job ${job.id} sauté (version inchangée v${run.modelVersion}, ` +
-          `dernierSuccès=${run.previousRunId}) — idle, nextRun=${
-            job.nextRun instanceof Date ? job.nextRun.toISOString() : job.nextRun
-          }, aucun workitem`
+        `[Scheduler] QC job ${job.id} sauté (${reasonLabel}) — idle, nextRun=${nextIso}, aucun workitem`
       );
       return run;
     }
