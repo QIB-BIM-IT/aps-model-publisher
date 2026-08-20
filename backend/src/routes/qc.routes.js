@@ -85,6 +85,7 @@ router.post('/runs', authenticateToken, async (req, res) => {
       designation: extractDesignation(req.body),
       runType: runType || 'quotidien',
       jobId: jobId || null,
+      trigger: 'manual',
       simulerEchec: simulerEchec || null, // TEST uniquement (isolation des extracteurs)
     });
     // Un run refusé par une garde est créé failed sans workitem : 200 avec le run,
