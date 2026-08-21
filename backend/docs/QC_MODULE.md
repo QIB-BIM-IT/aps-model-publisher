@@ -70,6 +70,12 @@ plus vieux que `QC_POLL_TIMEOUT_MS` (défaut 20 min — le délai d'expiration d
 Au-delà, le run n'est plus considéré en cours (un `running` coincé, non couvert par le
 watchdog Publish/PDF/Copie, ne paralyse pas la maquette). Trace journal uniquement.
 Désactivation : `QC_SKIP_IN_FLIGHT=false`. Run Now **jamais** sauté. Doute → soumettre.
+**Déclenchement à la publication** : après l'horodatage Publish/PDF/Copie (inchangé), un
+`dm.version.added` dont le fichier est une maquette `.rvt` et qui correspond à un
+`qc.jobs.modelUrn` (lignée) lance `runJobNow(..., { trigger: 'automatic' })` en
+fire-and-forget. Interrupteur `QC_TRIGGER_ON_PUBLISH` (**off** par défaut). PDF / copies
+déposés par l'app exclus par le filtre d'extension (pas de boucle). Si le tip DM n'a pas
+encore la version du webhook, une reprise unique après 8 s (`QC_TRIGGER_ON_PUBLISH_TIP_RETRY_MS`).
 Concurrence check-then-create acceptée (pas d'index unique : une migration serait requise) ;
 un double submit rare vaut mieux qu'un contrôle manquant.
 **Mails d’échec QC** : label `jobTypeLabel('qc')` prêt, mais les jobs QC n’ont pas encore
@@ -136,6 +142,7 @@ POST /api/qc/runs (JWT)                       [qc.routes.js]
 | `QC_POLL_INTERVAL_MS` / `QC_POLL_TIMEOUT_MS` | non | Polling de secours (30 000 / 1 200 000). |
 | `QC_SKIP_UNCHANGED_VERSION` | non | Garde-fou des runs **automatiques** (cron + rattrapage). Défaut **actif** : pas de workitem si la version ACC de la maquette est identique au dernier run **réussi** de cette maquette. `false` / `0` / `off` / `no` désactive. Run Now / `POST /runs` **jamais** sauté. Trace : journal uniquement (aucune ligne `qc.runs`). |
 | `QC_SKIP_IN_FLIGHT` | non | Garde-fou des runs **automatiques** : pas de workitem si un run de **cette maquette** (`accModelGuid`) est déjà `queued` / `submitted` / `running` et plus récent que `QC_POLL_TIMEOUT_MS`. Défaut **actif**. `false` / `0` / `off` / `no` désactive. Run Now **jamais** sauté. Indépendant de `QC_SKIP_UNCHANGED_VERSION`. Trace journal uniquement. |
+| `QC_TRIGGER_ON_PUBLISH` | non | Déclenche un run QC **automatique** à la réception d'un `dm.version.added` pour une maquette Revit (`.rvt`) qui a une tâche `qc.jobs`. Défaut **inactif**. `true` / `1` / `on` / `yes` active. Les garde-fous version / run en cours s'appliquent. Aucune inscription Autodesk supplémentaire. |
 
 **Scopes** : ajouter `code:all` à `APS_SCOPES` (3 legs, pour les prochains logins) et il est
 demandé automatiquement par le token 2 legs privé du module QC. Montée progressive : aucune

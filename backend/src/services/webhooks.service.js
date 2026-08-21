@@ -8,6 +8,15 @@ const { Op } = require('sequelize');
 const logger = require('../config/logger');
 const { apsConfig } = require('../config/aps.config');
 const { PublishRun, PDFExportRun, CopyRun } = require('../models');
+const {
+  isTriggerOnPublishEnabled,
+  getTipRetryDelayMs,
+  isRevitModelPayload,
+  lineageKey,
+  urnsMatch,
+  projectJobMatches,
+  shouldRetryForStaleTip,
+} = require('./qcTriggerOnPublish');
 
 // Note: Op est importé de Sequelize pour les requêtes avec opérateurs (gte, lte, etc.)
 
@@ -453,6 +462,11 @@ class WebhooksService {
     if (hookEvent.startsWith('dm.') || resourceType === 'data' ||
         eventType.includes('version') || eventType.includes('item')) {
       await this.handleDataVersionAdded(event);
+      // QC : après l'horodatage Publish/PDF/Copie, SANS l'attendre ni le modifier.
+      // Fire-and-forget : la réponse HTTP Autodesk est déjà partie (routes L83-91).
+      this._qcTriggerPromise = this._maybeTriggerQcFromPublish(event).catch((e) => {
+        logger.error(`[Webhooks][QC] Déclenchement échoué: ${e.message}`);
+      });
     } else if (resourceType.includes('pdf') || resourceType.includes('export') ||
                eventType.includes('pdf') || eventType.includes('export')) {
       // Chemin hérité (events explicites export.*) — conservé pour /test.
@@ -460,6 +474,113 @@ class WebhooksService {
     } else {
       logger.warn(`[Webhooks] Type d'événement non géré: ${eventType} (hook=${hookEvent}, resource=${resourceType})`);
     }
+  }
+
+  /**
+   * Run QC automatique si une tâche cible cette maquette. Jamais d'inscription Autodesk.
+   * Ne doit PAS être await dans le chemin HTTP (réponse Autodesk déjà envoyée).
+   */
+  async _maybeTriggerQcFromPublish(event) {
+    const payload = event?.payload || {};
+    const fileName = payload.name || payload.fileName || null;
+    const lineageUrn = payload.lineageUrn || null;
+    const versionUrn = payload.versionUrn || event?.resourceUrn || payload.resourceUrn || null;
+    const webhookVersion = payload.version != null ? payload.version : null;
+    const rawProject = payload.project || payload.projectId || null;
+
+    if (!isRevitModelPayload(payload)) {
+      logger.info(
+        `[Webhooks][QC] ignoré (type): file=${fileName || '-'} — pas une maquette Revit`
+      );
+      return { decision: 'ignored_type', fileName };
+    }
+
+    const job = await this._findQcJobForPublish({ lineageUrn, rawProject });
+    if (!job) {
+      logger.info(
+        `[Webhooks][QC] ignoré (aucune tâche): file=${fileName || '-'} ` +
+          `lineage=${lineageUrn || '-'} project=${rawProject || '-'}`
+      );
+      return { decision: 'ignored_no_job', fileName, lineageUrn };
+    }
+
+    if (!isTriggerOnPublishEnabled()) {
+      logger.info(
+        `[Webhooks][QC] ignoré (QC_TRIGGER_ON_PUBLISH inactif): job=${job.id} ` +
+          `file=${fileName || '-'} lineage=${lineageUrn || '-'}`
+      );
+      return { decision: 'ignored_flag_off', fileName, jobId: job.id };
+    }
+
+    const qcRunService = require('./qcRun.service');
+    if (!qcRunService.isReady()) {
+      logger.warn(`[Webhooks][QC] Module QC non prêt, run non lancé (job=${job.id})`);
+      return { decision: 'ignored_qc_not_ready', jobId: job.id };
+    }
+
+    logger.info(
+      `[Webhooks][QC] run automatique demandé: job=${job.id} file=${fileName || '-'} ` +
+        `lineage=${lineageUrn || '-'} version=${webhookVersion ?? '-'} urn=${versionUrn || '-'}`
+    );
+
+    let result = await this._launchAutomaticQcJob(job);
+    if (
+      shouldRetryForStaleTip({
+        skipped: !!result?.run?.skipped,
+        skipReason: result?.run?.reason,
+        webhookVersion,
+        resolvedVersion: result?.run?.modelVersion,
+        webhookVersionUrn: versionUrn,
+        resolvedVersionUrn: result?.run?.versionUrn,
+      })
+    ) {
+      const delayMs = getTipRetryDelayMs();
+      logger.info(
+        `[Webhooks][QC] tip probablement en retard (webhook v${webhookVersion} ` +
+          `vs résolu v${result.run.modelVersion}) — reprise dans ${delayMs}ms job=${job.id}`
+      );
+      if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+      result = await this._launchAutomaticQcJob(job);
+    }
+
+    if (result?.run?.skipped) {
+      logger.info(
+        `[Webhooks][QC] run sauté (${result.run.reason}): job=${job.id} file=${fileName || '-'}`
+      );
+      return { decision: 'skipped', reason: result.run.reason, jobId: job.id, run: result.run };
+    }
+    if (result?.alreadyRunning) {
+      logger.info(`[Webhooks][QC] job déjà en cours côté scheduler: job=${job.id}`);
+      return { decision: 'skipped', reason: 'scheduler_already_running', jobId: job.id };
+    }
+    logger.info(
+      `[Webhooks][QC] run lancé: job=${job.id} run=${result?.run?.id || '-'} ` +
+        `status=${result?.run?.status || '-'} trigger=automatic`
+    );
+    return { decision: 'launched', jobId: job.id, run: result?.run || null };
+  }
+
+  async _findQcJobForPublish({ lineageUrn, rawProject }) {
+    const key = lineageKey(lineageUrn);
+    if (!key) return null;
+    let QCJob;
+    try {
+      ({ QCJob } = require('../models/qc'));
+    } catch (e) {
+      logger.warn(`[Webhooks][QC] modèles qc indisponibles: ${e.message}`);
+      return null;
+    }
+    const jobs = await QCJob.findAll({ where: { modelUrn: { [Op.ne]: null } } });
+    const byUrn = jobs.filter((j) => urnsMatch(j.modelUrn, lineageUrn));
+    if (byUrn.length === 0) return null;
+    const byProject = byUrn.filter((j) => projectJobMatches(j, rawProject));
+    const pool = byProject.length ? byProject : byUrn;
+    return pool[0];
+  }
+
+  async _launchAutomaticQcJob(job) {
+    const scheduler = require('./scheduler.service');
+    return scheduler.runJobNow(job.id, { job, trigger: 'automatic' });
   }
 
   /**
