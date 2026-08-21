@@ -243,6 +243,36 @@ export default function QcRunViewerPane({
     applyIsolate(isolateRequest);
   }, [open, isolateRequest, applyIsolate]);
 
+  // Canevas 3D : un changement de taille du conteneur ne met pas à jour la
+  // projection tout seul (image étirée / clics décalés). resize() à chaque
+  // observation, y compris pendant le glissement de la séparation.
+  useEffect(() => {
+    if (!open || blocking) return undefined;
+    const el = hostRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    let raf = 0;
+    const sync = () => {
+      const v = viewerRef.current;
+      if (v && typeof v.resize === 'function') {
+        try {
+          v.resize();
+        } catch (_) {
+          /* viewer en cours de teardown */
+        }
+      }
+    };
+    const ro = new ResizeObserver(() => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(sync);
+    });
+    ro.observe(el);
+    sync();
+    return () => {
+      ro.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [open, runId, blocking]);
+
   if (!open) {
     return (
       <button type="button" onClick={onToggle} style={btnSecondary}>
@@ -300,6 +330,7 @@ export default function QcRunViewerPane({
         overflow: 'hidden',
         background: '#0f172a',
         minHeight: 420,
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -336,7 +367,7 @@ export default function QcRunViewerPane({
       {blocking ? (
         <div style={{ padding: 16, color: '#e2e8f0', fontSize: 13, lineHeight: 1.5 }}>{blocking}</div>
       ) : (
-        <div ref={hostRef} style={{ flex: 1, minHeight: 380, height: 420 }} />
+        <div ref={hostRef} style={{ flex: 1, minHeight: 380 }} />
       )}
       {status && !blocking && (
         <div

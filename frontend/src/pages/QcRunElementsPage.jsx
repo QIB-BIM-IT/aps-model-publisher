@@ -7,6 +7,7 @@ import {
   qcDashboardReturnPath,
 } from '../components/qc-config/qcDashboardNav';
 import QcRunViewerPane from '../components/QcRunViewerPane';
+import QcElementsSplitLayout from '../components/QcElementsSplitLayout';
 import { isolationUnavailableMessage, notFoundMessage } from '../components/qcViewerIsolation';
 
 const VIOLET = '#7c3aed';
@@ -425,7 +426,7 @@ export default function QcRunElementsPage() {
 
   return (
     <div style={pageShell}>
-      <div style={{ ...pageInner, maxWidth: viewerOpen ? 1680 : 1280 }}>
+      <div style={{ ...pageInner, maxWidth: viewerOpen ? 1760 : 1280 }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
           {dashboardReturnPath ? (
             <button
@@ -460,13 +461,10 @@ export default function QcRunElementsPage() {
                   state: {
                     preSelectHub: run.hubId || location.state?.preSelectHub || null,
                     preSelectProject: run.projectId,
-                    ...(dashboardOrigin
+                          ...(dashboardOrigin
                       ? {
                           qcDashboardTheme: dashboardOrigin.theme,
                           qcDashboardAccModelGuid: dashboardOrigin.accModelGuid,
-                          ...(dashboardOrigin.series === 'run'
-                            ? { qcDashboardSeries: 'run' }
-                            : {}),
                         }
                       : {}),
                   },
@@ -541,14 +539,9 @@ export default function QcRunElementsPage() {
           </div>
         )}
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: viewerOpen ? 'minmax(0, 1fr) minmax(360px, 480px)' : '1fr',
-            gap: 16,
-            alignItems: 'start',
-          }}
-        >
+        <QcElementsSplitLayout
+          open={viewerOpen}
+          left={
         <div style={card}>
           <div
             style={{
@@ -860,17 +853,16 @@ export default function QcRunElementsPage() {
             </div>
           )}
         </div>
-        {viewerOpen && (
-          <div style={{ position: 'sticky', top: 16 }}>
+          }
+          right={
             <QcRunViewerPane
               runId={runId}
               open={viewerOpen}
               onToggle={() => setViewerOpen(false)}
               isolateRequest={isolateRequest}
             />
-          </div>
-        )}
-        </div>
+          }
+        />
       </div>
     </div>
   );
