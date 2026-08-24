@@ -57,6 +57,19 @@ function desiredSenseOf(entry) {
   return DESIRED_SENSE.has(v) ? v : 'aucun';
 }
 
+/**
+ * Affichage seulement : ce contrôle attend-il une cible / liste projet pour un verdict ?
+ * Faux pour les contrôles indicatifs par nature et pour les règles maison
+ * (G408, G412, G210…) — on n'invite pas à « configurer » ce qui n'a pas de cible.
+ */
+function attendCibleProjet(entry) {
+  const tw = entry?.descriptionCible?.typeWidget;
+  if (tw === 'indicatif' || tw === 'regleMaisonLectureSeule') return false;
+  if (tw === 'parametreUniformat') return true;
+  const cle = entry?.descriptionCible?.cleConfig;
+  return cle != null && String(cle).trim() !== '';
+}
+
 function metaForCodes(codes) {
   const catalog = qcProjectConfigService.loadCatalog();
   return codes.map((code) => {
@@ -67,6 +80,9 @@ function metaForCodes(codes) {
       unite: unitOf(code, entry),
       section: qcProjectConfigService.sectionOf(code),
       sensSouhaitable: desiredSenseOf(entry),
+      forme: entry.forme || null,
+      typeWidget: entry.descriptionCible?.typeWidget || null,
+      attendCibleProjet: attendCibleProjet(entry),
     };
   });
 }
@@ -123,6 +139,14 @@ function extrasFromSlim(code, json) {
       rempli: numOrNull(g.rempli),
       total: numOrNull(g.total),
       pourcentage: numOrNull(g.pourcentage),
+    };
+  }
+  if (code === 'G507') {
+    return {
+      aucunParametre: json.aucunParametre === true,
+      nbAttendus: numOrNull(json.nbAttendus),
+      nbPresents: numOrNull(json.nbPresents),
+      nbAbsents: numOrNull(json.nbAbsents),
     };
   }
   return null;
@@ -317,6 +341,12 @@ class QcDashboardService {
                 WHEN cr."controlCode" = 'G508' THEN jsonb_build_object(
                   'aucunParametre', cr.valeur_json->'aucunParametre',
                   'global', cr.valeur_json->'global'
+                )
+                WHEN cr."controlCode" = 'G507' THEN jsonb_build_object(
+                  'aucunParametre', cr.valeur_json->'aucunParametre',
+                  'nbAttendus', cr.valeur_json->'nbAttendus',
+                  'nbPresents', cr.valeur_json->'nbPresents',
+                  'nbAbsents', cr.valeur_json->'nbAbsents'
                 )
                 ELSE NULL
               END AS "valeurJsonSlim"
