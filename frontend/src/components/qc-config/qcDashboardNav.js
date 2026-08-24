@@ -10,10 +10,20 @@
 export const QC_DASHBOARD_DEFAULT_THEME = 'hygiene';
 
 export const QC_DASHBOARD_THEMES = [
-  { id: 'hygiene', label: 'Hygiène et santé du modèle', available: true },
-  { id: 'donnees', label: 'Données et codification', available: false },
-  { id: 'references', label: 'Références et positionnement', available: false },
-  { id: 'livraison', label: 'Conventions de livraison', available: false },
+  {
+    id: 'hygiene',
+    label: 'Hygiène et santé du modèle',
+    available: true,
+    controls: ['G408', 'G412', 'G411', 'G402', 'G410', 'G102'],
+  },
+  {
+    id: 'donnees',
+    label: 'Données et codification',
+    available: true,
+    controls: ['G504', 'G508', 'G502', 'G507', 'G105'],
+  },
+  { id: 'references', label: 'Références et positionnement', available: false, controls: [] },
+  { id: 'livraison', label: 'Conventions de livraison', available: false, controls: [] },
 ];
 
 export function qcDashboardThemeById(id) {

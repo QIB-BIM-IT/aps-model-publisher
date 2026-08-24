@@ -104,6 +104,27 @@ function extrasFromSlim(code, json) {
       typesGroupes: numOrNull(json.nbTypesGroupes),
     };
   }
+  if (code === 'G504') {
+    const c = json.couverture && typeof json.couverture === 'object' ? json.couverture : {};
+    return {
+      numerateur: numOrNull(c.numerateur),
+      denominateur: numOrNull(c.denominateur),
+      pourcentage: numOrNull(c.pourcentage),
+      nature: typeof c.nature === 'string' ? c.nature : null,
+      aucunElementDesign: json.aucunElementDesign === true,
+      nbEntitesFautives: numOrNull(json.nbEntitesFautives),
+      nbInstancesConcernees: numOrNull(json.nbInstancesConcernees),
+    };
+  }
+  if (code === 'G508') {
+    const g = json.global && typeof json.global === 'object' ? json.global : {};
+    return {
+      aucunParametre: json.aucunParametre === true,
+      rempli: numOrNull(g.rempli),
+      total: numOrNull(g.total),
+      pourcentage: numOrNull(g.pourcentage),
+    };
+  }
   return null;
 }
 
@@ -286,6 +307,16 @@ class QcDashboardService {
                 WHEN cr."controlCode" = 'G102' THEN jsonb_build_object(
                   'mo', cr.valeur_json->'mo',
                   'octets', cr.valeur_json->'octets'
+                )
+                WHEN cr."controlCode" = 'G504' THEN jsonb_build_object(
+                  'couverture', cr.valeur_json->'couverture',
+                  'aucunElementDesign', cr.valeur_json->'aucunElementDesign',
+                  'nbEntitesFautives', cr.valeur_json->'nbEntitesFautives',
+                  'nbInstancesConcernees', cr.valeur_json->'nbInstancesConcernees'
+                )
+                WHEN cr."controlCode" = 'G508' THEN jsonb_build_object(
+                  'aucunParametre', cr.valeur_json->'aucunParametre',
+                  'global', cr.valeur_json->'global'
                 )
                 ELSE NULL
               END AS "valeurJsonSlim"

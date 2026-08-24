@@ -268,6 +268,7 @@ class QcDesignatedElementsQueryService {
    * @param {string} [filters.sortBy]
    * @param {string} [filters.sortDir]
    * @param {boolean} [filters.idsOnly]
+   * @param {string} [filters.groupBy]  'category' : totaux par catégorie (tableau de bord)
    */
   async list(filters = {}) {
     const { QCDesignatedElement } = this.getModels();
@@ -289,6 +290,9 @@ class QcDesignatedElementsQueryService {
       if (!runIds.length) {
         if (filters.idsOnly) {
           return { run: null, project, total: 0, truncated: false, revitElementIds: [], labels: [], revitUniqueIds: [] };
+        }
+        if (String(filters.groupBy || '').toLowerCase() === 'category') {
+          return { run: null, project, total: 0, groups: [] };
         }
         return this.emptyList({ project, byModel: scopeModels.map((m) => ({ ...m, count: 0 })) });
       }
@@ -321,6 +325,27 @@ class QcDesignatedElementsQueryService {
           .filter((u) => u != null && String(u).trim() !== '')
           .map((u) => String(u).trim()),
       };
+    }
+
+    if (String(filters.groupBy || '').toLowerCase() === 'category') {
+      const rows = await QCDesignatedElement.findAll({
+        where,
+        attributes: [
+          'category',
+          [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
+          [sequelize.fn('COUNT', sequelize.col('revitUniqueId')), 'withUniqueId'],
+        ],
+        group: ['category'],
+        raw: true,
+        order: [[sequelize.literal('COUNT(*)'), 'DESC']],
+      });
+      const groups = (rows || []).map((r) => ({
+        category: r.category || null,
+        count: Number(r.count) || 0,
+        withUniqueId: Number(r.withUniqueId) || 0,
+      }));
+      const total = groups.reduce((sum, g) => sum + g.count, 0);
+      return { run, project, total, groups };
     }
 
     const { page, pageSize, offset } = parsePage(filters);

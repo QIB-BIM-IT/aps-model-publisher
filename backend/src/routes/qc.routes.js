@@ -229,6 +229,7 @@ function elementsQueryFromReq(req, extra = {}) {
     sortDir: req.query.sortDir,
     accModelGuid: req.query.accModelGuid,
     idsOnly: req.query.idsOnly === '1' || req.query.idsOnly === 'true',
+    groupBy: req.query.groupBy,
     ...extra,
   };
 }
@@ -238,6 +239,7 @@ function elementsQueryFromReq(req, extra = {}) {
  * Lecture paginée des éléments désignés d'un run.
  * Filtres : controlCode, category, level, q (libellé / type / famille).
  * idsOnly=1 : identifiants et libellés de tout le filtre (copie presse-papiers).
+ * groupBy=category : totaux par catégorie (tableau de bord, sans changer la liste paginée).
  */
 router.get('/runs/:id/elements', authenticateToken, async (req, res) => {
   if (!qcRunService.isReady()) return notReady(res);
