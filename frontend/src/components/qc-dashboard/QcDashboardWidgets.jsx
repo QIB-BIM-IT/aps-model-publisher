@@ -16,7 +16,6 @@ import {
 import { card } from '../qc-config/qcTheme';
 import {
   DELTA_TONE,
-  MIN_TREND_POINTS,
   PROJECT_ELEMENTS_CODES,
   VIOLET_DARK,
   deltaTone,
@@ -27,50 +26,9 @@ import {
   isFirstControlledVersion,
   isNegligibleMovement,
   modelLabel,
-  trendNumericCount,
   uniteLabel,
   versionLabel,
 } from './qcDashboardShared';
-
-export function MiniTrend({ points }) {
-  const numeric = (points || []).filter(
-    (p) => p.valeurNum != null && Number.isFinite(Number(p.valeurNum))
-  );
-  if (numeric.length < MIN_TREND_POINTS) return null;
-  const w = 88;
-  const h = 28;
-  const pad = 3;
-  const vals = numeric.map((p) => Number(p.valeurNum));
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const span = max - min || 1;
-  const coords = vals.map((v, i) => {
-    const x = pad + (i / (vals.length - 1)) * (w - pad * 2);
-    const y = h - pad - ((v - min) / span) * (h - pad * 2);
-    return [x, y];
-  });
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-      <polyline
-        fill="none"
-        stroke="#64748b"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        points={coords.map(([x, y]) => `${x},${y}`).join(' ')}
-      />
-      {coords.map(([x, y], i) => (
-        <circle
-          key={`${x}-${y}-${i}`}
-          cx={x}
-          cy={y}
-          r={i === coords.length - 1 ? 2.4 : 1.5}
-          fill="#475569"
-        />
-      ))}
-    </svg>
-  );
-}
 
 export function DirectionMark({ dir, color, size = 18 }) {
   if (dir === 'flat') {
@@ -142,11 +100,21 @@ export function DeltaLine({ delta, unite, sensSouhaitable }) {
     );
   }
   const stable = isNegligibleMovement(delta, unite);
-  const tone = deltaTone(sensSouhaitable, delta.abs, stable);
-  const color = DELTA_TONE[tone];
-  const dir = delta.abs > 0 ? 'up' : delta.abs < 0 ? 'down' : 'flat';
-  const compact = formatDeltaCompact(delta.abs, unite);
   const vs = versionLabel(delta.previousVersion);
+  if (stable) {
+    return (
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: DELTA_TONE.none, lineHeight: 1.1 }}>
+          stable
+        </div>
+        <div style={{ marginTop: 3, fontSize: 11, color: '#64748b' }}>depuis la {vs}</div>
+      </div>
+    );
+  }
+  const tone = deltaTone(sensSouhaitable, delta.abs, false);
+  const color = DELTA_TONE[tone];
+  const dir = delta.abs > 0 ? 'up' : 'down';
+  const compact = formatDeltaCompact(delta.abs, unite);
   return (
     <div style={{ marginTop: 8 }}>
       <div
@@ -242,7 +210,6 @@ export function KpiCard({
   projectId,
   linkState,
   hideDelta,
-  showMiniTrend = true,
 }) {
   const code = control.code;
   const value = model.values?.[code] || null;
@@ -251,8 +218,6 @@ export function KpiCard({
   const missing = !value;
   const unite = uniteLabel(control.unite);
   const extras = value?.extras;
-  const showTrend =
-    showMiniTrend && !hideDelta && trendNumericCount(value?.trend) >= MIN_TREND_POINTS;
   const configHint = !failed && showMissingConfig(control, value);
 
   let body;
@@ -349,11 +314,6 @@ export function KpiCard({
       {body}
       {!failed && !hideDelta ? (
         <DeltaLine delta={value?.delta} unite={unite} sensSouhaitable={control.sensSouhaitable} />
-      ) : null}
-      {showTrend ? (
-        <div style={{ marginTop: 10 }}>
-          <MiniTrend points={value?.trend} />
-        </div>
       ) : null}
       {configHint ? (
         <div style={{ marginTop: 8, fontSize: 12, color: '#64748b', lineHeight: 1.4 }}>

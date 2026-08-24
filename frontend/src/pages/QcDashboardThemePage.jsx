@@ -456,7 +456,6 @@ export default function QcDashboardThemePage() {
                             projectId={project?.projectId || projectId}
                             linkState={detailLinkState}
                             hideDelta={firstVersion}
-                            showMiniTrend={isHygiene}
                           />
                         ))}
                       </div>
