@@ -27,6 +27,10 @@ export default function QcElementsSplitLayout({ open, left, right }) {
     typeof window !== 'undefined' ? window.innerWidth < STACK_BELOW_PX : false
   );
   const [viewerWidth, setViewerWidth] = useState(() => widthRef.current);
+  const paneRef = useRef(null);
+  const [viewerHeight, setViewerHeight] = useState(() =>
+    typeof window !== 'undefined' ? Math.max(280, window.innerHeight - 160) : 480
+  );
 
   const applyWidth = useCallback((desired, persist) => {
     const box = rowRef.current?.getBoundingClientRect();
@@ -36,14 +40,33 @@ export default function QcElementsSplitLayout({ open, left, right }) {
     if (persist) writeStoredViewerWidth(next);
   }, []);
 
+  // Hauteur = espace restant sous le haut du volet, pas 100vh : le chrome
+  // (nav, titre, carte du run) est au-dessus. Recalcul au scroll / resize
+  // pour que sticky et fenêtre courte restent dans le cadre visible.
+  const syncHeight = useCallback(() => {
+    const el = paneRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    const next = Math.max(280, Math.floor(window.innerHeight - top - 16));
+    setViewerHeight((prev) => (prev === next ? prev : next));
+  }, []);
+
   useEffect(() => {
     const onWin = () => {
       setNarrow(window.innerWidth < STACK_BELOW_PX);
       if (open && rowRef.current) applyWidth(widthRef.current, false);
+      if (open) syncHeight();
     };
     window.addEventListener('resize', onWin);
     return () => window.removeEventListener('resize', onWin);
-  }, [open, applyWidth]);
+  }, [open, applyWidth, syncHeight]);
+
+  useEffect(() => {
+    if (!open || narrow) return undefined;
+    syncHeight();
+    window.addEventListener('scroll', syncHeight, { passive: true });
+    return () => window.removeEventListener('scroll', syncHeight);
+  }, [open, narrow, syncHeight, viewerWidth]);
 
   useEffect(() => {
     if (!open || narrow) return undefined;
@@ -73,7 +96,7 @@ export default function QcElementsSplitLayout({ open, left, right }) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>{left}</div>
-        <div>{right}</div>
+        <div style={{ height: 'min(70vh, 640px)', minHeight: 360 }}>{right}</div>
       </div>
     );
   }
@@ -118,13 +141,17 @@ export default function QcElementsSplitLayout({ open, left, right }) {
         />
       </div>
       <div
+        ref={paneRef}
         style={{
           flex: `0 0 ${viewerWidth}px`,
           minWidth: MIN_VIEWER_PX,
           position: 'sticky',
           top: 16,
           alignSelf: 'flex-start',
-          height: 'calc(100vh - 48px)',
+          height: viewerHeight,
+          maxHeight: viewerHeight,
+          overflow: 'hidden',
+          boxSizing: 'border-box',
         }}
       >
         {right}

@@ -329,10 +329,12 @@ export default function QcRunViewerPane({
         borderRadius: 12,
         overflow: 'hidden',
         background: '#0f172a',
-        minHeight: 420,
+        minHeight: 0,
         height: '100%',
+        maxHeight: '100%',
         display: 'flex',
         flexDirection: 'column',
+        boxSizing: 'border-box',
       }}
     >
       <div
@@ -344,6 +346,7 @@ export default function QcRunViewerPane({
           padding: '10px 12px',
           background: 'rgba(15,23,42,0.95)',
           borderBottom: '1px solid rgba(148,163,184,0.25)',
+          flexShrink: 0,
         }}
       >
         <div>
@@ -367,7 +370,7 @@ export default function QcRunViewerPane({
       {blocking ? (
         <div style={{ padding: 16, color: '#e2e8f0', fontSize: 13, lineHeight: 1.5 }}>{blocking}</div>
       ) : (
-        <div ref={hostRef} style={{ flex: 1, minHeight: 380 }} />
+        <div ref={hostRef} style={{ flex: 1, minHeight: 0, width: '100%', position: 'relative' }} />
       )}
       {status && !blocking && (
         <div
@@ -377,6 +380,7 @@ export default function QcRunViewerPane({
             color: '#ddd6fe',
             background: 'rgba(124,58,237,0.18)',
             borderTop: `1px solid ${VIOLET}`,
+            flexShrink: 0,
           }}
         >
           {status}
