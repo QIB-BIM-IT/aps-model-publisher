@@ -165,7 +165,7 @@ function breakdownFor(model, breakdowns) {
   );
 }
 
-function ChartTooltip({ active, payload, unite, seriesMode }) {
+function ChartTooltip({ active, payload, unite }) {
   if (!active || !payload?.length) return null;
   const items = payload.filter(
     (p) => p.value != null && p.dataKey && !String(p.dataKey).includes('__')
@@ -198,7 +198,7 @@ function ChartTooltip({ active, payload, unite, seriesMode }) {
               {formatNumber(p.value)}
               {unite ? ` ${unite}` : ''}
             </div>
-            {seriesMode === 'version' && runs != null ? (
+            {runs != null ? (
               <div style={{ marginTop: 4, color: '#94a3b8' }}>
                 {runs === 1
                   ? '1 contrôle réussi sur cette version'
@@ -691,7 +691,6 @@ export default function QcHygieneDashboardPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const accModelGuid = searchParams.get('accModelGuid') || '';
-  const seriesMode = searchParams.get('series') === 'run' ? 'run' : 'version';
   const previewCompare = searchParams.get('apercuComparaison') === '1';
   const theme = resolveQcDashboardTheme(themeParam);
   const themeMeta = QC_DASHBOARD_THEMES.find((t) => t.id === theme);
@@ -739,12 +738,7 @@ export default function QcHygieneDashboardPage() {
   const series = payload?.series || [];
   const seriesByVersion = payload?.seriesByVersion || [];
   const warningBreakdown = payload?.warningBreakdown || [];
-  const seriesForCharts =
-    seriesMode === 'run'
-      ? series
-      : seriesByVersion.length
-        ? seriesByVersion
-        : groupSeriesByVersion(series);
+  const seriesForCharts = seriesByVersion.length ? seriesByVersion : groupSeriesByVersion(series);
 
   useEffect(() => {
     if (!controls.length) return;
@@ -774,15 +768,14 @@ export default function QcHygieneDashboardPage() {
     return map;
   }, [modelOptions]);
 
-  function replaceParams({ nextModel = accModelGuid, nextSeries = seriesMode }) {
+  function replaceParams({ nextModel = accModelGuid }) {
     const next = {};
     if (nextModel) next.accModelGuid = nextModel;
-    if (nextSeries === 'run') next.series = 'run';
     setSearchParams(next, { replace: true });
   }
 
   function setModelFilter(next) {
-    replaceParams({ nextModel: next, nextSeries: seriesMode });
+    replaceParams({ nextModel: next });
   }
 
   function goBackToPlanning() {
@@ -812,7 +805,7 @@ export default function QcHygieneDashboardPage() {
       preSelectHub: location.state?.preSelectHub || project?.hubId || null,
       preSelectProject: location.state?.preSelectProject || project?.projectId || projectId,
     },
-    { theme, accModelGuid, series: seriesMode }
+    { theme, accModelGuid }
   );
 
   function toggleChartModel(guid) {
@@ -1116,40 +1109,10 @@ export default function QcHygieneDashboardPage() {
                     Évolution dans le temps
                   </h2>
                   <p style={{ margin: '0 0 12px', fontSize: 13, color: '#64748b', lineHeight: 1.5 }}>
-                    {seriesMode === 'version'
-                      ? 'Un point par version ACC de chaque maquette, placé à la date du dernier contrôle réussi de cette version. Les numéros de version ne sont pas comparés d’une maquette à l’autre.'
-                      : 'Un point par contrôle réussi, placé à sa date réelle.'}
+                    Un point par version ACC de chaque maquette, placé à la date du contrôle de
+                    cette version. Les numéros de version ne sont pas comparés d’une maquette à
+                    l’autre.
                   </p>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-                    <button
-                      type="button"
-                      onClick={() => replaceParams({ nextSeries: 'version' })}
-                      style={{
-                        ...btnSecondary,
-                        background: seriesMode === 'version' ? 'rgba(124, 58, 237, 0.12)' : undefined,
-                        color: seriesMode === 'version' ? VIOLET_DARK : undefined,
-                        border:
-                          seriesMode === 'version'
-                            ? '1px solid rgba(124, 58, 237, 0.45)'
-                            : undefined,
-                      }}
-                    >
-                      Par version ACC
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => replaceParams({ nextSeries: 'run' })}
-                      style={{
-                        ...btnSecondary,
-                        background: seriesMode === 'run' ? 'rgba(124, 58, 237, 0.12)' : undefined,
-                        color: seriesMode === 'run' ? VIOLET_DARK : undefined,
-                        border:
-                          seriesMode === 'run' ? '1px solid rgba(124, 58, 237, 0.45)' : undefined,
-                      }}
-                    >
-                      Chaque contrôle
-                    </button>
-                  </div>
                   <div style={{ marginBottom: 10 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
                       Grandeur
@@ -1243,7 +1206,7 @@ export default function QcHygieneDashboardPage() {
                             stroke="#94a3b8"
                           />
                           <YAxis stroke="#94a3b8" tick={{ fontSize: 11, fill: '#64748b' }} />
-                          <Tooltip content={<ChartTooltip unite={unite} seriesMode={seriesMode} />} />
+                          <Tooltip content={<ChartTooltip unite={unite} />} />
                           {timeChart.rows.length > 1 ? (
                             <Legend wrapperStyle={{ fontSize: 12 }} />
                           ) : null}

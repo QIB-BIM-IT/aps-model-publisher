@@ -243,6 +243,36 @@ export default function QcRunViewerPane({
     applyIsolate(isolateRequest);
   }, [open, isolateRequest, applyIsolate]);
 
+  // Canevas 3D : un changement de taille du conteneur ne met pas à jour la
+  // projection tout seul (image étirée / clics décalés). resize() à chaque
+  // observation, y compris pendant le glissement de la séparation.
+  useEffect(() => {
+    if (!open || blocking) return undefined;
+    const el = hostRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    let raf = 0;
+    const sync = () => {
+      const v = viewerRef.current;
+      if (v && typeof v.resize === 'function') {
+        try {
+          v.resize();
+        } catch (_) {
+          /* viewer en cours de teardown */
+        }
+      }
+    };
+    const ro = new ResizeObserver(() => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(sync);
+    });
+    ro.observe(el);
+    sync();
+    return () => {
+      ro.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [open, runId, blocking]);
+
   if (!open) {
     return (
       <button type="button" onClick={onToggle} style={btnSecondary}>
@@ -299,9 +329,12 @@ export default function QcRunViewerPane({
         borderRadius: 12,
         overflow: 'hidden',
         background: '#0f172a',
-        minHeight: 420,
+        minHeight: 0,
+        height: '100%',
+        maxHeight: '100%',
         display: 'flex',
         flexDirection: 'column',
+        boxSizing: 'border-box',
       }}
     >
       <div
@@ -313,6 +346,7 @@ export default function QcRunViewerPane({
           padding: '10px 12px',
           background: 'rgba(15,23,42,0.95)',
           borderBottom: '1px solid rgba(148,163,184,0.25)',
+          flexShrink: 0,
         }}
       >
         <div>
@@ -336,7 +370,7 @@ export default function QcRunViewerPane({
       {blocking ? (
         <div style={{ padding: 16, color: '#e2e8f0', fontSize: 13, lineHeight: 1.5 }}>{blocking}</div>
       ) : (
-        <div ref={hostRef} style={{ flex: 1, minHeight: 380, height: 420 }} />
+        <div ref={hostRef} style={{ flex: 1, minHeight: 0, width: '100%', position: 'relative' }} />
       )}
       {status && !blocking && (
         <div
@@ -346,6 +380,7 @@ export default function QcRunViewerPane({
             color: '#ddd6fe',
             background: 'rgba(124,58,237,0.18)',
             borderTop: `1px solid ${VIOLET}`,
+            flexShrink: 0,
           }}
         >
           {status}

@@ -366,7 +366,6 @@ class QcDashboardService {
       if (h.modelName && !nameByModel.has(key)) nameByModel.set(key, h.modelName);
     }
 
-    const series = [];
     const modelsInHistory = [];
     const seenModel = new Set();
     for (const h of history) {
@@ -413,12 +412,9 @@ class QcDashboardService {
       const runs = history.filter((h) => String(h.accModelGuid).toLowerCase() === modelGuid);
       const modelName = nameByModel.get(modelGuid) || null;
       for (const code of codes) {
-        series.push({
-          accModelGuid: modelGuid,
-          modelName,
-          controlCode: code,
-          points: runs.map((h) => pointFromRun(h, code)),
-        });
+        // Un point par version ACC (dernier run réussi de la version).
+        // Le jeu « un point par run » n'est plus calculé : aucun consommateur
+        // hors de l'ancien basculement d'interface, retiré.
         seriesByVersion.push({
           accModelGuid: modelGuid,
           modelName,
@@ -442,7 +438,7 @@ class QcDashboardService {
       controls,
       models: allModels,
       current,
-      series,
+      series: [],
       seriesByVersion,
       warningBreakdown,
     };

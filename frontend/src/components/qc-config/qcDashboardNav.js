@@ -34,12 +34,11 @@ export function qcDashboardPath(projectId, theme = QC_DASHBOARD_DEFAULT_THEME, s
   return q ? `${base}?${q}` : base;
 }
 
-export function withQcDashboardOrigin(baseState, { theme, accModelGuid, series } = {}) {
+export function withQcDashboardOrigin(baseState, { theme, accModelGuid } = {}) {
   const next = { ...(baseState || {}) };
   next.qcDashboardTheme = resolveQcDashboardTheme(theme);
   next.qcDashboardAccModelGuid = accModelGuid ? String(accModelGuid) : '';
-  if (series === 'run') next.qcDashboardSeries = 'run';
-  else delete next.qcDashboardSeries;
+  delete next.qcDashboardSeries;
   return next;
 }
 
@@ -48,7 +47,6 @@ export function qcDashboardOriginFromState(state) {
   return {
     theme: resolveQcDashboardTheme(state.qcDashboardTheme),
     accModelGuid: state.qcDashboardAccModelGuid || '',
-    series: state.qcDashboardSeries || '',
     preSelectHub: state.preSelectHub ?? null,
     preSelectProject: state.preSelectProject ?? null,
   };
@@ -59,6 +57,5 @@ export function qcDashboardReturnPath(origin, projectId) {
   if (!pid || !origin) return null;
   const params = new URLSearchParams();
   if (origin.accModelGuid) params.set('accModelGuid', origin.accModelGuid);
-  if (origin.series === 'run') params.set('series', 'run');
   return qcDashboardPath(pid, origin.theme, params.toString());
 }
