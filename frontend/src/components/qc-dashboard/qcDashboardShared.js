@@ -4,7 +4,6 @@ export const VIOLET = '#7c3aed';
 export const VIOLET_DARK = '#6d28d9';
 export const MODEL_COLORS = ['#2563eb', '#0f766e', '#d97706', '#db2777', '#475569', '#0891b2'];
 export const EVOLUTION_CHART_HEIGHT = 360;
-export const MIN_TREND_POINTS = 5;
 
 export const STABILITY = {
   countAbs: 1,
@@ -168,10 +167,6 @@ export function isFirstControlledVersion(model, controls) {
   const deltas = (controls || []).map((c) => model.values?.[c.code]?.delta).filter(Boolean);
   if (!deltas.length) return false;
   return deltas.every((d) => d.reason === 'no_previous_version');
-}
-
-export function trendNumericCount(points) {
-  return (points || []).filter((p) => p.valeurNum != null && Number.isFinite(Number(p.valeurNum))).length;
 }
 
 export function formatDeltaCompact(abs, unite) {

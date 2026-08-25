@@ -16,7 +16,6 @@ import {
 import { card } from '../qc-config/qcTheme';
 import {
   DELTA_TONE,
-  MIN_TREND_POINTS,
   PROJECT_ELEMENTS_CODES,
   VIOLET_DARK,
   deltaTone,
@@ -27,50 +26,9 @@ import {
   isFirstControlledVersion,
   isNegligibleMovement,
   modelLabel,
-  trendNumericCount,
   uniteLabel,
   versionLabel,
 } from './qcDashboardShared';
-
-export function MiniTrend({ points }) {
-  const numeric = (points || []).filter(
-    (p) => p.valeurNum != null && Number.isFinite(Number(p.valeurNum))
-  );
-  if (numeric.length < MIN_TREND_POINTS) return null;
-  const w = 88;
-  const h = 28;
-  const pad = 3;
-  const vals = numeric.map((p) => Number(p.valeurNum));
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const span = max - min || 1;
-  const coords = vals.map((v, i) => {
-    const x = pad + (i / (vals.length - 1)) * (w - pad * 2);
-    const y = h - pad - ((v - min) / span) * (h - pad * 2);
-    return [x, y];
-  });
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
-      <polyline
-        fill="none"
-        stroke="#64748b"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        points={coords.map(([x, y]) => `${x},${y}`).join(' ')}
-      />
-      {coords.map(([x, y], i) => (
-        <circle
-          key={`${x}-${y}-${i}`}
-          cx={x}
-          cy={y}
-          r={i === coords.length - 1 ? 2.4 : 1.5}
-          fill="#475569"
-        />
-      ))}
-    </svg>
-  );
-}
 
 export function DirectionMark({ dir, color, size = 18 }) {
   if (dir === 'flat') {
@@ -142,11 +100,21 @@ export function DeltaLine({ delta, unite, sensSouhaitable }) {
     );
   }
   const stable = isNegligibleMovement(delta, unite);
-  const tone = deltaTone(sensSouhaitable, delta.abs, stable);
-  const color = DELTA_TONE[tone];
-  const dir = delta.abs > 0 ? 'up' : delta.abs < 0 ? 'down' : 'flat';
-  const compact = formatDeltaCompact(delta.abs, unite);
   const vs = versionLabel(delta.previousVersion);
+  if (stable) {
+    return (
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: DELTA_TONE.none, lineHeight: 1.1 }}>
+          stable
+        </div>
+        <div style={{ marginTop: 3, fontSize: 11, color: '#64748b' }}>depuis la {vs}</div>
+      </div>
+    );
+  }
+  const tone = deltaTone(sensSouhaitable, delta.abs, false);
+  const color = DELTA_TONE[tone];
+  const dir = delta.abs > 0 ? 'up' : 'down';
+  const compact = formatDeltaCompact(delta.abs, unite);
   return (
     <div style={{ marginTop: 8 }}>
       <div
@@ -195,13 +163,7 @@ function extrasHint(code, extras) {
     );
   }
   if (code === 'G508') {
-    if (extras.aucunParametre) {
-      return (
-        <div style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
-          Aucun paramètre d’exploitation configuré — relevé sans verdict.
-        </div>
-      );
-    }
+    if (extras.aucunParametre) return null;
     if (extras.total != null) {
       return (
         <div style={{ marginTop: 8, fontSize: 12, color: '#64748b' }}>
@@ -213,7 +175,42 @@ function extrasHint(code, extras) {
   return null;
 }
 
-export function KpiCard({ control, model, breakdown, projectId, linkState, hideDelta }) {
+function missingConfigCopy(control, extras) {
+  if (control.code === 'G508' || (extras?.aucunParametre && control.forme === 'remplissage')) {
+    return 'Aucun paramètre d’exploitation n’est listé pour ce projet : le taux n’est pas mesuré.';
+  }
+  if (control.code === 'G507' || (extras?.aucunParametre && control.forme === 'presenceProjet')) {
+    return 'Aucune liste attendue n’est configurée : le chiffre est un inventaire, pas des absents.';
+  }
+  if (control.code === 'G502') {
+    return 'Aucune liste de paramètres de projet attendus n’est configurée.';
+  }
+  if (control.code === 'G105') {
+    return 'Aucun champ projet à valider n’est configuré.';
+  }
+  if (control.code === 'G504') {
+    return 'Aucun verdict : la porte de livraison n’est pas activée pour ce projet.';
+  }
+  return 'Aucun verdict : une cible n’est pas configurée pour ce projet.';
+}
+
+function showMissingConfig(control, value) {
+  // Catalogue : attendCibleProjet=false pour indicatif-par-nature (G402, G314)
+  // et règles maison (G408, G412, G210). Contrat scoring : pas de cible → statut null.
+  if (!control?.attendCibleProjet) return false;
+  if (!value || value.etatExtraction === 'echec') return false;
+  if (value.statut === 'conforme' || value.statut === 'non_conforme') return false;
+  return true;
+}
+
+export function KpiCard({
+  control,
+  model,
+  breakdown,
+  projectId,
+  linkState,
+  hideDelta,
+}) {
   const code = control.code;
   const value = model.values?.[code] || null;
   const href = detailHref(code, model.runId);
@@ -221,7 +218,7 @@ export function KpiCard({ control, model, breakdown, projectId, linkState, hideD
   const missing = !value;
   const unite = uniteLabel(control.unite);
   const extras = value?.extras;
-  const showTrend = !hideDelta && trendNumericCount(value?.trend) >= MIN_TREND_POINTS;
+  const configHint = !failed && showMissingConfig(control, value);
 
   let body;
   if (failed) {
@@ -318,9 +315,16 @@ export function KpiCard({ control, model, breakdown, projectId, linkState, hideD
       {!failed && !hideDelta ? (
         <DeltaLine delta={value?.delta} unite={unite} sensSouhaitable={control.sensSouhaitable} />
       ) : null}
-      {showTrend ? (
-        <div style={{ marginTop: 10 }}>
-          <MiniTrend points={value?.trend} />
+      {configHint ? (
+        <div style={{ marginTop: 8, fontSize: 12, color: '#64748b', lineHeight: 1.4 }}>
+          {missingConfigCopy(control, extras)}{' '}
+          <Link
+            to="/qc-config"
+            state={linkState}
+            style={{ color: VIOLET_DARK, fontWeight: 600, textDecoration: 'none' }}
+          >
+            Configurer les cibles
+          </Link>
         </div>
       ) : null}
       <div style={{ marginTop: 'auto', paddingTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
