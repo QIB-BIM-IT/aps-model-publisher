@@ -7,6 +7,7 @@ import {
   readStoredViewerWidth,
   writeStoredViewerWidth,
   clampViewerWidth,
+  viewportViewerHeight,
 } from './qcElementsSplitPrefs';
 
 /**
@@ -17,6 +18,12 @@ import {
  *   sur un écran de 1280 px.
  * Sous 960 px de fenêtre, on empile (liste puis 3D) : le glissement côte à côte
  * n'a plus de sens.
+ *
+ * Hauteur : fraction stable de la fenêtre (innerHeight − chrome), JAMAIS
+ * innerHeight − getBoundingClientRect().top. Cette dernière formule croît
+ * au défilement (top diminue → hauteur augmente → le parent s'allonge →
+ * le sticky n'a plus de course → boucle). Recalcul seulement au resize
+ * de la fenêtre.
  */
 
 export default function QcElementsSplitLayout({ open, left, right }) {
@@ -27,10 +34,7 @@ export default function QcElementsSplitLayout({ open, left, right }) {
     typeof window !== 'undefined' ? window.innerWidth < STACK_BELOW_PX : false
   );
   const [viewerWidth, setViewerWidth] = useState(() => widthRef.current);
-  const paneRef = useRef(null);
-  const [viewerHeight, setViewerHeight] = useState(() =>
-    typeof window !== 'undefined' ? Math.max(280, window.innerHeight - 160) : 480
-  );
+  const [viewerHeight, setViewerHeight] = useState(() => viewportViewerHeight());
 
   const applyWidth = useCallback((desired, persist) => {
     const box = rowRef.current?.getBoundingClientRect();
@@ -40,33 +44,15 @@ export default function QcElementsSplitLayout({ open, left, right }) {
     if (persist) writeStoredViewerWidth(next);
   }, []);
 
-  // Hauteur = espace restant sous le haut du volet, pas 100vh : le chrome
-  // (nav, titre, carte du run) est au-dessus. Recalcul au scroll / resize
-  // pour que sticky et fenêtre courte restent dans le cadre visible.
-  const syncHeight = useCallback(() => {
-    const el = paneRef.current;
-    if (!el) return;
-    const top = el.getBoundingClientRect().top;
-    const next = Math.max(280, Math.floor(window.innerHeight - top - 16));
-    setViewerHeight((prev) => (prev === next ? prev : next));
-  }, []);
-
   useEffect(() => {
     const onWin = () => {
       setNarrow(window.innerWidth < STACK_BELOW_PX);
+      setViewerHeight(viewportViewerHeight());
       if (open && rowRef.current) applyWidth(widthRef.current, false);
-      if (open) syncHeight();
     };
     window.addEventListener('resize', onWin);
     return () => window.removeEventListener('resize', onWin);
-  }, [open, applyWidth, syncHeight]);
-
-  useEffect(() => {
-    if (!open || narrow) return undefined;
-    syncHeight();
-    window.addEventListener('scroll', syncHeight, { passive: true });
-    return () => window.removeEventListener('scroll', syncHeight);
-  }, [open, narrow, syncHeight, viewerWidth]);
+  }, [open, applyWidth]);
 
   useEffect(() => {
     if (!open || narrow) return undefined;
@@ -96,7 +82,7 @@ export default function QcElementsSplitLayout({ open, left, right }) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>{left}</div>
-        <div style={{ height: 'min(70vh, 640px)', minHeight: 360 }}>{right}</div>
+        <div style={{ height: viewerHeight, minHeight: 360 }}>{right}</div>
       </div>
     );
   }
@@ -141,7 +127,6 @@ export default function QcElementsSplitLayout({ open, left, right }) {
         />
       </div>
       <div
-        ref={paneRef}
         style={{
           flex: `0 0 ${viewerWidth}px`,
           minWidth: MIN_VIEWER_PX,

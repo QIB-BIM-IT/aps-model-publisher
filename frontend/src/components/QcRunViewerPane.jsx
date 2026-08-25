@@ -243,15 +243,23 @@ export default function QcRunViewerPane({
     applyIsolate(isolateRequest);
   }, [open, isolateRequest, applyIsolate]);
 
-  // Canevas 3D : un changement de taille du conteneur ne met pas à jour la
-  // projection tout seul (image étirée / clics décalés). resize() à chaque
-  // observation, y compris pendant le glissement de la séparation.
+  // Canevas 3D : un vrai changement de taille du conteneur (séparation, fenêtre)
+  // ne met pas à jour la projection tout seul. On ignore les observations
+  // qui ne changent ni largeur ni hauteur — viewer.resize() ne doit pas
+  // relancer l'observateur.
   useEffect(() => {
     if (!open || blocking) return undefined;
     const el = hostRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return undefined;
     let raf = 0;
+    let lastW = -1;
+    let lastH = -1;
     const sync = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w === lastW && h === lastH) return;
+      lastW = w;
+      lastH = h;
       const v = viewerRef.current;
       if (v && typeof v.resize === 'function') {
         try {

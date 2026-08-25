@@ -200,6 +200,7 @@
       "forme": "presence",
       "champListe": "parametres",
       "libelle": "Paramètres de projet présents",
+      "sensSouhaitable": "aucun",
       "descriptionCible": {
         "typeWidget": "liste",
         "libelle": "Paramètres de projet attendus",
@@ -216,6 +217,7 @@
       "forme": "presenceProjet",
       "unite": "absents",
       "libelle": "Paramètres partagés attendus (liste variable par projet)",
+      "sensSouhaitable": "aucun",
       "descriptionCible": {
         "typeWidget": "liste",
         "libelle": "Paramètres partagés attendus",
@@ -370,6 +372,7 @@
       "forme": "infosProjet",
       "champListe": "champsRenseignes",
       "libelle": "Informations du projet",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "table",
         "libelle": "Champs projet à valider",
@@ -516,6 +519,7 @@
       "forme": "couverture",
       "unite": "pourcentage",
       "libelle": "Couverture de codification UNIFORMAT",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "parametreUniformat",
         "libelle": "Codification UNIFORMAT",
@@ -605,6 +609,7 @@
       "forme": "remplissage",
       "unite": "pourcentage",
       "libelle": "Taux de remplissage des paramètres d’exploitation",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "table",
         "libelle": "Paramètres d’exploitation à vérifier",

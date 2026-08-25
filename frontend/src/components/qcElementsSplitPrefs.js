@@ -7,6 +7,14 @@ export const MIN_VIEWER_PX = 400;
 export const MIN_TABLE_PX = 420;
 export const HANDLE_PX = 8;
 export const STACK_BELOW_PX = 960;
+/** Chrome hors volet (nav + marge sticky). Indépendant du défilement. */
+export const VIEWER_CHROME_PX = 120;
+export const MIN_VIEWER_HEIGHT_PX = 360;
+
+export function viewportViewerHeight() {
+  if (typeof window === 'undefined') return 480;
+  return Math.max(MIN_VIEWER_HEIGHT_PX, Math.floor(window.innerHeight - VIEWER_CHROME_PX));
+}
 
 export function readStoredViewerWidth(fallback = DEFAULT_VIEWER_PX) {
   try {
