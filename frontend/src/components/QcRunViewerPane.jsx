@@ -81,6 +81,17 @@ export default function QcRunViewerPane({
       pendingRef.current = req || null;
       return;
     }
+    if (req.clear) {
+      try {
+        if (typeof viewer.showAll === 'function') viewer.showAll();
+        else viewer.isolate();
+        if (typeof viewer.clearSelection === 'function') viewer.clearSelection();
+      } catch (_) {
+        /* viewer en cours de teardown */
+      }
+      setStatus(req.emptyMessage || '');
+      return;
+    }
     const ids = (req.uniqueIds || []).filter(Boolean);
     if (!ids.length) {
       setStatus(req.emptyMessage || 'Aucun objet 3D à isoler pour cette sélection.');
@@ -88,7 +99,7 @@ export default function QcRunViewerPane({
     }
     let work = ids;
     let capped = false;
-    if (work.length > ISOLATE_MAX) {
+    if (!req.skipCap && work.length > ISOLATE_MAX) {
       work = work.slice(0, ISOLATE_MAX);
       capped = true;
     }
