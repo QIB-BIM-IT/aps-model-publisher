@@ -10,6 +10,17 @@ import {
   sameAccModel,
 } from '../components/qcViewerIsolation';
 import {
+  SELECTION_HINT,
+  isAddModifier,
+  isRangeModifier,
+  mixedIsolationNote,
+  noneIsolableMessage,
+  partitionIsolation,
+  selectedCountLabel,
+  selectedRowsFromIds,
+} from '../components/qcElementsSelection';
+import { useDisplayedRowSelection } from '../components/useDisplayedRowSelection';
+import {
   qcDashboardOriginFromState,
   qcDashboardReturnPath,
 } from '../components/qc-config/qcDashboardNav';
@@ -212,11 +223,20 @@ export default function QcProjectElementsPage() {
   const [payload, setPayload] = useState(null);
   const [copyMsg, setCopyMsg] = useState(null);
   const [copying, setCopying] = useState(false);
-  const [selectedId, setSelectedId] = useState(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [isolateRequest, setIsolateRequest] = useState(null);
   const [isolateMsg, setIsolateMsg] = useState(null);
   const [switchOffer, setSwitchOffer] = useState(null);
+
+  const selectionResetKey = `${projectId}|${page}|${controlCode}|${accModelGuid}|${category}|${level}|${q}|${sortBy}|${sortDir}`;
+  const { selectedSet, applyClick, count: selectedCount } = useDisplayedRowSelection(
+    selectionResetKey,
+    () => {
+      setIsolateRequest((prev) => (prev && !prev.clear ? { clear: true } : prev));
+      setIsolateMsg(null);
+      setSwitchOffer(null);
+    }
+  );
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -424,16 +444,6 @@ export default function QcProjectElementsPage() {
     setTimeout(() => setIsolateMsg(null), 7000);
   }
 
-  function requestIsolate(row) {
-    setViewerOpen(true);
-    setIsolateRequest({
-      uniqueIds: [row.revitUniqueId],
-      label: row.label || row.typeName || row.familyName || '',
-      notFoundMessage: notFoundMessage(row),
-      accModelGuid: row.accModelGuid,
-    });
-  }
-
   function offerSwitchToRowModel(row, extra) {
     setSwitchOffer({
       accModelGuid: row.accModelGuid,
@@ -459,29 +469,65 @@ export default function QcProjectElementsPage() {
     setIsolateMsg(null);
   }
 
-  function onRowClick(row) {
-    setSelectedId(row.id);
-    if (!row.revitUniqueId) {
-      setSwitchOffer(null);
-      showIsolateMsg(isolationUnavailableMessage(row));
+  function isolateSelectedRows(rows) {
+    const { isolable, skippedNoGuid, skippedModel } = partitionIsolation(rows, {
+      accModelGuid,
+      sameAccModel,
+    });
+    if (!isolable.length) {
+      const msg = noneIsolableMessage(rows, { skippedNoGuid, skippedModel });
+      setIsolateRequest({ clear: true, emptyMessage: msg });
+      showIsolateMsg(msg);
       return;
     }
-    if (!accModelGuid) {
-      offerSwitchToRowModel(
-        row,
-        `Choisissez d’abord la maquette « ${row.modelName || 'de cette ligne'} » dans le filtre — ou basculez ci-dessous — pour l’isoler en 3D.`
-      );
-      return;
+    setViewerOpen(true);
+    setIsolateRequest({
+      uniqueIds: isolable.map((r) => r.revitUniqueId),
+      skipCap: true,
+      label:
+        isolable.length === 1
+          ? isolable[0].label || isolable[0].typeName || isolable[0].familyName || ''
+          : `${isolable.length} objets sélectionnés`,
+      notFoundMessage:
+        isolable.length === 1
+          ? notFoundMessage(isolable[0])
+          : 'Aucun des objets sélectionnés n’apparaît dans la maquette 3D (vues, familles, ou traduction différente).',
+      accModelGuid: isolable[0].accModelGuid,
+    });
+    const note = mixedIsolationNote({ skippedNoGuid, skippedModel });
+    if (note) showIsolateMsg(note);
+    else setIsolateMsg(null);
+  }
+
+  function onRowClick(row, event) {
+    const next = applyClick(items, row, event);
+    const rows = selectedRowsFromIds(items, next.selectedIds);
+    const multi = isAddModifier(event) || isRangeModifier(event);
+
+    if (!multi) {
+      if (!row.revitUniqueId) {
+        setSwitchOffer(null);
+        isolateSelectedRows(rows);
+        return;
+      }
+      if (!accModelGuid) {
+        offerSwitchToRowModel(
+          row,
+          `Choisissez d’abord la maquette « ${row.modelName || 'de cette ligne'} » dans le filtre — ou basculez ci-dessous — pour l’isoler en 3D.`
+        );
+        return;
+      }
+      if (!sameAccModel(row.accModelGuid, accModelGuid)) {
+        offerSwitchToRowModel(
+          row,
+          `Cette ligne appartient à « ${row.modelName || 'une autre maquette'} », pas à la maquette affichée. Filtrez sur cette maquette, ou basculez ci-dessous. L’objet n’a pas été isolé dans le mauvais modèle.`
+        );
+        return;
+      }
     }
-    if (!sameAccModel(row.accModelGuid, accModelGuid)) {
-      offerSwitchToRowModel(
-        row,
-        `Cette ligne appartient à « ${row.modelName || 'une autre maquette'} », pas à la maquette affichée. Filtrez sur cette maquette, ou basculez ci-dessous. L’objet n’a pas été isolé dans le mauvais modèle.`
-      );
-      return;
-    }
+
     setSwitchOffer(null);
-    requestIsolate(row);
+    isolateSelectedRows(rows);
   }
 
   async function isolateFiltered() {
@@ -773,6 +819,9 @@ export default function QcProjectElementsPage() {
           <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b' }}>
             « Cette page » = les {items.length} ligne(s) affichées. « Tous les résultats filtrés » = les{' '}
             {total} ligne(s) correspondant aux filtres actuels, pas seulement cette page.
+            {' '}
+            {SELECTION_HINT}
+            {selectedCount ? ` ${selectedCountLabel(selectedCount)}.` : ''}
           </p>
           {(isolateMsg || switchOffer) && (
             <div
@@ -875,14 +924,20 @@ export default function QcProjectElementsPage() {
                 {!loading &&
                   items.map((row, i) => {
                     const isolable = Boolean(row.revitUniqueId);
-                    const selected = selectedId === row.id;
+                    const selected = selectedSet.has(row.id);
                     return (
                     <tr
                       key={row.id}
-                      onClick={() => onRowClick(row)}
+                      onMouseDown={(e) => {
+                        if (e.shiftKey) {
+                          e.preventDefault();
+                          window.getSelection?.()?.removeAllRanges?.();
+                        }
+                      }}
+                      onClick={(e) => onRowClick(row, e)}
                       title={
                         isolable
-                          ? 'Cliquer pour isoler dans la maquette 3D'
+                          ? 'Cliquer pour isoler dans la maquette 3D. Ctrl : ajouter. Maj : étendre.'
                           : isolationUnavailableMessage(row)
                       }
                       style={{
@@ -891,7 +946,7 @@ export default function QcProjectElementsPage() {
                           : i % 2
                             ? 'rgba(248,250,252,0.8)'
                             : 'transparent',
-                        cursor: isolable || row.accModelGuid ? 'pointer' : 'default',
+                        cursor: 'pointer',
                         opacity: isolable ? 1 : 0.62,
                         outline: selected ? `2px solid ${VIOLET}` : 'none',
                         outlineOffset: -2,

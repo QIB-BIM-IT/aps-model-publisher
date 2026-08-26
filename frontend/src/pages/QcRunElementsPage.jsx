@@ -9,6 +9,15 @@ import {
 import QcRunViewerPane from '../components/QcRunViewerPane';
 import QcElementsSplitLayout from '../components/QcElementsSplitLayout';
 import { isolationUnavailableMessage, notFoundMessage } from '../components/qcViewerIsolation';
+import {
+  SELECTION_HINT,
+  mixedIsolationNote,
+  noneIsolableMessage,
+  partitionIsolation,
+  selectedCountLabel,
+  selectedRowsFromIds,
+} from '../components/qcElementsSelection';
+import { useDisplayedRowSelection } from '../components/useDisplayedRowSelection';
 
 const VIOLET = '#7c3aed';
 const VIOLET_DARK = '#6d28d9';
@@ -203,10 +212,18 @@ export default function QcRunElementsPage() {
   const [payload, setPayload] = useState(null);
   const [copyMsg, setCopyMsg] = useState(null);
   const [copying, setCopying] = useState(false);
-  const [selectedId, setSelectedId] = useState(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [isolateRequest, setIsolateRequest] = useState(null);
   const [isolateMsg, setIsolateMsg] = useState(null);
+
+  const selectionResetKey = `${runId}|${page}|${controlCode}|${category}|${level}|${q}|${sortBy}|${sortDir}`;
+  const { selectedSet, applyClick, count: selectedCount } = useDisplayedRowSelection(
+    selectionResetKey,
+    () => {
+      setIsolateRequest((prev) => (prev && !prev.clear ? { clear: true } : prev));
+      setIsolateMsg(null);
+    }
+  );
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -374,18 +391,37 @@ export default function QcRunElementsPage() {
     setTimeout(() => setIsolateMsg(null), 6000);
   }
 
-  function onRowClick(row) {
-    setSelectedId(row.id);
-    if (!row.revitUniqueId) {
-      showIsolateMsg(isolationUnavailableMessage(row));
+  function isolateSelectedRows(rows) {
+    const { isolable, skippedNoGuid } = partitionIsolation(rows);
+    if (!isolable.length) {
+      setIsolateRequest({
+        clear: true,
+        emptyMessage: noneIsolableMessage(rows, { skippedNoGuid, skippedModel: 0 }),
+      });
+      showIsolateMsg(noneIsolableMessage(rows, { skippedNoGuid, skippedModel: 0 }));
       return;
     }
     setViewerOpen(true);
     setIsolateRequest({
-      uniqueIds: [row.revitUniqueId],
-      label: row.label || row.typeName || row.familyName || '',
-      notFoundMessage: notFoundMessage(row),
+      uniqueIds: isolable.map((r) => r.revitUniqueId),
+      skipCap: true,
+      label:
+        isolable.length === 1
+          ? isolable[0].label || isolable[0].typeName || isolable[0].familyName || ''
+          : `${isolable.length} objets sélectionnés`,
+      notFoundMessage:
+        isolable.length === 1
+          ? notFoundMessage(isolable[0])
+          : 'Aucun des objets sélectionnés n’apparaît dans la maquette 3D (vues, familles, ou traduction différente).',
     });
+    const note = mixedIsolationNote({ skippedNoGuid, skippedModel: 0 });
+    if (note) showIsolateMsg(note);
+    else setIsolateMsg(null);
+  }
+
+  function onRowClick(row, event) {
+    const next = applyClick(items, row, event);
+    isolateSelectedRows(selectedRowsFromIds(items, next.selectedIds));
   }
 
   async function isolateFiltered() {
@@ -681,6 +717,9 @@ export default function QcRunElementsPage() {
           <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b' }}>
             « Cette page » = les {items.length} ligne(s) affichées. « Tous les résultats filtrés » = les{' '}
             {total} ligne(s) correspondant aux filtres actuels, pas seulement cette page.
+            {' '}
+            {SELECTION_HINT}
+            {selectedCount ? ` ${selectedCountLabel(selectedCount)}.` : ''}
           </p>
           {isolateMsg && (
             <div
@@ -766,14 +805,20 @@ export default function QcRunElementsPage() {
                 {!loading &&
                   items.map((row, i) => {
                     const isolable = Boolean(row.revitUniqueId);
-                    const selected = selectedId === row.id;
+                    const selected = selectedSet.has(row.id);
                     return (
                     <tr
                       key={row.id}
-                      onClick={() => onRowClick(row)}
+                      onMouseDown={(e) => {
+                        if (e.shiftKey) {
+                          e.preventDefault();
+                          window.getSelection?.()?.removeAllRanges?.();
+                        }
+                      }}
+                      onClick={(e) => onRowClick(row, e)}
                       title={
                         isolable
-                          ? 'Cliquer pour isoler dans la maquette 3D'
+                          ? 'Cliquer pour isoler dans la maquette 3D. Ctrl : ajouter. Maj : étendre.'
                           : isolationUnavailableMessage(row)
                       }
                       style={{
@@ -782,7 +827,7 @@ export default function QcRunElementsPage() {
                           : i % 2
                             ? 'rgba(248,250,252,0.8)'
                             : 'transparent',
-                        cursor: isolable ? 'pointer' : 'default',
+                        cursor: 'pointer',
                         opacity: isolable ? 1 : 0.62,
                         outline: selected ? `2px solid ${VIOLET}` : 'none',
                         outlineOffset: -2,
