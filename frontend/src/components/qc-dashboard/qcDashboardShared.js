@@ -20,6 +20,9 @@ export const UNITE_FR = {
   'groupes-instance-unique': 'groupes à instance unique',
   pourcentage: '%',
   absents: 'absents',
+  fautifs: 'fautifs',
+  metres: 'm',
+  degres: '°',
 };
 
 export const DELTA_TONE = {
@@ -97,9 +100,11 @@ export function versionLabel(v) {
   return `version ACC ${v}`;
 }
 
+export const RUN_DETAIL_CODES = new Set(['G408', 'G102', 'G200', 'G201', 'G202']);
+
 export function detailHref(code, runId) {
   if (!runId) return null;
-  if (code === 'G408' || code === 'G102') {
+  if (RUN_DETAIL_CODES.has(code)) {
     return `/qc-run/${encodeURIComponent(runId)}`;
   }
   return `/qc-run/${encodeURIComponent(runId)}/elements?controlCode=${encodeURIComponent(code)}`;
@@ -177,4 +182,15 @@ export function formatDeltaCompact(abs, unite) {
   return unite === 'Mo' ? `${sign}${body} Mo` : `${sign}${body}`;
 }
 
-export const PROJECT_ELEMENTS_CODES = new Set(['G412', 'G411', 'G402', 'G410', 'G504', 'G508']);
+export const PROJECT_ELEMENTS_CODES = new Set([
+  'G412',
+  'G411',
+  'G402',
+  'G410',
+  'G504',
+  'G508',
+  'G203',
+  'G205',
+  'G210',
+  'G314',
+]);

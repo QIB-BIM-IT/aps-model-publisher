@@ -22,7 +22,12 @@ export const QC_DASHBOARD_THEMES = [
     available: true,
     controls: ['G504', 'G508', 'G502', 'G507', 'G105'],
   },
-  { id: 'references', label: 'Références et positionnement', available: false, controls: [] },
+  {
+    id: 'references',
+    label: 'Références et positionnement',
+    available: true,
+    controls: ['G200', 'G201', 'G202', 'G203', 'G205', 'G210', 'G314'],
+  },
   { id: 'livraison', label: 'Conventions de livraison', available: false, controls: [] },
 ];
 

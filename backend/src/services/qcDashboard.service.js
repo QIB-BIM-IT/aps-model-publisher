@@ -149,7 +149,78 @@ function extrasFromSlim(code, json) {
       nbAbsents: numOrNull(json.nbAbsents),
     };
   }
-  return null;
+  return extrasFromShape(json);
+}
+
+/**
+ * Extras d'affichage dérivés de la forme JSON, pas du code.
+ * Compte/total, pourcentage naturel, écart, coordonnées, vacuité.
+ */
+function extrasFromShape(json) {
+  if (!json || typeof json !== 'object') return null;
+  const out = {};
+  if (json.vacuite === true) out.vacuite = true;
+
+  const nbNiveaux = numOrNull(json.nbNiveaux);
+  const nbAxes = numOrNull(json.nbAxes);
+  const nbFautifs = numOrNull(json.nbFautifs);
+  if (nbNiveaux != null && nbFautifs != null) {
+    out.fautifs = nbFautifs;
+    out.total = nbNiveaux;
+    out.totalNoun = 'niveaux';
+  } else if (nbAxes != null && nbFautifs != null) {
+    out.fautifs = nbFautifs;
+    out.total = nbAxes;
+    out.totalNoun = 'axes';
+  }
+
+  const g = json.global && typeof json.global === 'object' ? json.global : null;
+  if (g && g.soumisAudit != null) {
+    out.numerateur = numOrNull(g.monitores);
+    out.denominateur = numOrNull(g.soumisAudit);
+    out.pourcentage = numOrNull(g.pourcentage);
+    out.ratioNoun = 'éléments monitorés';
+    out.showPercent = true;
+  }
+
+  const conformes = numOrNull(json.conformes);
+  const evaluables = numOrNull(json.evaluables);
+  if (conformes != null && evaluables != null) {
+    out.numerateur = conformes;
+    out.denominateur = evaluables;
+    out.pourcentage = numOrNull(json.pourcentageConformite);
+    out.ratioNoun = 'éléments rattachés';
+    out.showPercent = true;
+    const fautifsCount = numOrNull(
+      typeof json.fautifs === 'number' ? json.fautifs : json.fautifsDetail?.total
+    );
+    if (fautifsCount != null) out.fautifsCount = fautifsCount;
+  }
+
+  const ecartMaxAbs = numOrNull(json.ecartMaxAbs);
+  if (ecartMaxAbs != null) out.ecartMaxAbs = ecartMaxAbs;
+  if (json.ecart && typeof json.ecart === 'object') out.ecart = json.ecart;
+  if (json.surveyPoint && typeof json.surveyPoint === 'object') out.surveyPoint = json.surveyPoint;
+  const angle = numOrNull(json.angleNordProjet);
+  if (angle != null) out.angleNordProjet = angle;
+  const axesCmp = Array.isArray(json.coordonnees?.axes) ? json.coordonnees.axes : [];
+  const contreTolerance = axesCmp
+    .map((a) => {
+      if (!a || typeof a !== 'object') return null;
+      const tolerance = numOrNull(a.tolerance);
+      if (tolerance == null) return null;
+      return {
+        axe: typeof a.axe === 'string' ? a.axe : null,
+        releve: numOrNull(a.releve),
+        attendu: numOrNull(a.attendu),
+        ecart: numOrNull(a.ecart),
+        tolerance,
+      };
+    })
+    .filter(Boolean);
+  if (contreTolerance.length) out.contreTolerance = contreTolerance;
+
+  return Object.keys(out).length ? out : null;
 }
 
 function valuePayload(row, code) {
@@ -348,6 +419,43 @@ class QcDashboardService {
                   'nbPresents', cr.valeur_json->'nbPresents',
                   'nbAbsents', cr.valeur_json->'nbAbsents'
                 )
+                WHEN cr."controlCode" = 'G200' THEN jsonb_build_object(
+                  'unite', cr.valeur_json->'unite',
+                  'ecart', cr.valeur_json->'ecart',
+                  'ecartMaxAbs', cr.valeur_json->'ecartMaxAbs'
+                )
+                WHEN cr."controlCode" = 'G201' THEN jsonb_build_object(
+                  'unite', cr.valeur_json->'unite',
+                  'surveyPoint', cr.valeur_json->'surveyPoint',
+                  'coordonnees', cr.valeur_json->'coordonnees'
+                )
+                WHEN cr."controlCode" = 'G202' THEN jsonb_build_object(
+                  'unite', cr.valeur_json->'unite',
+                  'angleNordProjet', cr.valeur_json->'angleNordProjet'
+                )
+                WHEN cr."controlCode" = 'G203' THEN jsonb_build_object(
+                  'vacuite', cr.valeur_json->'vacuite',
+                  'nbNiveaux', cr.valeur_json->'nbNiveaux',
+                  'nbFautifs', cr.valeur_json->'nbFautifs'
+                )
+                WHEN cr."controlCode" = 'G205' THEN jsonb_build_object(
+                  'vacuite', cr.valeur_json->'vacuite',
+                  'nbAxes', cr.valeur_json->'nbAxes',
+                  'nbFautifs', cr.valeur_json->'nbFautifs'
+                )
+                WHEN cr."controlCode" = 'G210' THEN jsonb_build_object(
+                  'vacuite', cr.valeur_json->'vacuite',
+                  'global', cr.valeur_json->'global'
+                )
+                WHEN cr."controlCode" = 'G314' THEN jsonb_build_object(
+                  'conformes', cr.valeur_json->'conformes',
+                  'fautifs', cr.valeur_json->'fautifs',
+                  'evaluables', cr.valeur_json->'evaluables',
+                  'pourcentageConformite', cr.valeur_json->'pourcentageConformite',
+                  'fautifsDetail', jsonb_build_object(
+                    'total', cr.valeur_json#>'{fautifsDetail,total}'
+                  )
+                )
                 ELSE NULL
               END AS "valeurJsonSlim"
        FROM qc.control_results cr
@@ -507,3 +615,4 @@ class QcDashboardService {
 }
 
 module.exports = new QcDashboardService();
+module.exports.extrasFromShape = extrasFromShape;
