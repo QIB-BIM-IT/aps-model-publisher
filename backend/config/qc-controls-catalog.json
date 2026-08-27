@@ -297,7 +297,7 @@
       "forme": "etatReference",
       "unite": "fautifs",
       "libelle": "Niveaux pinnés",
-      "sensSouhaitable": "baisse",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "regleMaisonLectureSeule",
         "libelle": "Niveaux pinnés",
@@ -314,7 +314,7 @@
       "forme": "etatReference",
       "unite": "fautifs",
       "libelle": "Axes pinnés et dans la variante principale",
-      "sensSouhaitable": "baisse",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "texte",
         "libelle": "Nom de la variante des axes",

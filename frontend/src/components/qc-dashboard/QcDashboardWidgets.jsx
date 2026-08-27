@@ -136,22 +136,14 @@ export function DeltaLine({ delta, unite, sensSouhaitable }) {
   );
 }
 
-function isCountOverTotal(extras) {
-  return Boolean(
-    extras && extras.fautifs != null && extras.total != null && extras.showPercent !== true
-  );
+function isPercentCoverage(extras) {
+  return Boolean(extras && extras.showPercent === true && extras.denominateur > 0);
 }
 
-/**
- * Unité du ratio fautifs/total : le numérateur est un compte de manquements
- * (extras.fautifs), pas de conformes. totalNoun nomme la population (niveaux, axes).
- * Sans cette qualification, « 3 / 24 niveaux » se lit comme l’état souhaité.
- */
-function faultRatioUnit(extras) {
-  const noun = extras?.totalNoun;
-  if (noun === 'niveaux' || noun === 'axes') return `${noun} non verrouillés`;
-  if (noun) return `${noun} fautifs`;
-  return 'éléments fautifs';
+function showCiblePourcent(control, value) {
+  if (control?.ciblePourcent == null) return false;
+  if (!value || value.etatExtraction === 'echec') return false;
+  return value.statut === 'conforme' || value.statut === 'non_conforme';
 }
 
 function extrasHint(code, extras) {
@@ -298,14 +290,22 @@ export function KpiCard({
         Relevé indisponible — aucun verdict, aucune comparaison.
       </div>
     );
-  } else if (isCountOverTotal(extras) && extras.vacuite !== true) {
+  } else if (isPercentCoverage(extras)) {
+    const pct = extras.pourcentage != null ? extras.pourcentage : value.valeurNum;
+    const showCible = showCiblePourcent(control, value);
     body = (
-      <div style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', lineHeight: 1.1 }}>
-        {formatNumber(extras.fautifs)} / {formatNumber(extras.total)}
-        <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b', marginLeft: 6 }}>
-          {faultRatioUnit(extras)}
-        </span>
-      </div>
+      <>
+        <div style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', lineHeight: 1.1 }}>
+          {formatNumber(pct)}
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b', marginLeft: 6 }}>%</span>
+          {showCible ? (
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b', marginLeft: 10 }}>
+              cible {formatNumber(control.ciblePourcent)} %
+            </span>
+          ) : null}
+        </div>
+        {extrasHint(code, extras)}
+      </>
     );
   } else if (missing || value.valeurNum == null) {
     const coords = axisLine(extras?.surveyPoint);
