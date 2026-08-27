@@ -142,6 +142,18 @@ function isCountOverTotal(extras) {
   );
 }
 
+/**
+ * Unité du ratio fautifs/total : le numérateur est un compte de manquements
+ * (extras.fautifs), pas de conformes. totalNoun nomme la population (niveaux, axes).
+ * Sans cette qualification, « 3 / 24 niveaux » se lit comme l’état souhaité.
+ */
+function faultRatioUnit(extras) {
+  const noun = extras?.totalNoun;
+  if (noun === 'niveaux' || noun === 'axes') return `${noun} non verrouillés`;
+  if (noun) return `${noun} fautifs`;
+  return 'éléments fautifs';
+}
+
 function extrasHint(code, extras) {
   if (!extras) return null;
   if (code === 'G412' && (extras.famillesInPlace != null || extras.typesGroupes != null)) {
@@ -291,7 +303,7 @@ export function KpiCard({
       <div style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', lineHeight: 1.1 }}>
         {formatNumber(extras.fautifs)} / {formatNumber(extras.total)}
         <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b', marginLeft: 6 }}>
-          {extras.totalNoun || 'éléments'}
+          {faultRatioUnit(extras)}
         </span>
       </div>
     );
