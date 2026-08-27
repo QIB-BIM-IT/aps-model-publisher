@@ -70,19 +70,57 @@ function attendCibleProjet(entry) {
   return cle != null && String(cle).trim() !== '';
 }
 
-function metaForCodes(codes) {
+function parsePercentToken(text) {
+  const m = String(text || '').match(/(\d+(?:[.,]\d+)?)\s*%/);
+  if (!m) return null;
+  const n = Number(String(m[1]).replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Cible de taux lue dans le catalogue ou la config projet — jamais inventée dans la page.
+ * - pourcentage (G314) : controles[code].cible|seuil du projet, sinon absente
+ * - couverture : défaut de la porte (catalogue activationPorte.defaut)
+ * - règle / aide catalogue contenant « N % » (copie-contrôle, axes…)
+ * - etatReference documenté « tolérance zéro » → 100 % de conformes (scoreur : 0 fautif)
+ */
+function resolveCiblePourcent(entry, projetCtrl) {
+  const forme = entry?.forme;
+  const dc = entry?.descriptionCible || {};
+  if (forme === 'pourcentage') {
+    return numOrNull(projetCtrl?.cible ?? projetCtrl?.seuil);
+  }
+  if (forme === 'couverture') {
+    return numOrNull(dc.activationPorte?.defaut);
+  }
+  const parsed = parsePercentToken(dc.regle) ?? parsePercentToken(dc.aide);
+  if (parsed != null) return parsed;
+  if (
+    forme === 'etatReference' &&
+    /tol[eé]rance z[eé]ro/i.test(`${dc.regle || ''} ${dc.aide || ''}`)
+  ) {
+    return 100;
+  }
+  return null;
+}
+
+function metaForCodes(codes, projectControles) {
   const catalog = qcProjectConfigService.loadCatalog();
+  const byCode = projectControles && typeof projectControles === 'object' ? projectControles : {};
   return codes.map((code) => {
     const entry = catalog.controles?.[code] || {};
+    const unite =
+      entry.forme === 'etatReference' ? 'pourcentage' : unitOf(code, entry);
     return {
       code,
       libelle: entry.libelle || code,
-      unite: unitOf(code, entry),
+      unite,
       section: qcProjectConfigService.sectionOf(code),
       sensSouhaitable: desiredSenseOf(entry),
       forme: entry.forme || null,
       typeWidget: entry.descriptionCible?.typeWidget || null,
       attendCibleProjet: attendCibleProjet(entry),
+      ciblePourcent: resolveCiblePourcent(entry, byCode[code]),
     };
   });
 }
@@ -93,11 +131,35 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function roundPercent(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+/** Compte de fautifs + population → % de conformes (affichage / delta / séries). */
+function slimHasFaultPopulation(json) {
+  if (!json || typeof json !== 'object') return false;
+  return Object.prototype.hasOwnProperty.call(json, 'nbNiveaux')
+    || Object.prototype.hasOwnProperty.call(json, 'nbAxes');
+}
+
+function percentConformesFromFaultCounts(json) {
+  if (!json || typeof json !== 'object') return null;
+  const nbFautifs = numOrNull(json.nbFautifs);
+  const total = numOrNull(json.nbNiveaux) ?? numOrNull(json.nbAxes);
+  if (nbFautifs == null || total == null || total <= 0) return null;
+  return roundPercent(((total - nbFautifs) / total) * 100);
+}
+
 /** G102 : les runs anciens ont stocké des octets dans valeur_num ; l’unité catalogue est Mo. */
 function valeurNumSuivie(code, row) {
+  const json = row?.valeurJsonSlim;
+  // Ne pas retomber sur valeur_num (fautifs) : cela mélangerait les unités avec le %.
+  if (slimHasFaultPopulation(json)) {
+    return percentConformesFromFaultCounts(json);
+  }
   const n = numOrNull(row?.valeurNum);
   if (code === 'G102') {
-    const mo = numOrNull(row?.valeurJsonSlim?.mo);
+    const mo = numOrNull(json?.mo);
     if (mo != null) return mo;
     if (n != null && n >= 1048576) return Math.round((n / 1048576) * 100) / 100;
   }
@@ -130,6 +192,7 @@ function extrasFromSlim(code, json) {
       aucunElementDesign: json.aucunElementDesign === true,
       nbEntitesFautives: numOrNull(json.nbEntitesFautives),
       nbInstancesConcernees: numOrNull(json.nbInstancesConcernees),
+      showPercent: true,
     };
   }
   if (code === 'G508') {
@@ -138,7 +201,11 @@ function extrasFromSlim(code, json) {
       aucunParametre: json.aucunParametre === true,
       rempli: numOrNull(g.rempli),
       total: numOrNull(g.total),
+      numerateur: numOrNull(g.rempli),
+      denominateur: numOrNull(g.total),
       pourcentage: numOrNull(g.pourcentage),
+      ratioNoun: 'valeurs renseignées',
+      showPercent: true,
     };
   }
   if (code === 'G507') {
@@ -149,7 +216,88 @@ function extrasFromSlim(code, json) {
       nbAbsents: numOrNull(json.nbAbsents),
     };
   }
-  return null;
+  return extrasFromShape(json);
+}
+
+/**
+ * Extras d'affichage dérivés de la forme JSON, pas du code.
+ * Compte/total, pourcentage naturel, écart, coordonnées, vacuité.
+ */
+function extrasFromShape(json) {
+  if (!json || typeof json !== 'object') return null;
+  const out = {};
+  if (json.vacuite === true) out.vacuite = true;
+
+  const nbNiveaux = numOrNull(json.nbNiveaux);
+  const nbAxes = numOrNull(json.nbAxes);
+  const nbFautifs = numOrNull(json.nbFautifs);
+  if (nbNiveaux != null && nbFautifs != null) {
+    out.fautifs = nbFautifs;
+    out.total = nbNiveaux;
+    out.totalNoun = 'niveaux';
+    out.numerateur = Math.max(0, nbNiveaux - nbFautifs);
+    out.denominateur = nbNiveaux;
+    out.pourcentage = nbNiveaux > 0 ? roundPercent(((nbNiveaux - nbFautifs) / nbNiveaux) * 100) : null;
+    out.ratioNoun = 'niveaux verrouillés';
+    out.showPercent = true;
+  } else if (nbAxes != null && nbFautifs != null) {
+    out.fautifs = nbFautifs;
+    out.total = nbAxes;
+    out.totalNoun = 'axes';
+    out.numerateur = Math.max(0, nbAxes - nbFautifs);
+    out.denominateur = nbAxes;
+    out.pourcentage = nbAxes > 0 ? roundPercent(((nbAxes - nbFautifs) / nbAxes) * 100) : null;
+    out.ratioNoun = 'axes verrouillés';
+    out.showPercent = true;
+  }
+
+  const g = json.global && typeof json.global === 'object' ? json.global : null;
+  if (g && g.soumisAudit != null) {
+    out.numerateur = numOrNull(g.monitores);
+    out.denominateur = numOrNull(g.soumisAudit);
+    out.pourcentage = numOrNull(g.pourcentage);
+    out.ratioNoun = 'éléments monitorés';
+    out.showPercent = true;
+  }
+
+  const conformes = numOrNull(json.conformes);
+  const evaluables = numOrNull(json.evaluables);
+  if (conformes != null && evaluables != null) {
+    out.numerateur = conformes;
+    out.denominateur = evaluables;
+    out.pourcentage = numOrNull(json.pourcentageConformite);
+    out.ratioNoun = 'éléments rattachés';
+    out.showPercent = true;
+    const fautifsCount = numOrNull(
+      typeof json.fautifs === 'number' ? json.fautifs : json.fautifsDetail?.total
+    );
+    if (fautifsCount != null) out.fautifsCount = fautifsCount;
+  }
+
+  const ecartMaxAbs = numOrNull(json.ecartMaxAbs);
+  if (ecartMaxAbs != null) out.ecartMaxAbs = ecartMaxAbs;
+  if (json.ecart && typeof json.ecart === 'object') out.ecart = json.ecart;
+  if (json.surveyPoint && typeof json.surveyPoint === 'object') out.surveyPoint = json.surveyPoint;
+  const angle = numOrNull(json.angleNordProjet);
+  if (angle != null) out.angleNordProjet = angle;
+  const axesCmp = Array.isArray(json.coordonnees?.axes) ? json.coordonnees.axes : [];
+  const contreTolerance = axesCmp
+    .map((a) => {
+      if (!a || typeof a !== 'object') return null;
+      const tolerance = numOrNull(a.tolerance);
+      if (tolerance == null) return null;
+      return {
+        axe: typeof a.axe === 'string' ? a.axe : null,
+        releve: numOrNull(a.releve),
+        attendu: numOrNull(a.attendu),
+        ecart: numOrNull(a.ecart),
+        tolerance,
+      };
+    })
+    .filter(Boolean);
+  if (contreTolerance.length) out.contreTolerance = contreTolerance;
+
+  return Object.keys(out).length ? out : null;
 }
 
 function valuePayload(row, code) {
@@ -244,7 +392,14 @@ class QcDashboardService {
   async getDashboard({ projectKey, controlsRaw, accModelGuid }) {
     const t0 = Date.now();
     const codes = parseControlCodes(controlsRaw);
-    const controls = metaForCodes(codes);
+    let projectControles = {};
+    try {
+      const cfg = await qcProjectConfigService.getProjectConfig(projectKey);
+      projectControles = cfg?.config?.controles || {};
+    } catch (err) {
+      logger.warn(`[QC][Dashboard] lecture config projet ignorée: ${err.message}`);
+    }
+    const controls = metaForCodes(codes, projectControles);
 
     const scope = await qcDesignatedElementsQueryService.resolveProjectScope(
       projectKey,
@@ -347,6 +502,43 @@ class QcDashboardService {
                   'nbAttendus', cr.valeur_json->'nbAttendus',
                   'nbPresents', cr.valeur_json->'nbPresents',
                   'nbAbsents', cr.valeur_json->'nbAbsents'
+                )
+                WHEN cr."controlCode" = 'G200' THEN jsonb_build_object(
+                  'unite', cr.valeur_json->'unite',
+                  'ecart', cr.valeur_json->'ecart',
+                  'ecartMaxAbs', cr.valeur_json->'ecartMaxAbs'
+                )
+                WHEN cr."controlCode" = 'G201' THEN jsonb_build_object(
+                  'unite', cr.valeur_json->'unite',
+                  'surveyPoint', cr.valeur_json->'surveyPoint',
+                  'coordonnees', cr.valeur_json->'coordonnees'
+                )
+                WHEN cr."controlCode" = 'G202' THEN jsonb_build_object(
+                  'unite', cr.valeur_json->'unite',
+                  'angleNordProjet', cr.valeur_json->'angleNordProjet'
+                )
+                WHEN cr."controlCode" = 'G203' THEN jsonb_build_object(
+                  'vacuite', cr.valeur_json->'vacuite',
+                  'nbNiveaux', cr.valeur_json->'nbNiveaux',
+                  'nbFautifs', cr.valeur_json->'nbFautifs'
+                )
+                WHEN cr."controlCode" = 'G205' THEN jsonb_build_object(
+                  'vacuite', cr.valeur_json->'vacuite',
+                  'nbAxes', cr.valeur_json->'nbAxes',
+                  'nbFautifs', cr.valeur_json->'nbFautifs'
+                )
+                WHEN cr."controlCode" = 'G210' THEN jsonb_build_object(
+                  'vacuite', cr.valeur_json->'vacuite',
+                  'global', cr.valeur_json->'global'
+                )
+                WHEN cr."controlCode" = 'G314' THEN jsonb_build_object(
+                  'conformes', cr.valeur_json->'conformes',
+                  'fautifs', cr.valeur_json->'fautifs',
+                  'evaluables', cr.valeur_json->'evaluables',
+                  'pourcentageConformite', cr.valeur_json->'pourcentageConformite',
+                  'fautifsDetail', jsonb_build_object(
+                    'total', cr.valeur_json#>'{fautifsDetail,total}'
+                  )
                 )
                 ELSE NULL
               END AS "valeurJsonSlim"
@@ -507,3 +699,5 @@ class QcDashboardService {
 }
 
 module.exports = new QcDashboardService();
+module.exports.extrasFromShape = extrasFromShape;
+module.exports.resolveCiblePourcent = resolveCiblePourcent;

@@ -136,6 +136,16 @@ export function DeltaLine({ delta, unite, sensSouhaitable }) {
   );
 }
 
+function isPercentCoverage(extras) {
+  return Boolean(extras && extras.showPercent === true && extras.denominateur > 0);
+}
+
+function showCiblePourcent(control, value) {
+  if (control?.ciblePourcent == null) return false;
+  if (!value || value.etatExtraction === 'echec') return false;
+  return value.statut === 'conforme' || value.statut === 'non_conforme';
+}
+
 function extrasHint(code, extras) {
   if (!extras) return null;
   if (code === 'G412' && (extras.famillesInPlace != null || extras.typesGroupes != null)) {
@@ -171,6 +181,59 @@ function extrasHint(code, extras) {
         </div>
       );
     }
+  }
+  return structuredExtrasHint(extras);
+}
+
+function axisLine(point, unite = 'm') {
+  if (!point || typeof point !== 'object') return null;
+  const bits = [];
+  if (point.ns != null) bits.push(`N/S ${formatNumber(point.ns)} ${unite}`);
+  if (point.eo != null) bits.push(`E/O ${formatNumber(point.eo)} ${unite}`);
+  if (point.elev != null) bits.push(`élév. ${formatNumber(point.elev)} ${unite}`);
+  return bits.length ? bits.join(' · ') : null;
+}
+
+function structuredExtrasHint(extras) {
+  if (!extras) return null;
+  const hintStyle = { marginTop: 8, fontSize: 12, color: '#64748b', lineHeight: 1.4 };
+
+  if (extras.showPercent && extras.denominateur === 0) {
+    if (extras.ratioNoun === 'éléments monitorés') {
+      return <div style={hintStyle}>Aucun axe ni niveau soumis à l’audit.</div>;
+    }
+    return <div style={hintStyle}>Aucun élément évaluable pour le rattachement au niveau.</div>;
+  }
+
+  if (extras.vacuite && extras.totalNoun) {
+    return (
+      <div style={hintStyle}>
+        {extras.totalNoun === 'axes'
+          ? 'Cette maquette n’a pas d’axe.'
+          : `Cette maquette n’a pas de ${extras.totalNoun}.`}
+      </div>
+    );
+  }
+
+  if (extras.contreTolerance?.length) {
+    const bits = extras.contreTolerance.map((a) => {
+      const label = a.axe === 'ns' ? 'N/S' : a.axe === 'eo' ? 'E/O' : a.axe === 'elev' ? 'élév.' : a.axe;
+      return `${label} ${formatNumber(a.ecart)} m (tol. ${formatNumber(a.tolerance)} m)`;
+    });
+    return <div style={hintStyle}>{bits.join(' · ')}</div>;
+  }
+
+  if (extras.showPercent && extras.numerateur != null && extras.denominateur != null) {
+    return (
+      <div style={hintStyle}>
+        {formatNumber(extras.numerateur)} / {formatNumber(extras.denominateur)} {extras.ratioNoun || 'éléments'}
+      </div>
+    );
+  }
+
+  const axes = axisLine(extras.ecart);
+  if (axes) {
+    return <div style={hintStyle}>{axes}</div>;
   }
   return null;
 }
@@ -227,13 +290,44 @@ export function KpiCard({
         Relevé indisponible — aucun verdict, aucune comparaison.
       </div>
     );
-  } else if (missing || value.valeurNum == null) {
+  } else if (isPercentCoverage(extras)) {
+    const pct = extras.pourcentage != null ? extras.pourcentage : value.valeurNum;
+    const showCible = showCiblePourcent(control, value);
     body = (
       <>
-        <div style={{ fontSize: 14, color: '#64748b' }}>Pas de donnée chiffrée</div>
+        <div style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', lineHeight: 1.1 }}>
+          {formatNumber(pct)}
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b', marginLeft: 6 }}>%</span>
+          {showCible ? (
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#64748b', marginLeft: 10 }}>
+              cible {formatNumber(control.ciblePourcent)} %
+            </span>
+          ) : null}
+        </div>
         {extrasHint(code, extras)}
       </>
     );
+  } else if (missing || value.valeurNum == null) {
+    const coords = axisLine(extras?.surveyPoint);
+    if (coords) {
+      body = (
+        <>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', lineHeight: 1.45 }}>
+            {coords}
+          </div>
+          {extrasHint(code, extras)}
+        </>
+      );
+    } else {
+      body = (
+        <>
+          {extras?.vacuite || (extras?.showPercent && extras?.denominateur === 0) ? null : (
+            <div style={{ fontSize: 14, color: '#64748b' }}>Pas de donnée chiffrée</div>
+          )}
+          {extrasHint(code, extras)}
+        </>
+      );
+    }
   } else if (code === 'G408') {
     const critique = breakdown?.critique ?? extras?.critique;
     const faible = breakdown?.faible ?? extras?.faible;

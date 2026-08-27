@@ -297,6 +297,7 @@
       "forme": "etatReference",
       "unite": "fautifs",
       "libelle": "Niveaux pinnés",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "regleMaisonLectureSeule",
         "libelle": "Niveaux pinnés",
@@ -313,6 +314,7 @@
       "forme": "etatReference",
       "unite": "fautifs",
       "libelle": "Axes pinnés et dans la variante principale",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "texte",
         "libelle": "Nom de la variante des axes",
@@ -427,6 +429,7 @@
       "sens": "max",
       "unite": "metres",
       "libelle": "Écart point de base projet / origine interne",
+      "sensSouhaitable": "baisse",
       "descriptionCible": {
         "typeWidget": "valeurNumerique",
         "libelle": "Tolérance d’écart point de base",
@@ -447,6 +450,7 @@
       "champObjet": "surveyPoint",
       "unite": "metres",
       "libelle": "Géoréférencement",
+      "sensSouhaitable": "baisse",
       "descriptionCible": {
         "typeWidget": "coordonnees",
         "libelle": "Coordonnées attendues du survey point",
@@ -491,6 +495,7 @@
       "forme": "angle",
       "unite": "degres",
       "libelle": "Angle du nord projet",
+      "sensSouhaitable": "aucun",
       "descriptionCible": {
         "typeWidget": "angle",
         "libelle": "Angle du nord projet attendu",
@@ -643,6 +648,7 @@
       "forme": "copieControle",
       "unite": "pourcentage",
       "libelle": "Copie-contrôle des axes et niveaux",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "regleMaisonLectureSeule",
         "libelle": "Copie-contrôle axes et niveaux",
@@ -670,6 +676,7 @@
       "sens": "min",
       "unite": "pourcentage",
       "libelle": "Rattachement au niveau",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "indicatif",
         "libelle": "Rattachement au niveau",
