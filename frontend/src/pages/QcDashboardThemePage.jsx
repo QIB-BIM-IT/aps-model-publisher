@@ -104,10 +104,14 @@ export default function QcDashboardThemePage() {
 
   useEffect(() => {
     if (!controls.length) return;
-    if (!controls.some((c) => c.code === metricCode)) {
-      setMetricCode(controls[0].code);
-    }
-  }, [controls, metricCode]);
+    if (controls.some((c) => c.code === metricCode)) return;
+    const withNum = controls.find((c) =>
+      (seriesForCharts || []).some(
+        (s) => s.controlCode === c.code && numericPoints(s.points).length
+      )
+    );
+    setMetricCode(withNum?.code || controls[0].code);
+  }, [controls, metricCode, seriesForCharts]);
 
   const modelOptions = useMemo(() => {
     const fromApi = payload?.models || [];
@@ -284,7 +288,7 @@ export default function QcDashboardThemePage() {
         </h1>
         <p style={{ margin: '0 0 16px', fontSize: 14, color: '#94a3b8', lineHeight: 1.5, maxWidth: 820 }}>
           Suivi de la qualité des maquettes du projet. Le thème actif décrit un regroupement de
-          contrôles ; d’autres thèmes arriveront ensuite.
+          contrôles.
         </p>
 
         <div
@@ -656,14 +660,21 @@ export default function QcDashboardThemePage() {
                                     <span style={{ fontWeight: 500, color: '#64748b' }}> ({row.unite})</span>
                                   ) : null}
                                 </td>
-                                {compareModels.map((m) => (
+                                {compareModels.map((m) => {
+                                  const v = m.values?.[row.code];
+                                  const text =
+                                    v?.extras?.binaire && v.extras.releve
+                                      ? v.extras.releve
+                                      : formatNumber(row[m.accModelGuid]);
+                                  return (
                                   <td
                                     key={m.accModelGuid}
                                     style={{ padding: '8px 10px', textAlign: 'right', color: '#0f172a' }}
                                   >
-                                    {formatNumber(row[m.accModelGuid])}
+                                    {text}
                                   </td>
-                                ))}
+                                  );
+                                })}
                               </tr>
                             ))}
                           </tbody>

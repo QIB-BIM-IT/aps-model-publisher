@@ -57,6 +57,79 @@ function desiredSenseOf(entry) {
   return DESIRED_SENSE.has(v) ? v : 'aucun';
 }
 
+/** Formes dont le relevé est une valeur (ou une liste) face à une attendue — pas un taux. */
+const BINARY_FORMES = new Set(['egalite', 'presence', 'sequence']);
+
+function isBinaryForme(forme) {
+  return BINARY_FORMES.has(forme);
+}
+
+function joinListe(items, forme) {
+  const sep = forme === 'sequence' ? ' → ' : ' · ';
+  return (items || []).map((x) => String(x)).join(sep);
+}
+
+const UNITE_SYSTEME_LIBELLE = {
+  metrique: 'métrique',
+  imperial: 'impérial',
+};
+
+/** Libellé métier d'un jeton d'unités, lu dans le catalogue — jamais recalculé. */
+function labelSystemeUnites(token, entry) {
+  const raw = token == null ? '' : String(token).trim();
+  if (!raw) return null;
+  const map = entry?.descriptionCible?.traductionFormulaire;
+  if (map && typeof map === 'object') {
+    for (const [cle, jeton] of Object.entries(map)) {
+      if (String(jeton) === raw) return UNITE_SYSTEME_LIBELLE[cle] || cle;
+    }
+  }
+  return raw;
+}
+
+/**
+ * Valeur attendue d'affichage, lue dans la config projet (ou absente).
+ * Ne reconstitue pas un verdict : si la config n'a rien, on n'invente pas le défaut catalogue.
+ */
+function formatValeurAttendue(entry, projetCtrl) {
+  const forme = entry?.forme;
+  if (forme === 'egalite') {
+    const c = projetCtrl?.cible;
+    if (c == null || String(c).trim() === '') return null;
+    if (entry?.descriptionCible?.traductionFormulaire) {
+      return labelSystemeUnites(c, entry);
+    }
+    return String(c).trim();
+  }
+  if (forme === 'presence' || forme === 'sequence') {
+    const c = projetCtrl?.cible;
+    if (!Array.isArray(c) || c.length === 0) return null;
+    return joinListe(c, forme);
+  }
+  return null;
+}
+
+function formatReleveBinaire(entry, row) {
+  const forme = entry?.forme;
+  const json = row?.valeurJsonSlim;
+  if (forme === 'egalite') {
+    if (entry?.descriptionCible?.traductionFormulaire) {
+      return labelSystemeUnites(row?.valeurText, entry);
+    }
+    if (row?.valeurText != null && String(row.valeurText).trim() !== '') {
+      return String(row.valeurText).trim();
+    }
+    if (row?.valeurNum != null) return String(row.valeurNum);
+    return null;
+  }
+  if ((forme === 'presence' || forme === 'sequence') && Array.isArray(json?.phases)) {
+    return joinListe(json.phases, forme);
+  }
+  return row?.valeurText != null && String(row.valeurText).trim() !== ''
+    ? String(row.valeurText).trim()
+    : null;
+}
+
 /**
  * Affichage seulement : ce contrôle attend-il une cible / liste projet pour un verdict ?
  * Faux pour les contrôles indicatifs par nature et pour les règles maison
@@ -121,6 +194,8 @@ function metaForCodes(codes, projectControles) {
       typeWidget: entry.descriptionCible?.typeWidget || null,
       attendCibleProjet: attendCibleProjet(entry),
       ciblePourcent: resolveCiblePourcent(entry, byCode[code]),
+      valeurAttendue: formatValeurAttendue(entry, byCode[code]),
+      binaire: isBinaryForme(entry.forme),
     };
   });
 }
@@ -139,23 +214,36 @@ function roundPercent(n) {
 function slimHasFaultPopulation(json) {
   if (!json || typeof json !== 'object') return false;
   return Object.prototype.hasOwnProperty.call(json, 'nbNiveaux')
-    || Object.prototype.hasOwnProperty.call(json, 'nbAxes');
+    || Object.prototype.hasOwnProperty.call(json, 'nbAxes')
+    || Object.prototype.hasOwnProperty.call(json, 'nbLiens');
 }
 
 function percentConformesFromFaultCounts(json) {
   if (!json || typeof json !== 'object') return null;
   const nbFautifs = numOrNull(json.nbFautifs);
-  const total = numOrNull(json.nbNiveaux) ?? numOrNull(json.nbAxes);
+  const total = numOrNull(json.nbNiveaux) ?? numOrNull(json.nbAxes) ?? numOrNull(json.nbLiens);
   if (nbFautifs == null || total == null || total <= 0) return null;
   return roundPercent(((total - nbFautifs) / total) * 100);
 }
 
+function percentFromNommageCounts(json) {
+  if (!json || typeof json !== 'object') return null;
+  const total = numOrNull(json.nbSousProjets);
+  const fautifs = numOrNull(json.nbFautifsNommage);
+  if (total == null || fautifs == null || total <= 0) return null;
+  return roundPercent(((total - fautifs) / total) * 100);
+}
+
 /** G102 : les runs anciens ont stocké des octets dans valeur_num ; l’unité catalogue est Mo. */
-function valeurNumSuivie(code, row) {
+function valeurNumSuivie(code, row, binarySet) {
   const json = row?.valeurJsonSlim;
+  if (binarySet && binarySet.has(code)) return null;
   // Ne pas retomber sur valeur_num (fautifs) : cela mélangerait les unités avec le %.
   if (slimHasFaultPopulation(json)) {
     return percentConformesFromFaultCounts(json);
+  }
+  if (json && Object.prototype.hasOwnProperty.call(json, 'nbSousProjets')) {
+    return percentFromNommageCounts(json);
   }
   const n = numOrNull(row?.valeurNum);
   if (code === 'G102') {
@@ -230,6 +318,7 @@ function extrasFromShape(json) {
 
   const nbNiveaux = numOrNull(json.nbNiveaux);
   const nbAxes = numOrNull(json.nbAxes);
+  const nbLiens = numOrNull(json.nbLiens);
   const nbFautifs = numOrNull(json.nbFautifs);
   if (nbNiveaux != null && nbFautifs != null) {
     out.fautifs = nbFautifs;
@@ -248,6 +337,27 @@ function extrasFromShape(json) {
     out.denominateur = nbAxes;
     out.pourcentage = nbAxes > 0 ? roundPercent(((nbAxes - nbFautifs) / nbAxes) * 100) : null;
     out.ratioNoun = 'axes verrouillés';
+    out.showPercent = true;
+  } else if (nbLiens != null && nbFautifs != null) {
+    out.fautifs = nbFautifs;
+    out.total = nbLiens;
+    out.totalNoun = 'liens';
+    out.numerateur = Math.max(0, nbLiens - nbFautifs);
+    out.denominateur = nbLiens;
+    out.pourcentage = nbLiens > 0 ? roundPercent(((nbLiens - nbFautifs) / nbLiens) * 100) : null;
+    out.ratioNoun = 'liens dans la variante principale';
+    out.showPercent = true;
+  }
+
+  const nbSousProjets = numOrNull(json.nbSousProjets);
+  const nbFautifsNommage = numOrNull(json.nbFautifsNommage);
+  if (nbSousProjets != null && nbFautifsNommage != null) {
+    out.numerateur = Math.max(0, nbSousProjets - nbFautifsNommage);
+    out.denominateur = nbSousProjets;
+    out.pourcentage = nbSousProjets > 0
+      ? roundPercent(((nbSousProjets - nbFautifsNommage) / nbSousProjets) * 100)
+      : null;
+    out.ratioNoun = 'sous-projets bien nommés';
     out.showPercent = true;
   }
 
@@ -300,7 +410,7 @@ function extrasFromShape(json) {
   return Object.keys(out).length ? out : null;
 }
 
-function valuePayload(row, code) {
+function valuePayload(row, code, entry, binarySet) {
   if (!row) {
     return {
       valeurNum: null,
@@ -310,11 +420,16 @@ function valuePayload(row, code) {
     };
   }
   const failed = row.etatExtraction === 'echec';
+  const catalogEntry = qcProjectConfigService.loadCatalog().controles?.[code] || entry || {};
+  let extras = failed ? null : extrasFromSlim(code, row.valeurJsonSlim);
+  if (!failed && isBinaryForme(catalogEntry.forme)) {
+    extras = { ...(extras || {}), binaire: true, releve: formatReleveBinaire(catalogEntry, row) };
+  }
   return {
-    valeurNum: failed ? null : valeurNumSuivie(code, row),
+    valeurNum: failed ? null : valeurNumSuivie(code, row, binarySet),
     etatExtraction: row.etatExtraction,
     statut: failed ? null : row.statut || null,
-    extras: failed ? null : extrasFromSlim(code, row.valeurJsonSlim),
+    extras,
   };
 }
 
@@ -332,7 +447,7 @@ function trendFromPoints(points) {
  * Delta face à la version ACC précédente (dernier run retenu de cette version).
  * Fait numérique uniquement : aucun verdict, aucun seuil.
  */
-function deltaFromPoints(currentVal, points) {
+function deltaFromPoints(currentVal, points, binary) {
   const last = points.length ? points[points.length - 1] : null;
   const prev = points.length >= 2 ? points[points.length - 2] : null;
   const base = {
@@ -343,6 +458,7 @@ function deltaFromPoints(currentVal, points) {
     previousVersion: prev?.modelVersion ?? null,
     previousAt: prev?.at ?? null,
     previousValeurNum: prev?.valeurNum ?? null,
+    previousStatut: prev?.statut ?? null,
     abs: null,
     rel: null,
   };
@@ -352,6 +468,18 @@ function deltaFromPoints(currentVal, points) {
   }
   if (!prev) {
     return { ...base, reason: 'no_previous_version' };
+  }
+
+  if (binary) {
+    const currentStatut = currentVal?.statut ?? null;
+    const previousStatut = prev.statut ?? null;
+    const changed = currentStatut !== previousStatut;
+    return {
+      ...base,
+      reason: changed ? 'statut_changed' : 'statut_unchanged',
+      previousStatut,
+      currentStatut,
+    };
   }
 
   const currN = currentVal?.valeurNum;
@@ -371,7 +499,7 @@ function deltaFromPoints(currentVal, points) {
   };
 }
 
-function attachCurrentDelta(current, seriesByVersion, codes) {
+function attachCurrentDelta(current, seriesByVersion, codes, binarySet) {
   const byKey = new Map();
   for (const s of seriesByVersion) {
     byKey.set(`${String(s.accModelGuid).toLowerCase()}|${s.controlCode}`, s.points || []);
@@ -383,7 +511,11 @@ function attachCurrentDelta(current, seriesByVersion, codes) {
       if (!m.values[code]) m.values[code] = valuePayload(null, code);
       const points = byKey.get(`${guid}|${code}`) || [];
       m.values[code].trend = trendFromPoints(points);
-      m.values[code].delta = deltaFromPoints(m.values[code], points);
+      m.values[code].delta = deltaFromPoints(
+        m.values[code],
+        points,
+        binarySet && binarySet.has(code)
+      );
     }
   }
 }
@@ -400,6 +532,8 @@ class QcDashboardService {
       logger.warn(`[QC][Dashboard] lecture config projet ignorée: ${err.message}`);
     }
     const controls = metaForCodes(codes, projectControles);
+    const byControl = new Map(controls.map((c) => [c.code, c]));
+    const binarySet = new Set(controls.filter((c) => c.binaire).map((c) => c.code));
 
     const scope = await qcDesignatedElementsQueryService.resolveProjectScope(
       projectKey,
@@ -471,6 +605,7 @@ class QcDashboardService {
       `SELECT cr."runId" AS "runId",
               cr."controlCode" AS "controlCode",
               cr.valeur_num AS "valeurNum",
+              cr.valeur_text AS "valeurText",
               cr.statut AS statut,
               cr.etat_extraction AS "etatExtraction",
               CASE
@@ -540,6 +675,32 @@ class QcDashboardService {
                     'total', cr.valeur_json#>'{fautifsDetail,total}'
                   )
                 )
+                WHEN cr."controlCode" = 'G111' THEN jsonb_build_object(
+                  'vacuite', cr.valeur_json->'vacuite',
+                  'nbLiens', cr.valeur_json->'nbLiens',
+                  'nbFautifs', cr.valeur_json->'nbFautifs',
+                  'nbConformes', cr.valeur_json->'nbConformes'
+                )
+                WHEN cr."controlCode" = 'G404' THEN jsonb_build_object(
+                  'nbSousProjets', jsonb_array_length(
+                    COALESCE(cr.valeur_json->'sousProjets', '[]'::jsonb)
+                  ),
+                  'nbFautifsNommage', CASE
+                    WHEN cr.valeur_json->'nommage' ? 'nomsNonConformes'
+                    THEN jsonb_array_length(
+                      COALESCE(cr.valeur_json#>'{nommage,nomsNonConformes}', '[]'::jsonb)
+                    )
+                    ELSE NULL
+                  END
+                )
+                WHEN cr."controlCode" IN ('G406', 'G407') THEN jsonb_build_object(
+                  'phases', cr.valeur_json->'phases'
+                )
+                WHEN cr."controlCode" = 'G104' THEN jsonb_build_object(
+                  'longueur', cr.valeur_json->'longueur',
+                  'aire', cr.valeur_json->'aire',
+                  'volume', cr.valeur_json->'volume'
+                )
                 ELSE NULL
               END AS "valeurJsonSlim"
        FROM qc.control_results cr
@@ -578,7 +739,7 @@ class QcDashboardService {
     const current = currentModels.map((m) => {
       const values = {};
       for (const code of codes) {
-        values[code] = valuePayload(byRunCode.get(`${m.runId}|${code}`), code);
+        values[code] = valuePayload(byRunCode.get(`${m.runId}|${code}`), code, byControl.get(code), binarySet);
       }
       return {
         accModelGuid: m.accModelGuid,
@@ -635,7 +796,8 @@ class QcDashboardService {
         runId: h.runId,
         at: h.endedAtUtc || h.startedAtUtc,
         modelVersion: h.modelVersion,
-        valeurNum: failed || !row ? null : valeurNumSuivie(code, row),
+        valeurNum: failed || !row ? null : valeurNumSuivie(code, row, binarySet),
+        statut: failed || !row ? null : row.statut || null,
         etatExtraction: row?.etatExtraction || null,
         runCount: 1,
       };
@@ -677,7 +839,7 @@ class QcDashboardService {
       }
     }
 
-    attachCurrentDelta(current, seriesByVersion, codes);
+    attachCurrentDelta(current, seriesByVersion, codes, binarySet);
 
     const ms = Date.now() - t0;
     const logLine =
@@ -701,3 +863,6 @@ class QcDashboardService {
 module.exports = new QcDashboardService();
 module.exports.extrasFromShape = extrasFromShape;
 module.exports.resolveCiblePourcent = resolveCiblePourcent;
+module.exports.formatValeurAttendue = formatValeurAttendue;
+module.exports.formatReleveBinaire = formatReleveBinaire;
+module.exports.isBinaryForme = isBinaryForme;

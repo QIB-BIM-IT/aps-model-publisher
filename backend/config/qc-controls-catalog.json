@@ -23,6 +23,7 @@
       "forme": "egalite",
       "unite": "version",
       "libelle": "Version du logiciel",
+      "sensSouhaitable": "aucun",
       "descriptionCible": {
         "typeWidget": "menu",
         "libelle": "Version Revit attendue (PEB)",
@@ -117,6 +118,7 @@
       "forme": "presence",
       "champListe": "phases",
       "libelle": "Phases du document",
+      "sensSouhaitable": "aucun",
       "descriptionCible": {
         "typeWidget": "liste",
         "libelle": "Noms de phases attendus",
@@ -138,6 +140,7 @@
       "forme": "sequence",
       "champListe": "phases",
       "libelle": "Ordre des phases du document",
+      "sensSouhaitable": "aucun",
       "descriptionCible": {
         "typeWidget": "listeOrdonnee",
         "libelle": "Séquence de phases de référence",
@@ -235,6 +238,7 @@
       "forme": "nommage",
       "champListe": "sousProjets",
       "libelle": "Sous-projets utilisateur",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "listePrefixes",
         "libelle": "Préfixes de sous-projets autorisés",
@@ -332,6 +336,7 @@
       "forme": "etatReference",
       "unite": "fautifs",
       "libelle": "Liens dans la variante principale",
+      "sensSouhaitable": "hausse",
       "descriptionCible": {
         "typeWidget": "texte",
         "libelle": "Nom de la variante des liens",
@@ -349,6 +354,7 @@
       "forme": "egalite",
       "unite": "systeme-unites",
       "libelle": "Système d'unités (longueur/aire/volume)",
+      "sensSouhaitable": "aucun",
       "descriptionCible": {
         "typeWidget": "menu",
         "libelle": "Système d’unités",

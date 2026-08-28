@@ -28,7 +28,12 @@ export const QC_DASHBOARD_THEMES = [
     available: true,
     controls: ['G200', 'G201', 'G202', 'G203', 'G205', 'G210', 'G314'],
   },
-  { id: 'livraison', label: 'Conventions de livraison', available: false, controls: [] },
+  {
+    id: 'livraison',
+    label: 'Conventions de livraison',
+    available: true,
+    controls: ['G101', 'G104', 'G111', 'G404', 'G406', 'G407'],
+  },
 ];
 
 export function qcDashboardThemeById(id) {
