@@ -46,6 +46,18 @@ export function DirectionMark({ dir, color, size = 18 }) {
   );
 }
 
+function statutValueColor(statut) {
+  if (statut === 'conforme') return DELTA_TONE.good;
+  if (statut === 'non_conforme') return DELTA_TONE.bad;
+  return DELTA_TONE.none;
+}
+
+function statutPhrase(statut) {
+  if (statut === 'conforme') return 'conforme';
+  if (statut === 'non_conforme') return 'non conforme';
+  return 'indicatif';
+}
+
 export function VerdictBadge({ value }) {
   if (!value || value.etatExtraction === 'echec') return null;
   let label = 'Indicatif';
@@ -89,6 +101,24 @@ export function DeltaLine({ delta, unite, sensSouhaitable }) {
   if (!delta) return null;
   const muted = { marginTop: 8, fontSize: 12, color: '#475569', lineHeight: 1.35 };
   if (delta.reason === 'extraction_failed' || delta.reason === 'no_previous_version') return null;
+  if (delta.reason === 'statut_changed' || delta.reason === 'statut_unchanged') {
+    const vs = versionLabel(delta.previousVersion);
+    if (delta.reason === 'statut_unchanged') {
+      return (
+        <div style={muted}>
+          Même verdict depuis la {vs}.
+        </div>
+      );
+    }
+    return (
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: DELTA_TONE.none, lineHeight: 1.3 }}>
+          {statutPhrase(delta.previousStatut)} → {statutPhrase(delta.currentStatut)}
+        </div>
+        <div style={{ marginTop: 3, fontSize: 11, color: '#64748b' }}>depuis la {vs}</div>
+      </div>
+    );
+  }
   if (delta.reason === 'no_numeric' || !delta.available) {
     const prev = delta.previousVersion != null ? versionLabel(delta.previousVersion) : null;
     return (
@@ -202,6 +232,12 @@ function structuredExtrasHint(extras) {
     if (extras.ratioNoun === 'éléments monitorés') {
       return <div style={hintStyle}>Aucun axe ni niveau soumis à l’audit.</div>;
     }
+    if (extras.totalNoun === 'liens' || extras.ratioNoun === 'liens dans la variante principale') {
+      return <div style={hintStyle}>Cette maquette n’a pas de lien.</div>;
+    }
+    if (extras.ratioNoun === 'sous-projets bien nommés') {
+      return <div style={hintStyle}>Cette maquette n’a pas de sous-projet utilisateur.</div>;
+    }
     return <div style={hintStyle}>Aucun élément évaluable pour le rattachement au niveau.</div>;
   }
 
@@ -305,6 +341,20 @@ export function KpiCard({
           ) : null}
         </div>
         {extrasHint(code, extras)}
+      </>
+    );
+  } else if (extras?.binaire) {
+    const color = statutValueColor(value.statut);
+    body = (
+      <>
+        <div style={{ fontSize: 28, fontWeight: 800, color, lineHeight: 1.25 }}>
+          {extras.releve || '—'}
+        </div>
+        {value.statut === 'non_conforme' && control.valeurAttendue ? (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#64748b', lineHeight: 1.4 }}>
+            Attendu : {control.valeurAttendue}
+          </div>
+        ) : null}
       </>
     );
   } else if (missing || value.valeurNum == null) {
@@ -466,6 +516,12 @@ export function WhatChangedSection({ current, controls }) {
           const delta = value?.delta;
           if (!delta || delta.reason === 'extraction_failed') continue;
           if (delta.reason === 'no_previous_version') continue;
+          if (delta.reason === 'statut_changed' || delta.reason === 'statut_unchanged') {
+            const item = { control, delta, kind: 'statut' };
+            if (delta.reason === 'statut_unchanged') stable.push(item);
+            else moved.push(item);
+            continue;
+          }
           if (!delta.available || delta.abs == null) continue;
           const unite = uniteLabel(control.unite);
           const item = {
@@ -487,7 +543,34 @@ export function WhatChangedSection({ current, controls }) {
             ) : null}
             {moved.length ? (
               <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none', color: '#0f172a', fontSize: 14, lineHeight: 1.55 }}>
-                {moved.map(({ control, delta, unite, currentN }) => {
+                {moved.map((item) => {
+                  const { control, delta, unite, currentN, kind } = item;
+                  if (kind === 'statut') {
+                    return (
+                      <li
+                        key={control.code}
+                        style={{
+                          marginBottom: 8,
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                        }}
+                      >
+                        <span>
+                          <strong>{control.libelle}</strong>
+                          {' : '}
+                          {statutPhrase(delta.previousStatut)}
+                          {' → '}
+                          {statutPhrase(delta.currentStatut)}
+                          {' ('}
+                          {versionLabel(delta.previousVersion)}
+                          {' → '}
+                          {versionLabel(delta.currentVersion)}
+                          {')'}
+                        </span>
+                      </li>
+                    );
+                  }
                   const dir = delta.abs > 0 ? 'up' : 'down';
                   const tone = deltaTone(control.sensSouhaitable, delta.abs, false);
                   const color = DELTA_TONE[tone];

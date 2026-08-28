@@ -100,7 +100,7 @@ export function versionLabel(v) {
   return `version ACC ${v}`;
 }
 
-export const RUN_DETAIL_CODES = new Set(['G408', 'G102', 'G200', 'G201', 'G202']);
+export const RUN_DETAIL_CODES = new Set(['G408', 'G102', 'G101', 'G104', 'G200', 'G201', 'G202']);
 
 export function detailHref(code, runId) {
   if (!runId) return null;
@@ -193,4 +193,8 @@ export const PROJECT_ELEMENTS_CODES = new Set([
   'G205',
   'G210',
   'G314',
+  'G111',
+  'G404',
+  'G406',
+  'G407',
 ]);
