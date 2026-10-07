@@ -186,18 +186,43 @@ class QcJobService {
     return null;
   }
 
-  serializeJob(job) {
+  serializeJob(job, { lastRunStatus = null } = {}) {
     const data = typeof job.toJSON === 'function' ? job.toJSON() : { ...job };
     const user = data.user;
     return {
       ...data,
       userName: user?.name || user?.email || 'Utilisateur inconnu',
+      // Dernier statut technique (qc.runs.status), sans le payload du run.
+      lastRunStatus: lastRunStatus || null,
       // B2.2 : le scheduler planifie les QCJob scheduleEnabled (async, sans lock projet)
       schedulingActive: data.scheduleEnabled === true,
       schedulingNote: data.scheduleEnabled
         ? 'Planification active (soumission DA async ; finalisation via callback/poll).'
         : 'Planification inactive (scheduleEnabled=false).',
     };
+  }
+
+  /**
+   * Dernier statut par tâche : une ligne par jobId, colonnes status + createdAt seulement.
+   * @param {string[]} jobIds
+   * @returns {Promise<Map<string, string>>}
+   */
+  async _latestRunStatusByJobId(jobIds) {
+    if (!jobIds.length) return new Map();
+    const { QueryTypes } = require('sequelize');
+    const { sequelize } = require('../config/database');
+    const rows = await sequelize.query(
+      `SELECT DISTINCT ON ("jobId") "jobId", status
+       FROM qc.runs
+       WHERE "jobId" IN (:ids)
+       ORDER BY "jobId", "createdAt" DESC`,
+      { replacements: { ids: jobIds }, type: QueryTypes.SELECT }
+    );
+    const byJob = new Map();
+    for (const row of rows) {
+      if (row?.jobId && row.status) byJob.set(String(row.jobId), row.status);
+    }
+    return byJob;
   }
 
   _scheduler() {
@@ -269,7 +294,8 @@ class QcJobService {
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email'] }],
       order: [['createdAt', 'DESC']],
     });
-    return jobs.map((j) => this.serializeJob(j));
+    const lastStatus = await this._latestRunStatusByJobId(jobs.map((j) => j.id));
+    return jobs.map((j) => this.serializeJob(j, { lastRunStatus: lastStatus.get(String(j.id)) || null }));
   }
 
   async getJobById(id) {
@@ -279,7 +305,8 @@ class QcJobService {
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email'] }],
     });
     if (!job) throw httpError(404, 'Tâche QC introuvable');
-    return this.serializeJob(job);
+    const lastStatus = await this._latestRunStatusByJobId([job.id]);
+    return this.serializeJob(job, { lastRunStatus: lastStatus.get(String(job.id)) || null });
   }
 
   async updateJob(id, body) {

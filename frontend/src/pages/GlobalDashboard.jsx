@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getPublishJobs, getPDFExportJobs, getCopyJobs, getRuns, getPDFExportRuns, getCopyRuns, me, updatePreferences } from '../services/api';
+import { getPublishJobs, getPDFExportJobs, getCopyJobs, getRuns, getPDFExportRuns, getCopyRuns, fetchQcJobs, me, updatePreferences } from '../services/api';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Durée RÉELLE end-to-end d'un run = début -> confirmation de publication sur ACC
@@ -12,6 +12,102 @@ function getRealDurationMs(r) {
   }
   return s.realDurationMs || s.durationMs || s.timing?.totalMs
     || (r.endedAt && r.startedAt ? new Date(r.endedAt) - new Date(r.startedAt) : 0);
+}
+
+const JOB_TYPE_BADGE = {
+  publish: {
+    label: '🚀 Publish',
+    emoji: '🚀',
+    background: 'rgba(59, 130, 246, 0.25)',
+    color: '#60a5fa',
+    border: '1px solid rgba(59, 130, 246, 0.4)',
+  },
+  pdf: {
+    label: '📄 PDF',
+    emoji: '📄',
+    background: 'rgba(16, 185, 129, 0.25)',
+    color: '#34d399',
+    border: '1px solid rgba(16, 185, 129, 0.4)',
+  },
+  copy: {
+    label: '📋 Copie',
+    emoji: '📋',
+    background: 'rgba(245, 158, 11, 0.25)',
+    color: '#f59e0b',
+    border: '1px solid rgba(245, 158, 11, 0.4)',
+  },
+  // Même violet que « Créer tâche QC » / le badge historique de Planning (#7c3aed).
+  // Texte éclairci pour le fond sombre du dashboard.
+  qc: {
+    label: '✅ QC',
+    emoji: '✅',
+    background: 'rgba(124, 58, 237, 0.25)',
+    color: '#c4b5fd',
+    border: '1px solid rgba(124, 58, 237, 0.4)',
+  },
+};
+
+function jobTypeBadge(kind) {
+  return JOB_TYPE_BADGE[kind] || JOB_TYPE_BADGE.pdf;
+}
+
+function planningJobType(kind) {
+  if (kind === 'qc') return 'qc';
+  if (kind === 'copy') return 'file-copy';
+  if (kind === 'publish') return 'publish';
+  return 'pdf-export';
+}
+
+function typeLabelOf(kind) {
+  if (kind === 'qc') return 'QC';
+  if (kind === 'copy') return 'Copie';
+  if (kind === 'publish') return 'Publish';
+  return 'PDF';
+}
+
+function hasCronSchedule(job) {
+  return typeof job?.cronExpression === 'string' && job.cronExpression.trim().length > 0;
+}
+
+// Prochaine occurrence pour les crons du Planning : quotidien (m h * * *) ou hebdo (m h * * d).
+// Un jeudi 10 h ne doit pas retomber sur « demain 10 h ». Les autres formes restent variables.
+function nextSimpleOccurrence(cronExpression, now) {
+  const parts = String(cronExpression || '').trim().split(/\s+/);
+  if (parts.length < 5) return null;
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  if (!/^\d+$/.test(minute) || !/^\d+$/.test(hour)) return null;
+  if (dayOfMonth !== '*' || month !== '*') return null;
+  const minuteN = parseInt(minute, 10);
+  const hourN = parseInt(hour, 10);
+  if (hourN > 23 || minuteN > 59) return null;
+
+  const next = new Date(now);
+  next.setSeconds(0, 0);
+  next.setHours(hourN, minuteN, 0, 0);
+
+  if (dayOfWeek === '*') {
+    if (next <= now) next.setDate(next.getDate() + 1);
+    return next;
+  }
+  if (!/^\d+$/.test(dayOfWeek)) return null;
+  let target = parseInt(dayOfWeek, 10);
+  if (target === 7) target = 0;
+  if (target < 0 || target > 6) return null;
+  let delta = (target - next.getDay() + 7) % 7;
+  if (delta === 0 && next <= now) delta = 7;
+  next.setDate(next.getDate() + delta);
+  return next;
+}
+
+const QC_IN_FLIGHT = new Set(['queued', 'submitted', 'running']);
+const RUN_ERROR = new Set(['failed', 'error', 'timeout']);
+
+function lastRunStatusOf(job, runs) {
+  if (job?.dashboardKind === 'qc') return job.lastRunStatus || null;
+  const jobRuns = (runs || []).filter((r) => r.jobId === job?.id);
+  if (jobRuns.length === 0) return null;
+  const lastRun = jobRuns.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+  return lastRun?.status || null;
 }
 
 // Composant Card
@@ -85,6 +181,7 @@ export default function GlobalDashboard() {
   const [publishJobs, setPublishJobs] = React.useState([]);
   const [pdfJobs, setPdfJobs] = React.useState([]);
   const [copyJobs, setCopyJobs] = React.useState([]);
+  const [qcJobs, setQcJobs] = React.useState([]);
   const [publishRuns, setPublishRuns] = React.useState([]);
   const [pdfRuns, setPdfRuns] = React.useState([]);
   const [copyRuns, setCopyRuns] = React.useState([]);
@@ -160,18 +257,21 @@ export default function GlobalDashboard() {
     setError('');
     try {
       const runsQuery = getRunsQuery();
-      const [pjobs, pdfjobs, cpjobs, pruns, pdfruns, cpruns] = await Promise.all([
+      const [pjobs, pdfjobs, cpjobs, pruns, pdfruns, cpruns, scheduledQc] = await Promise.all([
         getPublishJobs({}),
         getPDFExportJobs({}),
         getCopyJobs({}),
         getRuns(runsQuery),
         getPDFExportRuns(runsQuery),
         getCopyRuns(runsQuery),
+        // Un module QC indisponible ne doit pas vider le reste du dashboard.
+        fetchQcJobs({}).catch(() => []),
       ]);
       
       setPublishJobs(pjobs);
       setPdfJobs(pdfjobs);
       setCopyJobs(cpjobs);
+      setQcJobs(Array.isArray(scheduledQc) ? scheduledQc : []);
       setPublishRuns(pruns);
       setPdfRuns(pdfruns);
       setCopyRuns(cpruns);
@@ -191,7 +291,13 @@ export default function GlobalDashboard() {
   }, [loadAllData]);
 
   // ========== CALCULS ==========
-  const allJobs = [...publishJobs, ...pdfJobs, ...copyJobs];
+  const allJobs = [
+    ...publishJobs.map((j) => ({ ...j, dashboardKind: 'publish' })),
+    ...pdfJobs.map((j) => ({ ...j, dashboardKind: 'pdf' })),
+    ...copyJobs.map((j) => ({ ...j, dashboardKind: 'copy' })),
+    // Scheduler seulement : cron présent (ex. jeudi 10 h). Les runs webhook ne sont pas des lignes.
+    ...qcJobs.filter(hasCronSchedule).map((j) => ({ ...j, dashboardKind: 'qc' })),
+  ];
   const allRuns = [...publishRuns, ...pdfRuns, ...copyRuns];
 
   // ===== Recherche & tri du tableau récapitulatif =====
@@ -201,26 +307,21 @@ export default function GlobalDashboard() {
 
   // Calcule les champs dérivés (affichés/triables) pour une tâche donnée
   const getJobMeta = React.useCallback((job) => {
-    const isPublish = publishJobs.some(j => j.id === job.id);
-    const isCopyJob = copyJobs.some(j => j.id === job.id);
-    const typeLabel = isCopyJob ? 'Copie' : isPublish ? 'Publish' : 'PDF';
+    const typeLabel = typeLabelOf(job.dashboardKind);
 
     const cronParts = job.cronExpression?.split(' ') || [];
     const hour = parseInt(cronParts[1], 10);
     const minute = parseInt(cronParts[0], 10);
     const hourMinutes = (Number.isNaN(hour) ? 2 : hour) * 60 + (Number.isNaN(minute) ? 0 : minute);
 
-    const jobRuns = allRuns.filter(r => r.jobId === job.id);
-    const lastRun = jobRuns.length > 0
-      ? jobRuns.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
-      : null;
+    const lastStatus = lastRunStatusOf(job, allRuns);
 
     let statusText;
     if (!job.scheduleEnabled) statusText = 'Pausé';
-    else if (job.status === 'running') statusText = 'running';
-    else if (lastRun && ['failed', 'error', 'timeout'].includes(lastRun.status)) statusText = lastRun.status;
-    else if (lastRun && lastRun.status === 'partial') statusText = 'partial';
-    else if (lastRun && lastRun.status === 'success') statusText = 'success';
+    else if (job.status === 'running' || (job.dashboardKind === 'qc' && QC_IN_FLIGHT.has(lastStatus))) statusText = 'running';
+    else if (RUN_ERROR.has(lastStatus)) statusText = lastStatus;
+    else if (lastStatus === 'partial') statusText = 'partial';
+    else if (lastStatus === 'success') statusText = 'success';
     else statusText = job.status || 'idle';
 
     return {
@@ -232,7 +333,7 @@ export default function GlobalDashboard() {
       timezone: job.timezone || 'UTC',
       statusText,
     };
-  }, [publishJobs, copyJobs, allRuns]);
+  }, [allRuns]);
 
   // Liste filtrée (recherche) puis triée (en-têtes cliquables)
   const visibleJobs = React.useMemo(() => {
@@ -509,32 +610,13 @@ export default function GlobalDashboard() {
     return allJobs
       .filter((j) => j.scheduleEnabled)
       .map((job) => {
-        // 🆕 Utiliser nextRun du backend si disponible
+        // nextRun du scheduler (timezone du job). S'il manque ou est déjà passé,
+        // repli quotidien / hebdomadaire — y compris les QC « jeudi 10 h ».
         let nextExecution = job.nextRun ? new Date(job.nextRun) : null;
-        let timeUntilMs = nextExecution ? nextExecution - now : null;
-        
-        // Si nextRun n'est pas disponible, fallback sur le calcul simple
-        if (!nextExecution) {
-          const cronParts = job.cronExpression?.split(' ') || [];
-          const minute = cronParts[0] || '0';
-          const hour = cronParts[1] || '2';
-
-          const isSimpleCron =
-            !minute.includes('*') &&
-            !minute.includes('/') &&
-            !hour.includes('*') &&
-            !hour.includes('/');
-
-          if (isSimpleCron) {
-            const next = new Date();
-            next.setHours(parseInt(hour, 10), parseInt(minute, 10), 0, 0);
-            if (next <= now) {
-              next.setDate(next.getDate() + 1);
-            }
-            nextExecution = next;
-            timeUntilMs = next - now;
-          }
+        if (!nextExecution || Number.isNaN(nextExecution.getTime()) || nextExecution <= now) {
+          nextExecution = nextSimpleOccurrence(job.cronExpression, now);
         }
+        const timeUntilMs = nextExecution ? nextExecution - now : null;
         
         // 🆕 Calculer timeUntil en format lisible (minutes, heures, jours)
         let timeUntilFormatted = null;
@@ -612,7 +694,7 @@ export default function GlobalDashboard() {
               📊 Vue d'ensemble
             </h1>
             <p style={{ color: '#94a3b8', fontSize: 15, margin: 0 }}>
-              Toutes les tâches planifiées (Publish, PDF Export & Copie)
+              Toutes les tâches planifiées (Publish, PDF Export, Copie & QC)
             </p>
           </div>
 
@@ -1095,9 +1177,31 @@ export default function GlobalDashboard() {
                 const cronParts = job.cronExpression?.split(' ') || [];
                 const hour = cronParts[1]?.padStart(2, '0') || '02';
                 const minute = cronParts[0]?.padStart(2, '0') || '00';
-                const isPublish = publishJobs.some(j => j.id === job.id);
-                const isCopy = copyJobs.some(j => j.id === job.id);
-                const jobType = isPublish ? 'publish' : isCopy ? 'file-copy' : 'pdf-export';
+                const badge = jobTypeBadge(job.dashboardKind);
+                const jobType = planningJobType(job.dashboardKind);
+                const isQc = job.dashboardKind === 'qc';
+                const rowRest = isQc
+                  ? {
+                      background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.18) 0%, rgba(124, 58, 237, 0.08) 100%)',
+                      borderColor: 'rgba(167, 139, 250, 0.45)',
+                      boxShadow: '0 2px 8px rgba(124, 58, 237, 0.18)',
+                    }
+                  : {
+                      background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(37, 99, 235, 0.06) 100%)',
+                      borderColor: 'rgba(96, 165, 250, 0.3)',
+                      boxShadow: '0 2px 8px rgba(37, 99, 235, 0.15)',
+                    };
+                const rowHover = isQc
+                  ? {
+                      background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.28) 0%, rgba(124, 58, 237, 0.14) 100%)',
+                      borderColor: 'rgba(196, 181, 253, 0.7)',
+                      boxShadow: '0 4px 16px rgba(124, 58, 237, 0.32)',
+                    }
+                  : {
+                      background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.2) 0%, rgba(37, 99, 235, 0.1) 100%)',
+                      borderColor: 'rgba(96, 165, 250, 0.5)',
+                      boxShadow: '0 4px 16px rgba(37, 99, 235, 0.3)',
+                    };
 
                 return (
                   <button
@@ -1109,29 +1213,29 @@ export default function GlobalDashboard() {
                       gridTemplateColumns: '120px 1fr 150px 100px 80px',
                       alignItems: 'center',
                       padding: '14px 16px',
-                      background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(37, 99, 235, 0.06) 100%)',
+                      background: rowRest.background,
                       borderRadius: 10,
-                      border: '1px solid rgba(96, 165, 250, 0.3)',
+                      border: `1px solid ${rowRest.borderColor}`,
                       gap: 16,
                       cursor: 'pointer',
                       transition: 'all 0.2s',
                       textAlign: 'left',
-                      boxShadow: '0 2px 8px rgba(37, 99, 235, 0.15)'
+                      boxShadow: rowRest.boxShadow,
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(37, 99, 235, 0.2) 0%, rgba(37, 99, 235, 0.1) 100%)';
+                      e.currentTarget.style.background = rowHover.background;
                       e.currentTarget.style.transform = 'translateX(4px)';
-                      e.currentTarget.style.borderColor = 'rgba(96, 165, 250, 0.5)';
-                      e.currentTarget.style.boxShadow = '0 4px 16px rgba(37, 99, 235, 0.3)';
+                      e.currentTarget.style.borderColor = rowHover.borderColor;
+                      e.currentTarget.style.boxShadow = rowHover.boxShadow;
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'linear-gradient(135deg, rgba(37, 99, 235, 0.12) 0%, rgba(37, 99, 235, 0.06) 100%)';
+                      e.currentTarget.style.background = rowRest.background;
                       e.currentTarget.style.transform = 'none';
-                      e.currentTarget.style.borderColor = 'rgba(96, 165, 250, 0.3)';
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(37, 99, 235, 0.15)';
+                      e.currentTarget.style.borderColor = rowRest.borderColor;
+                      e.currentTarget.style.boxShadow = rowRest.boxShadow;
                     }}
                   >
-                    <div style={{ fontSize: 16, fontWeight: 600, color: '#60a5fa', fontFamily: 'monospace' }}>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: isQc ? '#c4b5fd' : '#60a5fa', fontFamily: 'monospace' }}>
                       🕐 {hour}:{minute}
                     </div>
                     <div>
@@ -1168,11 +1272,11 @@ export default function GlobalDashboard() {
                         borderRadius: 4,
                         fontSize: 10,
                         fontWeight: 600,
-                        background: isCopy ? 'rgba(245, 158, 11, 0.25)' : isPublish ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.25)',
-                        color: isCopy ? '#f59e0b' : isPublish ? '#60a5fa' : '#34d399',
-                        border: `1px solid ${isCopy ? 'rgba(245, 158, 11, 0.4)' : isPublish ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`
+                        background: badge.background,
+                        color: badge.color,
+                        border: badge.border,
                       }}>
-                        {isCopy ? '📋' : isPublish ? '🚀' : '📄'}
+                        {badge.emoji}
                       </span>
                     </div>
                   </button>
@@ -1285,20 +1389,13 @@ export default function GlobalDashboard() {
                     const cronParts = job.cronExpression?.split(' ') || [];
                     const hour = cronParts[1]?.padStart(2, '0') || '02';
                     const minute = cronParts[0]?.padStart(2, '0') || '00';
-                    const isPublish = publishJobs.some(j => j.id === job.id);
-                    const isCopyJob = copyJobs.some(j => j.id === job.id);
-                    
-                    // Trouver le dernier run pour ce job
-                    const jobRuns = allRuns.filter(r => r.jobId === job.id);
-                    const lastRun = jobRuns.length > 0 
-                      ? jobRuns.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0]
-                      : null;
-                    
-                    // Déterminer si le status est en erreur
-                    const isError = lastRun && ['failed', 'error', 'timeout'].includes(lastRun.status);
-                    const isPartial = lastRun && lastRun.status === 'partial';
-                    const isRunning = job.status === 'running';
-                    const isSuccess = lastRun && lastRun.status === 'success';
+                    const badge = jobTypeBadge(job.dashboardKind);
+                    const lastStatus = lastRunStatusOf(job, allRuns);
+
+                    const isError = RUN_ERROR.has(lastStatus);
+                    const isPartial = lastStatus === 'partial';
+                    const isRunning = job.status === 'running' || (job.dashboardKind === 'qc' && QC_IN_FLIGHT.has(lastStatus));
+                    const isSuccess = lastStatus === 'success';
 
                     // Couleurs du status basées sur le dernier run
                     const getStatusStyle = () => {
@@ -1342,7 +1439,7 @@ export default function GlobalDashboard() {
                     const getStatusText = () => {
                       if (!job.scheduleEnabled) return 'Pausé';
                       if (isRunning) return 'running';
-                      if (isError) return `❌ ${lastRun.status}`;
+                      if (isError) return `❌ ${lastStatus}`;
                       if (isPartial) return '⚠️ partial';
                       if (isSuccess) return '✅ success';
                       return job.status || 'idle';
@@ -1365,7 +1462,7 @@ export default function GlobalDashboard() {
                         onMouseLeave={(e) => {
                           e.currentTarget.style.background = index % 2 === 0 ? 'rgba(255, 255, 255, 0.03)' : 'transparent';
                         }}
-                        onClick={() => handleJobClick(job, isPublish ? 'publish' : isCopyJob ? 'file-copy' : 'pdf-export')}
+                        onClick={() => handleJobClick(job, planningJobType(job.dashboardKind))}
                       >
                         <td style={{ padding: '12px 16px', fontSize: 14, fontWeight: 500, color: '#e2e8f0', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
                           {job.name || 'Sans nom'}
@@ -1376,11 +1473,11 @@ export default function GlobalDashboard() {
                             borderRadius: 6,
                             fontSize: 11,
                             fontWeight: 600,
-                            background: isCopyJob ? 'rgba(245, 158, 11, 0.25)' : isPublish ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.25)',
-                            color: isCopyJob ? '#f59e0b' : isPublish ? '#60a5fa' : '#34d399',
-                            border: `1px solid ${isCopyJob ? 'rgba(245, 158, 11, 0.4)' : isPublish ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`
+                            background: badge.background,
+                            color: badge.color,
+                            border: badge.border,
                           }}>
-                            {isCopyJob ? '📋 Copie' : isPublish ? '🚀 Publish' : '📄 PDF'}
+                            {badge.label}
                           </span>
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: 13, color: '#cbd5e1', borderRight: '1px solid rgba(148, 163, 184, 0.15)' }}>
