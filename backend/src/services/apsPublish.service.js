@@ -22,7 +22,7 @@ const { PublishRun } = require('../models');
 const { apsConfig } = require('../config/aps.config');
 
 const ENABLE_REAL = String(process.env.ENABLE_REAL_PUBLISH || 'false').toLowerCase() === 'true';
-const ITEM_TIMEOUT_MS = parseInt(process.env.PUBLISH_ITEM_TIMEOUT_MS || '120000', 10);
+const ITEM_TIMEOUT_MS = parseInt(process.env.PUBLISH_ITEM_TIMEOUT_MS || '300000', 10);
 const MAX_RETRIES = Math.max(0, parseInt(process.env.PUBLISH_MAX_RETRIES || '2', 10));
 const RETRY_BASE_MS = Math.max(100, parseInt(process.env.PUBLISH_RETRY_BASE_MS || '500', 10));
 const PUBLISH_COMMAND = String(process.env.PUBLISH_COMMAND || 'PublishModel'); // PublishModel | PublishWithoutLinks
@@ -39,6 +39,27 @@ function formatRegion(region) {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function safeBody(b) { try { return JSON.stringify(b).slice(0, 1200); } catch { return '<unserializable>'; } }
+
+function isPublishSuccessStatus(status) {
+  return status === 'accepted' || status === 'queued' || status === 'success';
+}
+
+/** Raison courte pour l'historique et le courriel (HTTP + extrait du corps APS). */
+function describePublishFailure(http, body) {
+  let detail = '';
+  if (body && typeof body === 'object') {
+    const err = Array.isArray(body.errors) ? body.errors[0] : null;
+    detail = err?.detail || err?.title || body.detail || body.title || body.message || body.developerMessage || '';
+    if (!detail) {
+      try { detail = JSON.stringify(body); } catch { detail = ''; }
+    }
+  } else if (body != null && body !== '') {
+    detail = String(body);
+  }
+  detail = String(detail).replace(/\s+/g, ' ').trim().slice(0, 400);
+  const httpPart = http ? `HTTP ${http}` : 'Échec de la publication';
+  return detail ? `${httpPart} — ${detail}` : httpPart;
+}
 
 function apiBase() {
   return (apsConfig && apsConfig.apis && apsConfig.apis.baseUrl) || 'https://developer.api.autodesk.com';
@@ -378,10 +399,10 @@ async function publishVersionWithRegion(resourceUrn, knownRegion, projectId, acc
       return { ...r, regionTried: region };
     }
 
-    if (r.http && r.http !== 404) {
-      // Erreur non-404, pas besoin d'essayer autre région
+    if (!r.http || r.http !== 404) {
+      // Timeout (http 0) ou erreur autre que 404 : une autre région ne corrigera pas ça.
       logger.warn(
-        `[Publish] Erreur ${r.http} dans région ${formatRegion(region)}, arrêt des tentatives`
+        `[Publish] Erreur ${r.http || 'timeout'} dans région ${formatRegion(region)}, arrêt des tentatives`
       );
       return { ...r, regionTried: region };
     }
@@ -487,13 +508,15 @@ class APSPublishService {
 
           const effectiveRegion = regionTried || resolvedRegion || null;
 
+          const failed = !isPublishSuccessStatus(outcome);
           results.push({
             item: selectedUrn,
             name: itemName,
             resource: resourceUrn,
-            status: outcome,
+            status: failed ? 'failed' : outcome,
             http,
             region: effectiveRegion,
+            ...(failed ? { message: describePublishFailure(http, body) } : {}),
           });
 
           if (outcome === 'accepted') {
@@ -555,24 +578,17 @@ class APSPublishService {
   }
 
   async finishRun(run, summary) {
-    const results = summary.results || [];
+    const results = (summary.results || []).map((r) => {
+      if (!r || isPublishSuccessStatus(r.status) || r.message) return r;
+      return { ...r, status: 'failed', message: describePublishFailure(r.http, r.body) };
+    });
 
-    let finalStatus = 'success';
-
-    if (summary.status) {
-      finalStatus = summary.status;
-    } else {
-      const hasFailures = results.some((r) => r.status === 'failed');
-      const hasSuccess = results.some((r) => r.status === 'accepted' || r.status === 'queued');
-
-      if (hasFailures && !hasSuccess) {
-        finalStatus = 'failed';
-      } else if (hasFailures && hasSuccess) {
-        finalStatus = 'success';
-      } else {
-        finalStatus = 'success';
-      }
-    }
+    const okCount = results.filter((r) => isPublishSuccessStatus(r.status)).length;
+    const failCount = results.length - okCount;
+    const explicitFailure = summary.status === 'failed' || summary.status === 'error';
+    // Un succès forcé par l'appelant est ignoré : le statut vient des maquettes.
+    // publish_runs n'a pas de valeur 'partial' : un mélange reste 'failed'.
+    const finalStatus = (explicitFailure || results.length === 0 || failCount > 0) ? 'failed' : 'success';
 
     run.status = finalStatus;
     run.endedAt = new Date();
@@ -581,12 +597,21 @@ class APSPublishService {
       ...(run.stats || {}),
       durationMs: summary.durationMs,
       items: results.length,
-      okCount: results.filter((r) => r.status === 'accepted' || r.status === 'queued').length,
-      failCount: results.filter((r) => r.status === 'failed').length,
+      okCount,
+      failCount,
     };
 
     if (summary.message) {
       run.message = summary.message;
+    } else if (results.length === 0) {
+      run.message = 'Aucune maquette traitée.';
+    } else if (failCount > 0) {
+      const names = results
+        .filter((r) => !isPublishSuccessStatus(r.status))
+        .map((r) => r.name || r.item || 'maquette')
+        .slice(0, 8);
+      const extra = failCount > names.length ? ` (+${failCount - names.length})` : '';
+      run.message = `${failCount} maquette(s) en échec : ${names.join(', ')}${extra}`;
     }
 
     await run.save();

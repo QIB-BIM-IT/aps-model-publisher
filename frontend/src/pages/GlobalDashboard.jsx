@@ -192,7 +192,7 @@ export default function GlobalDashboard() {
   const [timeFilter, setTimeFilter] = React.useState('forever'); // day, week, month, year, forever
   const [jobSearch, setJobSearch] = React.useState(''); // recherche dans le tableau récapitulatif
   const [jobSort, setJobSort] = React.useState({ key: null, direction: 'asc' }); // tri des colonnes
-  const [emailNotif, setEmailNotif] = React.useState(true); // préférence: recevoir un email en cas d'échec
+  const [emailNotif, setEmailNotif] = React.useState(true); // préférence: courriel à chaque exécution
   const [emailNotifSaving, setEmailNotifSaving] = React.useState(false);
 
   // Charger la préférence de notification email de l'utilisateur courant
@@ -708,8 +708,8 @@ export default function GlobalDashboard() {
               onClick={toggleEmailNotif}
               disabled={emailNotifSaving}
               title={emailNotif
-                ? 'Tu reçois un courriel quand une de tes tâches échoue ou se bloque. Cliquer pour désactiver.'
-                : 'Notifications par courriel désactivées. Cliquer pour activer.'}
+                ? 'Tu reçois un courriel à chaque exécution de tes tâches (réussite ou échec). Cliquer pour désactiver.'
+                : 'Courriels de fin de tâche désactivés. Cliquer pour activer.'}
               style={{
                 padding: '12px 18px',
                 borderRadius: 10,
@@ -724,7 +724,7 @@ export default function GlobalDashboard() {
                 transition: 'all 0.2s'
               }}
             >
-              {emailNotif ? '🔔 Alertes courriel : ON' : '🔕 Alertes courriel : OFF'}
+              {emailNotif ? '🔔 Courriels : ON' : '🔕 Courriels : OFF'}
             </button>
             <button
               onClick={() => loadAllData({ silent: true })}

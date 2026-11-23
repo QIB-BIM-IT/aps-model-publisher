@@ -24,7 +24,14 @@ const RUNNING_PROJECTS = new Set();
 const PROJECT_QUEUES = new Map();
 // 🆕 Délai d'attente entre les tentatives de lock projet (ms)
 const PROJECT_LOCK_RETRY_DELAY = 3000;
-const PROJECT_LOCK_MAX_WAIT_MS = 10 * 60 * 1000; // 10 minutes max d'attente dans la file
+// Une tâche QC, un PDF ou une publication de plusieurs maquettes dépasse souvent 10 min.
+// Le suivant attend son tour jusqu'à ce délai (défaut 3 h), réglable sur Azure.
+const PROJECT_LOCK_MAX_WAIT_MIN = Math.max(
+  1,
+  parseFloat(process.env.PROJECT_LOCK_MAX_WAIT_MIN || '180') || 180
+);
+const PROJECT_LOCK_MAX_WAIT_MS = PROJECT_LOCK_MAX_WAIT_MIN * 60 * 1000;
+logger.info(`[Scheduler] File d'attente projet : ${PROJECT_LOCK_MAX_WAIT_MIN} min max`);
 
 /**
  * Calcule la prochaine exécution d'une expression cron avec timezone
@@ -309,6 +316,88 @@ function getQueueLength(projectId) {
   return queue ? queue.length : 0;
 }
 
+function skipMessage(kind) {
+  if (kind === 'queue-timeout') {
+    return `Non exécutée : file d'attente du projet dépassée (${PROJECT_LOCK_MAX_WAIT_MIN} min).`;
+  }
+  return 'Non exécutée : une exécution de cette tâche est déjà en cours.';
+}
+
+function qualifiedTable(job) {
+  const t = job.constructor.getTableName();
+  if (t && typeof t === 'object') {
+    const schema = t.schema || 'public';
+    return `"${schema}"."${t.tableName}"`;
+  }
+  return `"${t}"`;
+}
+
+/** Relit l'historique en base avant d'ajouter une ligne, pour ne pas effacer un saut enregistré pendant le run. */
+async function historyWith(job, entry) {
+  let prior = Array.isArray(job.history) ? job.history : [];
+  try {
+    const fresh = await job.constructor.findByPk(job.id, { attributes: ['history'] });
+    if (fresh && Array.isArray(fresh.history)) prior = fresh.history;
+  } catch {}
+  return [...prior, entry];
+}
+
+/** Ajoute une ligne d'historique sans réécrire le reste de la tâche (évite d'écraser un run en cours). */
+async function appendJobHistory(job, entry) {
+  await job.sequelize.query(
+    `UPDATE ${qualifiedTable(job)} SET history = COALESCE(history, '[]'::jsonb) || CAST(:entry AS jsonb) WHERE id = :id`,
+    { replacements: { entry: JSON.stringify([entry]), id: job.id } }
+  );
+}
+
+/**
+ * Une exécution planifiée qui n'a pas démarré (déjà en cours, ou file projet au-delà du délai)
+ * laisse une trace et un courriel. Le QC n'a pas ce hook.
+ */
+async function recordSkippedExecution(jobId, kind) {
+  const message = skipMessage(kind);
+  let job = null;
+  try {
+    job = await resolveJobById(jobId);
+  } catch (e) {
+    logger.warn(`[Scheduler] Saut ${kind} job ${jobId}: relecture impossible (${e.message})`);
+  }
+  if (!job) return;
+
+  const jobType = getJobType(job);
+  if (jobType === 'qc' || !job.constructor.rawAttributes?.history) {
+    logger.warn(`[Scheduler] Job ${job.id} (${jobType || 'inconnu'}) sauté (${kind}) — ${message}`);
+    return;
+  }
+
+  const entry = { at: new Date().toISOString(), status: 'error', message };
+  try {
+    if (kind === 'already-running') {
+      await appendJobHistory(job, entry);
+    } else {
+      await job.reload();
+      job.history = [...(job.history || []), entry];
+      job.status = 'error';
+      if (job.scheduleEnabled && job.cronExpression) {
+        const nextRun = calculateNextRun(job.cronExpression, job.timezone || 'UTC');
+        if (nextRun) job.nextRun = nextRun;
+      }
+      await job.save();
+    }
+  } catch (e) {
+    logger.error(`[Scheduler] Impossible d'enregistrer le saut (${kind}) job ${job.id}: ${e.message}`);
+  }
+
+  logger.warn(`[Scheduler] Job ${job.id} (${jobType}) sauté (${kind}) — ${message}`);
+  await sendRunEmailIfNeeded(job, {
+    status: 'failed',
+    message,
+    endedAt: new Date(),
+    results: [],
+    stats: {},
+  }, jobType, 'failed');
+}
+
 async function runJob(jobId, jobInstance = null, options = {}) {
   const key = String(jobId);
   const skipBegin = options.skipBegin === true;
@@ -321,6 +410,7 @@ async function runJob(jobId, jobInstance = null, options = {}) {
   if (!skipBegin) {
     if (RUNNING.has(key)) {
       logger.warn(`[Scheduler] Job ${jobId} déjà en cours, on ignore ce tick`);
+      await recordSkippedExecution(jobId, 'already-running');
       return null;
     }
 
@@ -364,6 +454,7 @@ async function runJob(jobId, jobInstance = null, options = {}) {
         if (!hasProjectLock) {
           logger.warn(`[Scheduler] Job ${jobId} timeout: a attendu trop longtemps dans la file d'attente`);
           RUNNING.delete(key);
+          await recordSkippedExecution(jobId, 'queue-timeout');
           return null;
         }
       }
@@ -446,29 +537,29 @@ async function runJob(jobId, jobInstance = null, options = {}) {
       finishedRun = await pdfExportSchedulerService.finishRun(run, summary);
     } else {
       finishedRun = await apsPublishService.finishRun(run, {
-        status: 'success',
         results: summary.results,
         durationMs: summary.durationMs,
       });
     }
 
-    job.status = 'idle';
+    const outcome = emailService.classifyRunOutcome(finishedRun);
+    const succeeded = outcome === 'success';
+
+    job.status = succeeded ? 'idle' : 'error';
     job.statistics = {
       ...(job.statistics || {}),
       last: {
         at: new Date(),
         durationMs: summary.durationMs,
-        ok: finishedRun.status === 'success' || finishedRun.status === 'partial',
+        ok: succeeded,
       },
     };
-    job.history = [
-      ...(job.history || []),
-      {
-        at: new Date(),
-        status: finishedRun.status || 'done',
-        durationMs: summary.durationMs,
-      },
-    ];
+    job.history = await historyWith(job, {
+      at: new Date(),
+      status: outcome === 'partial' ? 'partial' : (finishedRun.status || 'done'),
+      durationMs: summary.durationMs,
+      message: finishedRun.message || undefined,
+    });
     
     // 🆕 Mettre à jour nextRun pour la prochaine exécution
     if (job.scheduleEnabled) {
@@ -484,17 +575,7 @@ async function runJob(jobId, jobInstance = null, options = {}) {
       `[Scheduler] Job ${job.id} exécuté (type=${jobType}, status=${finishedRun.status})`
     );
 
-    // Vérifier si le run a échoué (failed, error, ou partial avec des échecs) et envoyer une notification si nécessaire
-    if (finishedRun && (finishedRun.status === 'failed' || finishedRun.status === 'error')) {
-      await sendFailureEmailIfNeeded(job, finishedRun, jobType);
-    } else if (finishedRun && finishedRun.status === 'partial') {
-      // Pour les échecs partiels, vérifier s'il y a des échecs
-      const stats = finishedRun.stats || {};
-      const failCount = stats.failCount || stats.failed || 0;
-      if (failCount > 0) {
-        await sendFailureEmailIfNeeded(job, finishedRun, jobType);
-      }
-    }
+    await sendRunEmailIfNeeded(job, finishedRun, jobType);
 
     return run;
   } catch (e) {
@@ -522,10 +603,7 @@ async function runJob(jobId, jobInstance = null, options = {}) {
     try {
       if (job) {
         job.status = 'error';
-        job.history = [
-          ...(job.history || []),
-          { at: new Date(), status: 'error', message: e.message },
-        ];
+        job.history = await historyWith(job, { at: new Date(), status: 'error', message: e.message });
         // Recalculer nextRun même en cas d'échec (sinon l'heure affichée reste figée dans le passé)
         if (job.scheduleEnabled) {
           const nextRun = calculateNextRun(job.cronExpression, job.timezone || 'UTC');
@@ -535,9 +613,19 @@ async function runJob(jobId, jobInstance = null, options = {}) {
       }
     } catch {}
 
-    // Envoyer une notification d'échec si nécessaire
-    if (failedRun) {
-      await sendFailureEmailIfNeeded(job, failedRun, jobType);
+    if (job) {
+      await sendRunEmailIfNeeded(
+        job,
+        failedRun || {
+          status: 'failed',
+          message: e.message,
+          endedAt: new Date(),
+          results: [],
+          stats: {},
+        },
+        jobType,
+        'failed'
+      );
     }
 
     return run;
@@ -555,6 +643,7 @@ async function runJobNow(jobId, options = {}) {
 
   if (RUNNING.has(key)) {
     logger.warn(`[Scheduler] Job ${jobId} déjà en cours, lancement immédiat ignoré`);
+    await recordSkippedExecution(jobId, 'already-running');
     return { run: null, alreadyRunning: true };
   }
 
@@ -596,6 +685,7 @@ async function runJobNow(jobId, options = {}) {
     hasProjectLock = await acquireProjectLock(projectId, jobId);
     if (!hasProjectLock) {
       logger.warn(`[Scheduler] runJobNow: timeout, projet ${projectId} occupé trop longtemps`);
+      await recordSkippedExecution(jobId, 'queue-timeout');
       return { run: null, alreadyRunning: false, projectBusy: true };
     }
   }
@@ -656,7 +746,7 @@ async function recoverHangingRuns(RunModel, JobModel, jobType) {
       if (startedMs && startedMs >= recentCutoff) {
         let job = null;
         try { job = await JobModel.findByPk(r.jobId); } catch {}
-        if (job) await sendFailureEmailIfNeeded(job, r, jobType, 'failed');
+        if (job) await sendRunEmailIfNeeded(job, r, jobType, 'failed');
       }
     } catch (e) {
       logger.error(`[Scheduler] Crash-safety ${jobType} run ${r?.id}: ${e.message}`);
@@ -872,14 +962,15 @@ async function initQcSchedule() {
 }
 
 /**
- * Envoie un email d'alerte (échec ou tâche bloquée) au propriétaire de la tâche.
- * Gating "niveau A" : on envoie par défaut, sauf si le propriétaire a désactivé
- * la préférence globale `preferences.notificationEmail`.
- * @param {'failed'|'stuck'} reason
+ * Courriel de fin d'exécution (réussite, échec partiel, échec ou tâche bloquée).
+ * L'interrupteur global `preferences.notificationEmail` reste le seul gating.
+ * `notifyOnFailure` sur la tâche n'est pas lu : il est à false par défaut.
+ * @param {'failed'|'stuck'|'skipped'|undefined} reason
  */
-async function sendFailureEmailIfNeeded(job, run, jobType, reason = 'failed') {
+async function sendRunEmailIfNeeded(job, run, jobType, reason) {
   try {
-    if (!emailService.isEnabled()) return; // service ACS non configuré → on ne fait rien
+    if (!job) return;
+    if (jobType === 'qc') return;
 
     // Récupérer le propriétaire de la tâche
     let owner = null;
@@ -907,6 +998,17 @@ async function sendFailureEmailIfNeeded(job, run, jobType, reason = 'failed') {
       return;
     }
 
+    const stats = run?.stats || {};
+    const outcome = emailService.classifyRunOutcome(run, reason);
+    const failedItems = Array.isArray(run?.results)
+      ? run.results.filter((r) => r && r.success !== true && !['accepted', 'queued', 'success', 'uploaded', 'ok'].includes(String(r.status || '').toLowerCase()))
+      : [];
+    let errorMessage = run?.message || undefined;
+    if (!errorMessage && outcome === 'stuck') errorMessage = "Délai d'exécution dépassé.";
+    if (!errorMessage && (outcome === 'failed' || outcome === 'partial') && failedItems.length === 0) {
+      errorMessage = 'Erreur inconnue.';
+    }
+
     const jobDetails = {
       projectName: job.projectName || 'N/A',
       hubName: job.hubName || 'N/A',
@@ -916,13 +1018,18 @@ async function sendFailureEmailIfNeeded(job, run, jobType, reason = 'failed') {
     }
 
     await emailService.sendTaskAlert({
-      reason,
+      reason: outcome,
+      status: run?.status,
       jobName: job.name || 'Tâche sans nom',
       jobType,
       jobId: job.id,
       runId: run?.id,
-      errorMessage: run?.message || (reason === 'stuck' ? "Délai d'exécution dépassé." : 'Erreur inconnue'),
+      errorMessage,
       occurredAt: run?.endedAt || new Date(),
+      durationMs: stats.durationMs,
+      results: run?.results || [],
+      okCount: stats.okCount != null ? stats.okCount : stats.uploaded,
+      failCount: stats.failCount != null ? stats.failCount : stats.failed,
       recipients,
       jobDetails,
     });
@@ -980,7 +1087,7 @@ async function checkStuckRuns() {
             ];
             await job.save();
           } catch {}
-          await sendFailureEmailIfNeeded(job, run, jobType, 'stuck');
+          await sendRunEmailIfNeeded(job, run, jobType, 'stuck');
         }
         logger.warn(`[Watchdog] Run ${run.id} (${jobType}) marqué 'failed' (bloqué ${mins} min)`);
       } catch (e) {

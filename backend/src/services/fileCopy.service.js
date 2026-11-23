@@ -195,7 +195,9 @@ class FileCopyService {
     const failCount = summary.failCount || 0;
 
     let finalStatus = 'success';
-    if (failCount > 0 && okCount === 0) finalStatus = 'failed';
+    if (summary.status === 'failed' || summary.status === 'error') {
+      finalStatus = okCount > 0 && failCount > 0 ? 'partial' : 'failed';
+    } else if (failCount > 0 && okCount === 0) finalStatus = 'failed';
     else if (failCount > 0 && okCount > 0) finalStatus = 'partial';
 
     run.status = finalStatus;

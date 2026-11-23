@@ -14,7 +14,7 @@ const { apsConfig } = require('../config/aps.config');
 const apsPublishService = require('../services/apsPublish.service');
 
 const ENABLE_REAL = String(process.env.ENABLE_REAL_PUBLISH || 'false').toLowerCase() === 'true';
-const ITEM_TIMEOUT_MS = parseInt(process.env.PUBLISH_ITEM_TIMEOUT_MS || '120000', 10);
+const ITEM_TIMEOUT_MS = parseInt(process.env.PUBLISH_ITEM_TIMEOUT_MS || '300000', 10);
 const PUBLISH_COMMAND = String(process.env.PUBLISH_COMMAND || 'PublishModel');
 
 // Régions supportées : US, CAN (Canada), EMEA (Europe), GBR (UK), DEU (Allemagne), JPN (Japon), IND (Inde), AUS (Australie)

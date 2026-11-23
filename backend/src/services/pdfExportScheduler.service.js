@@ -168,9 +168,17 @@ class PDFExportSchedulerService {
       finalStatus = 'success';
     }
 
+    const errorItems = (Array.isArray(errors) ? errors : []).map((e) => ({
+      filename: e.filename || e.name || 'PDF',
+      name: e.filename || e.name || 'PDF',
+      status: 'failed',
+      success: false,
+      message: e.error || e.message || "Échec de l'export",
+    }));
+
     run.status = finalStatus;
     run.endedAt = new Date();
-    run.results = results;
+    run.results = [...results, ...errorItems];
     run.stats = {
       ...(run.stats || {}),
       durationMs: summary.durationMs,
