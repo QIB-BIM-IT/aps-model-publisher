@@ -513,8 +513,9 @@ class QcRunService {
    *
    * @param {object} run - instance QCRun (ou plain) avec jobId
    * @param {'success'|'failed'} terminalStatus
+   * @param {{notify?: boolean}} [options] notify=false sur une simple ré-synchronisation
    */
-  async _syncAssociatedJobStatus(run, terminalStatus) {
+  async _syncAssociatedJobStatus(run, terminalStatus, { notify = true } = {}) {
     const jobId = run?.jobId;
     if (!jobId) return;
 
@@ -535,11 +536,58 @@ class QcRunService {
       logger.info(
         `[QC] Job ${jobId} status → ${jobStatus} (run ${run.id || '?'} terminal=${terminalStatus})`
       );
+      if (notify) await this._notifyQcFinished(run, terminalStatus);
     } catch (e) {
       // Ne jamais faire échouer la finalisation du run à cause du job
       logger.warn(
         `[QC] Sync job ${jobId} après run ${run.id || '?'} échouée: ${e.message}`
       );
+    }
+  }
+
+  /**
+   * Courriel de fin pour une tâche QC planifiée (Run now compris).
+   * Pas sur la ré-synchronisation d'un run déjà finalisé : _sync n'est appelé
+   * ici qu'après une transition réelle, et le second canal sort avant.
+   */
+  async _notifyQcFinished(run, terminalStatus) {
+    if (!run?.jobId) return;
+    try {
+      const { QCJob, QCRun } = this.getModels();
+      const fresh = run.id ? await QCRun.findByPk(run.id) : run;
+      const job = await QCJob.findByPk(run.jobId);
+      if (!fresh || !job) return;
+
+      const ok = terminalStatus === 'success';
+      const modelName = job.modelName || fresh.stats?.fileName || 'Modèle';
+      const started = fresh.startedAtUtc ? new Date(fresh.startedAtUtc).getTime() : null;
+      const ended = fresh.endedAtUtc ? new Date(fresh.endedAtUtc).getTime() : Date.now();
+      const scheduler = require('./scheduler.service');
+      await scheduler.sendRunEmailIfNeeded(
+        job,
+        {
+          id: fresh.id,
+          status: ok ? 'success' : 'failed',
+          message: ok ? undefined : fresh.message,
+          endedAt: fresh.endedAtUtc || new Date(),
+          results: [
+            {
+              name: modelName,
+              status: ok ? 'success' : 'failed',
+              message: ok ? '' : fresh.message || '',
+            },
+          ],
+          stats: {
+            okCount: ok ? 1 : 0,
+            failCount: ok ? 0 : 1,
+            durationMs: started ? Math.max(0, ended - started) : undefined,
+          },
+        },
+        'qc',
+        ok ? undefined : 'failed'
+      );
+    } catch (e) {
+      logger.warn(`[QC] Courriel run ${run.id || '?'} non envoyé: ${e.message}`);
     }
   }
 
@@ -555,7 +603,7 @@ class QcRunService {
     if (!run || !run.daWorkitemId) return { handled: false, reason: 'run inconnu ou sans workitem' };
     if (['success', 'failed'].includes(run.status)) {
       // Idempotence / guérison : si le run est déjà terminal, ré-aligner le job (no-op si déjà OK)
-      await this._syncAssociatedJobStatus(run, run.status);
+      await this._syncAssociatedJobStatus(run, run.status, { notify: false });
       return { handled: false, reason: 'déjà finalisé' };
     }
 

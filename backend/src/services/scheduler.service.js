@@ -970,7 +970,6 @@ async function initQcSchedule() {
 async function sendRunEmailIfNeeded(job, run, jobType, reason) {
   try {
     if (!job) return;
-    if (jobType === 'qc') return;
 
     // Récupérer le propriétaire de la tâche
     let owner = null;
@@ -1147,4 +1146,5 @@ module.exports = {
   unscheduleJob,
   runJobNow,
   calculateNextRun,  // 🆕 Exporté pour les routes
+  sendRunEmailIfNeeded,
 };
