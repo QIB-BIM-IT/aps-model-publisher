@@ -113,21 +113,38 @@ function itemLabel(item) {
   return item.name || item.filename || item.fileName || shortId(item.item) || shortId(item.urn) || 'Sans nom';
 }
 
-function itemReason(item) {
-  const raw = item.message || item.error || (item.http ? `HTTP ${item.http}` : '');
-  return String(raw || '').replace(/\s+/g, ' ').trim();
+function successPhrase(jobType) {
+  if (jobType === 'pdf-export') return 'Exporté';
+  if (jobType === 'file-copy') return 'Copié';
+  if (jobType === 'qc') return 'Contrôlé';
+  return 'Publié';
 }
 
-function collectItems(results) {
+function itemReason(item, successLabel) {
+  const text = String(item.message || item.error || '').replace(/\s+/g, ' ').trim();
+  if (isSuccessItem(item)) return text || successLabel;
+  if (text) return text;
+  if (item.http) return `HTTP ${item.http}`;
+  return '';
+}
+
+function collectItems(results, successLabel = 'Publié') {
   const succeeded = [];
   const failed = [];
   for (const item of Array.isArray(results) ? results : []) {
     if (!item || typeof item !== 'object') continue;
-    const entry = { name: String(itemLabel(item)), reason: itemReason(item) };
+    const entry = { name: String(itemLabel(item)), reason: itemReason(item, successLabel) };
     if (isSuccessItem(item)) succeeded.push(entry);
     else failed.push(entry);
   }
   return { succeeded, failed };
+}
+
+function absoluteAppUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value)) return value;
+  return `https://${value.replace(/^\/+/, '')}`;
 }
 
 function countOf(explicit, fallback) {
@@ -262,13 +279,17 @@ function buildBody(opts) {
   const duration = formatDuration(durationMs);
   const shownOk = okCount != null ? okCount : succeeded.length;
   const shownFail = failCount != null ? failCount : failed.length;
-  const link = APP_BASE_URL || '';
+  const link = absoluteAppUrl(APP_BASE_URL);
   const note = reason === 'success' ? '' : (errorMessage || '');
 
+  // Lien texte bleu, pas un bouton blanc : Outlook retire le fond CSS et affiche
+  // alors « [hôte]Ouvrir… » comme du texte non cliquable.
   const linkButton = link
-    ? `<div style="margin:20px 0 4px;">
-         <a href="${esc(link)}" style="background:#111827;color:#fff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:600;display:inline-block;font-size:14px;">Ouvrir ${esc(APP_NAME)}</a>
-       </div>`
+    ? `<p style="margin:22px 0 0;font-size:15px;line-height:1.4;">
+         <a href="${esc(link)}" target="_blank" style="color:#2563eb;text-decoration:underline;font-weight:700;">
+           <font color="#2563eb"><u>Ouvrir ${esc(APP_NAME)}</u></font>
+         </a>
+       </p>`
     : '';
 
   const noteBlock = note
@@ -330,7 +351,7 @@ function buildBody(opts) {
     renderItemListText('Réussis', succeeded),
     '',
     renderItemListText('En échec', failed),
-    link ? `\nOuvrir l'application : ${link}` : '',
+    link ? `\nOuvrir ${APP_NAME} :\n${link}` : '',
     jobId ? `\nTâche ${jobId}${runId ? ` · exécution ${runId}` : ''}` : '',
   ].filter((line) => line !== '').join('\n');
 
@@ -342,7 +363,7 @@ function buildTaskEmail(opts) {
     { status: opts.status, results: opts.results, stats: { okCount: opts.okCount, failCount: opts.failCount, uploaded: opts.okCount, failed: opts.failCount } },
     opts.reason
   );
-  const { succeeded, failed } = collectItems(opts.results);
+  const { succeeded, failed } = collectItems(opts.results, successPhrase(opts.jobType));
   const subject = buildSubject({ ...opts, reason });
   const body = buildBody({ ...opts, reason, succeeded, failed });
   return { reason, subject, ...body };
